@@ -461,7 +461,7 @@ final class MeetingManager: ObservableObject {
 
         let report = T5TReport(
             id: UUID(),
-            title: t5tConfig.isComplete ? t5tConfig.subjectLine : "T5T — \(formatPeriod(start: periodStart, end: periodEnd))",
+            title: t5tDefaultTitle,
             createdDate: Date(),
             periodStart: periodStart,
             periodEnd: periodEnd,
@@ -561,6 +561,16 @@ final class MeetingManager: ObservableObject {
         let fmt = DateFormatter()
         fmt.dateFormat = "MMM d"
         return "\(fmt.string(from: start))–\(fmt.string(from: end))"
+    }
+
+    var t5tDefaultTitle: String {
+        if t5tConfig.isComplete && !t5tConfig.subjectLine.trimmingCharacters(in: .whitespaces).isEmpty {
+            return t5tConfig.subjectLine.trimmingCharacters(in: .whitespaces)
+        }
+        let v = t5tConfig.vertical.trimmingCharacters(in: .whitespaces)
+        let r = t5tConfig.region.trimmingCharacters(in: .whitespaces)
+        let j = t5tConfig.jobFunction.trimmingCharacters(in: .whitespaces)
+        return "Top 5 Things – \(v.isEmpty ? "Inference Ops" : v) | \(r.isEmpty ? "NALA" : r) | \(j.isEmpty ? "SA" : j)"
     }
 
     func deleteMeeting(_ meeting: Meeting) {

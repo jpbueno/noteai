@@ -263,7 +263,7 @@ struct T5TComposerView: View {
                             .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedMeetingIDs.isEmpty)
+                    .disabled(selectedMeetingIDs.isEmpty && selectedNoteIDs.isEmpty && selectedTaskIDs.isEmpty)
                 }
 
                 Spacer()

@@ -688,7 +688,7 @@ struct MeetingLibraryView: View {
 
         let report = T5TReport(
             id: UUID(),
-            title: meetingManager.t5tConfig.isComplete ? meetingManager.t5tConfig.subjectLine : "T5T — New Report",
+            title: meetingManager.t5tDefaultTitle,
             createdDate: Date(),
             periodStart: start,
             periodEnd: end,

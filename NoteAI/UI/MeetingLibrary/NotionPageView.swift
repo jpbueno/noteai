@@ -60,6 +60,11 @@ struct NotionPageView: View {
 
     private var pageHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
+            Text("MEETING")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.sectionHeader)
+                .textCase(.uppercase)
+
             Text(meeting.title)
                 .font(.system(size: Theme.pageTitleSize, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)

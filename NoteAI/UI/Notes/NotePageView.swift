@@ -37,6 +37,11 @@ struct NotePageView: View {
 
     private var pageHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("NOTE")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.sectionHeader)
+                .textCase(.uppercase)
+
             TextField("Untitled", text: $note.title)
                 .textFieldStyle(.plain)
                 .font(.system(size: Theme.pageTitleSize, weight: .bold))

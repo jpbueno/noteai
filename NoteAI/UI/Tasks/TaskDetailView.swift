@@ -57,6 +57,11 @@ struct TaskDetailView: View {
 
     private var taskHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("TASK")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.sectionHeader)
+                .textCase(.uppercase)
+
             TextField("Task title", text: $task.title)
                 .textFieldStyle(.plain)
                 .font(.system(size: Theme.h2Size, weight: .bold))

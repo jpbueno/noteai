@@ -12,7 +12,14 @@ class RichEditorTextView: NSTextView {
     private var dragFilename: String?
     private var dragStartX: CGFloat = 0
     private var dragStartWidth: CGFloat = 0
-    private let edgeHitZone: CGFloat = 8
+    private let edgeHitZone: CGFloat = 10
+
+    private lazy var imageOverlay: ImageOverlayPanel = {
+        let panel = ImageOverlayPanel(editor: self)
+        panel.onDownload = { [weak self] filename in self?.downloadImage(filename) }
+        panel.onAlignmentChange = { [weak self] alignment in self?.applyAlignment(alignment) }
+        return panel
+    }()
 
     override func resignFirstResponder() -> Bool {
         savedSelectedRange = selectedRange()
@@ -22,21 +29,39 @@ class RichEditorTextView: NSTextView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas { removeTrackingArea(area) }
-        let area = NSTrackingArea(
+        addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil
+        ))
     }
 
     override func mouseMoved(with event: NSEvent) {
-        if imageEdgeHit(for: event) != nil {
-            NSCursor.resizeLeftRight.set()
-        } else {
+        if let hit = fullImageHit(for: event) {
+            imageOverlay.show(filename: hit.filename, range: hit.range, imageRect: hit.rect)
+            if imageEdgeHit(for: event) != nil {
+                NSCursor.resizeLeftRight.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        } else if !isDraggingImageEdge {
+            let mouseOnOverlay = imageOverlay.isVisible && NSPointInRect(NSEvent.mouseLocation, imageOverlay.frame)
+            if !mouseOnOverlay {
+                imageOverlay.hide()
+            }
             super.mouseMoved(with: event)
         }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if !isDraggingImageEdge {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self else { return }
+                let mouseOnOverlay = self.imageOverlay.isVisible && NSPointInRect(NSEvent.mouseLocation, self.imageOverlay.frame)
+                if !mouseOnOverlay { self.imageOverlay.hide() }
+            }
+        }
+        super.mouseExited(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -47,6 +72,7 @@ class RichEditorTextView: NSTextView {
             dragStartX = event.locationInWindow.x
             dragStartWidth = hit.currentWidth
             NSCursor.resizeLeftRight.push()
+            imageOverlay.hide()
         } else {
             super.mouseDown(with: event)
         }
@@ -75,6 +101,10 @@ class RichEditorTextView: NSTextView {
         let widthKey = NSAttributedString.Key("NoteAIImageWidth")
         storage.addAttribute(widthKey, value: NSNumber(value: Double(newWidth)), range: range)
         needsDisplay = true
+
+        let imgRect = imageRectForRange(range)
+        imageOverlay.show(filename: dragFilename ?? "", range: range, imageRect: imgRect)
+        imageOverlay.showWidthDuringDrag(width: newWidth, imageRect: imgRect)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -83,6 +113,8 @@ class RichEditorTextView: NSTextView {
             dragAttachmentRange = nil
             dragFilename = nil
             NSCursor.pop()
+            imageOverlay.hideWidthLabel()
+            imageOverlay.hide()
             NotificationCenter.default.post(name: NSText.didChangeNotification, object: self)
         } else {
             super.mouseUp(with: event)
@@ -135,6 +167,189 @@ class RichEditorTextView: NSTextView {
         guard !filename.isEmpty else { return nil }
         return ImageEdgeHit(range: effectiveRange, filename: filename, currentWidth: currentWidth)
     }
+
+    struct FullImageHit {
+        let range: NSRange
+        let filename: String
+        let rect: NSRect
+    }
+
+    private func fullImageHit(for event: NSEvent) -> FullImageHit? {
+        guard let storage = textStorage,
+              let lm = layoutManager,
+              let tc = textContainer else { return nil }
+
+        let point = convert(event.locationInWindow, from: nil)
+        let textPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+
+        var fraction: CGFloat = 0
+        let gi = lm.glyphIndex(for: textPoint, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+        let ci = lm.characterIndexForGlyph(at: gi)
+        guard ci < storage.length else { return nil }
+
+        var er = NSRange(location: 0, length: 0)
+        guard storage.attribute(.attachment, at: ci, effectiveRange: &er) is NSTextAttachment else { return nil }
+
+        let rect = imageRectForRange(er)
+        guard NSPointInRect(point, rect.insetBy(dx: -12, dy: -8)) else { return nil }
+
+        let fnKey = NSAttributedString.Key("NoteAIImageFilename")
+        let fn = storage.attribute(fnKey, at: er.location, effectiveRange: nil) as? String ?? ""
+        guard !fn.isEmpty else { return nil }
+        return FullImageHit(range: er, filename: fn, rect: rect)
+    }
+
+    private func imageRectForRange(_ range: NSRange) -> NSRect {
+        guard let lm = layoutManager, let tc = textContainer else { return .zero }
+        let gr = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let r = lm.boundingRect(forGlyphRange: gr, in: tc)
+        return NSRect(x: r.origin.x + textContainerOrigin.x, y: r.origin.y + textContainerOrigin.y,
+                      width: r.width, height: r.height)
+    }
+
+    private func downloadImage(_ filename: String) {
+        guard let image = ImageStore.load(filename: filename),
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = filename
+        panel.allowedContentTypes = [.png]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? png.write(to: url)
+        }
+    }
+
+    static let imageAlignKey = NSAttributedString.Key("NoteAIImageAlign")
+
+    private func applyAlignment(_ alignment: NSTextAlignment) {
+        guard let storage = textStorage,
+              let range = imageOverlay.currentRange,
+              range.location < storage.length else { return }
+        let alignValue: String = switch alignment {
+            case .center: "center"
+            case .right: "right"
+            default: "left"
+        }
+        storage.addAttribute(Self.imageAlignKey, value: alignValue, range: range)
+        let lineRange = (storage.string as NSString).lineRange(for: range)
+        let para = NSMutableParagraphStyle()
+        para.alignment = alignment
+        para.lineSpacing = 4
+        para.paragraphSpacing = 6
+        storage.addAttribute(.paragraphStyle, value: para, range: lineRange)
+        needsDisplay = true
+        NotificationCenter.default.post(name: NSText.didChangeNotification, object: self)
+    }
+}
+
+/// Fixed toolbar with Notion-style SF Symbol icons. Uses refusesFirstResponder
+/// so the NSTextView keeps focus and selection when toolbar buttons are clicked.
+final class EditorFixedToolbar: NSView {
+    private weak var coordinator: RichMarkdownEditor.Coordinator?
+
+    init(coordinator: RichMarkdownEditor.Coordinator) {
+        self.coordinator = coordinator
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(red: 0.122, green: 0.122, blue: 0.122, alpha: 1).cgColor
+
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 1
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        let sep = { () -> NSView in
+            let v = NSView()
+            v.wantsLayer = true
+            v.layer?.backgroundColor = NSColor(white: 0.3, alpha: 1).cgColor
+            v.widthAnchor.constraint(equalToConstant: 1).isActive = true
+            v.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            return v
+        }
+
+        let row1: [BtnDef] = [
+            BtnDef(style: .bold, tip: "Bold", icon: "bold", label: nil),
+            BtnDef(style: .italic, tip: "Italic", icon: "italic", label: nil),
+            BtnDef(style: .underline, tip: "Underline", icon: "underline", label: nil),
+        ]
+        let row2: [BtnDef] = [
+            BtnDef(style: .codeBlock, tip: "Code Block", icon: "chevron.left.forwardslash.chevron.right", label: nil),
+            BtnDef(style: .heading(1), tip: "Heading 1", icon: nil, label: "H1"),
+            BtnDef(style: .heading(2), tip: "Heading 2", icon: nil, label: "H2"),
+        ]
+        let row3: [BtnDef] = [
+            BtnDef(style: .bullet, tip: "Bullet List", icon: "list.bullet", label: nil),
+            BtnDef(style: .numbered, tip: "Numbered List", icon: "list.number", label: nil),
+            BtnDef(style: .hyperlink, tip: "Hyperlink", icon: "link", label: nil),
+        ]
+
+        for def in row1 { stack.addArrangedSubview(makeButton(def)) }
+        stack.addArrangedSubview(sep())
+        for def in row2 { stack.addArrangedSubview(makeButton(def)) }
+        stack.addArrangedSubview(sep())
+        for def in row3 { stack.addArrangedSubview(makeButton(def)) }
+
+        let bottomBorder = NSView()
+        bottomBorder.wantsLayer = true
+        bottomBorder.layer?.backgroundColor = NSColor(white: 0.18, alpha: 1).cgColor
+        bottomBorder.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bottomBorder)
+        NSLayoutConstraint.activate([
+            bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bottomBorder.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private struct BtnDef {
+        let style: MarkdownTransformStyle
+        let tip: String
+        let icon: String?
+        let label: String?
+    }
+
+    private func makeButton(_ def: BtnDef) -> NSButton {
+        let btn = ToolbarActionButton(handler: { [weak self] in
+            self?.coordinator?.applyToggleFromToolbar(def.style)
+        })
+        btn.refusesFirstResponder = true
+        btn.isBordered = false
+        if let icon = def.icon {
+            btn.image = NSImage(systemSymbolName: icon, accessibilityDescription: def.tip)
+            btn.imageScaling = .scaleProportionallyDown
+        } else if let label = def.label {
+            btn.title = label
+            btn.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        }
+        btn.contentTintColor = NSColor(white: 0.65, alpha: 1)
+        btn.toolTip = def.tip
+        btn.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        return btn
+    }
+}
+
+private class ToolbarActionButton: NSButton {
+    private let handler: () -> Void
+    init(handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(frame: .zero)
+        self.target = self
+        self.action = #selector(fire)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func fire() { handler() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
 /// A Notion-style markdown editor that renders formatting inline as you type.
@@ -148,12 +363,32 @@ struct RichMarkdownEditor: NSViewRepresentable {
         Coordinator.activeCoordinator?.execute(command: command)
     }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> NSView {
+        let wrapper = NSView()
+        wrapper.wantsLayer = true
+
+        let toolbar = EditorFixedToolbar(coordinator: context.coordinator)
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(toolbar)
+
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(scrollView)
 
-        let contentSize = scrollView.contentSize
+        NSLayoutConstraint.activate([
+            toolbar.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 32),
+            scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+        ])
+
+        let contentSize = NSSize(width: 400, height: 300)
         let textContainer = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: .greatestFiniteMagnitude))
         textContainer.widthTracksTextView = true
         let layoutManager = NSLayoutManager()
@@ -176,6 +411,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
         textView.insertionPointColor = .white
         textView.textContainerInset = NSSize(width: 4, height: 8)
         textView.allowsUndo = true
+        textView.isAutomaticLinkDetectionEnabled = false
         textView.delegate = context.coordinator
         textView.string = text
 
@@ -186,11 +422,12 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
         context.coordinator.applyRichFormatting(to: textView)
 
-        return scrollView
+        return wrapper
     }
 
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else { return }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let scrollView = nsView.subviews.compactMap({ $0 as? NSScrollView }).first,
+              let textView = scrollView.documentView as? NSTextView else { return }
         if context.coordinator.currentMarkdown(from: textView) != text {
             let selectedRange = textView.selectedRange()
             textView.string = text
@@ -213,10 +450,6 @@ struct RichMarkdownEditor: NSViewRepresentable {
         private var commandObserver: NSObjectProtocol?
         private var mouseDownMonitor: Any?
         private var savedSelection: NSRange = NSRange(location: 0, length: 0)
-        private lazy var floatingToolbar: FloatingToolbarPanel = {
-            let panel = FloatingToolbarPanel()
-            return panel
-        }()
 
         init(_ parent: RichMarkdownEditor) {
             self.parent = parent
@@ -251,10 +484,6 @@ struct RichMarkdownEditor: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             Self.lastActiveTextView = textView
             Self.activeCoordinator = self
-            floatingToolbar.attach(to: textView)
-            DispatchQueue.main.async { [weak self] in
-                self?.floatingToolbar.updatePosition()
-            }
         }
 
         /// Called by ImagePasteHelper when an image paste is detected.
@@ -267,7 +496,6 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
         func bind(to textView: NSTextView) {
             boundTextView = textView
-            floatingToolbar.attach(to: textView)
 
             if let mouseDownMonitor {
                 NSEvent.removeMonitor(mouseDownMonitor)
@@ -276,13 +504,6 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 guard let self, let textView else { return event }
                 if textView.window?.firstResponder === textView {
                     self.savedSelection = textView.selectedRange()
-                }
-                let clickInToolbar = self.floatingToolbar.isVisible &&
-                    NSPointInRect(NSEvent.mouseLocation, self.floatingToolbar.frame)
-                if !clickInToolbar {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                        self?.floatingToolbar.updatePosition()
-                    }
                 }
                 return event
             }
@@ -389,6 +610,93 @@ struct RichMarkdownEditor: NSViewRepresentable {
             return true
         }
 
+        func applyToggleFromToolbar(_ style: MarkdownTransformStyle) {
+            guard let textView = boundTextView else { return }
+            textView.window?.makeFirstResponder(textView)
+            if savedSelection.length > 0,
+               NSMaxRange(savedSelection) <= (textView.string as NSString).length {
+                textView.setSelectedRange(savedSelection)
+            }
+            let selection = textView.selectedRange()
+
+            if case .hyperlink = style {
+                promptForLink(textView: textView, selection: selection)
+                return
+            }
+
+            guard selection.length > 0 else {
+                if case .codeBlock = style {
+                    let insertionPoint = selection.location
+                    let block = "```\n\n```"
+                    textView.insertText(block, replacementRange: selection)
+                    DispatchQueue.main.async {
+                        let cursorPos = insertionPoint + 4
+                        if cursorPos <= (textView.string as NSString).length {
+                            textView.setSelectedRange(NSRange(location: cursorPos, length: 0))
+                        }
+                    }
+                } else if case .bullet = style {
+                    textView.insertText("- ", replacementRange: selection)
+                } else if case .numbered = style {
+                    textView.insertText("1. ", replacementRange: selection)
+                } else {
+                    let inserted = style.apply(to: "text")
+                    textView.insertText(inserted, replacementRange: selection)
+                }
+                return
+            }
+            let nsText = textView.string as NSString
+            let selectedText = nsText.substring(with: selection)
+            if let unwrapped = style.unwrap(from: selectedText) {
+                textView.insertText(unwrapped, replacementRange: selection)
+            } else {
+                let wrapped = style.apply(to: selectedText)
+                textView.insertText(wrapped, replacementRange: selection)
+            }
+        }
+
+        private func promptForLink(textView: NSTextView, selection: NSRange) {
+            let nsText = textView.string as NSString
+            let selectedText = selection.length > 0 ? nsText.substring(with: selection) : ""
+
+            if selectedText.hasPrefix("[") && selectedText.contains("](") && selectedText.hasSuffix(")") {
+                if let unwrapped = MarkdownTransformStyle.hyperlink.unwrap(from: selectedText) {
+                    textView.insertText(unwrapped, replacementRange: selection)
+                }
+                return
+            }
+
+            let alert = NSAlert()
+            alert.messageText = "Paste Link"
+            alert.informativeText = selectedText.isEmpty ? "Enter URL:" : "Enter URL for \"\(selectedText)\":"
+            alert.addButton(withTitle: "Add Link")
+            alert.addButton(withTitle: "Cancel")
+
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+            input.placeholderString = "https://"
+
+            let pb = NSPasteboard.general
+            if let clipText = pb.string(forType: .string),
+               clipText.hasPrefix("http://") || clipText.hasPrefix("https://") {
+                input.stringValue = clipText
+            }
+
+            alert.accessoryView = input
+            alert.window.initialFirstResponder = input
+
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else { return }
+
+            let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else { return }
+
+            let linkText = selectedText.isEmpty ? url : selectedText
+            let markdown = "[\(linkText)](\(url))"
+
+            textView.window?.makeFirstResponder(textView)
+            textView.insertText(markdown, replacementRange: selection)
+        }
+
         func transformSelection(in textView: NSTextView, style: MarkdownTransformStyle) {
             let nsText = textView.string as NSString
             var selection = textView.selectedRange()
@@ -403,16 +711,70 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
         // MARK: - NSTextViewDelegate — intercept paste via textView(_:doCommandBy:)
 
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            if let url = link as? URL {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            if let urlStr = link as? String, let url = URL(string: urlStr) {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            return false
+        }
+
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // paste: and pasteAsPlainText: are the selectors called on Cmd+V
             if commandSelector == #selector(NSTextView.paste(_:)) ||
                commandSelector == #selector(NSTextView.pasteAsPlainText(_:)) {
                 if let image = ImagePasteHelper.imageFromPasteboard() {
                     insertImage(image, into: textView)
-                    return true // We handled it
+                    return true
                 }
             }
-            return false // Let the text view handle it normally
+
+            if commandSelector == #selector(NSTextView.insertNewline(_:)) {
+                return handleEnterKey(in: textView)
+            }
+
+            return false
+        }
+
+        private func handleEnterKey(in textView: NSTextView) -> Bool {
+            let nsText = textView.string as NSString
+            let cursor = textView.selectedRange().location
+            let lineRange = nsText.lineRange(for: NSRange(location: cursor, length: 0))
+            let line = nsText.substring(with: lineRange).trimmingCharacters(in: .newlines)
+
+            if line == "- " || line == "* " {
+                textView.insertText("", replacementRange: lineRange)
+                return true
+            }
+            if line.range(of: #"^\d+\.\s$"#, options: .regularExpression) != nil {
+                textView.insertText("", replacementRange: lineRange)
+                return true
+            }
+
+            if line.hasPrefix("- ") && line.count > 2 {
+                textView.insertText("\n- ", replacementRange: textView.selectedRange())
+                return true
+            }
+            if line.hasPrefix("* ") && line.count > 2 {
+                textView.insertText("\n* ", replacementRange: textView.selectedRange())
+                return true
+            }
+
+            if let nsMatch = try? NSRegularExpression(pattern: #"^(\d+)\.\s"#).firstMatch(
+                in: line, range: NSRange(location: 0, length: (line as NSString).length)),
+               nsMatch.numberOfRanges > 1 {
+                let numRange = nsMatch.range(at: 1)
+                let numStr = (line as NSString).substring(with: numRange)
+                if let num = Int(numStr) {
+                    textView.insertText("\n\(num + 1). ", replacementRange: textView.selectedRange())
+                    return true
+                }
+            }
+
+            return false
         }
 
         /// Flag to prevent textDidChange recursion when we insert attachments
@@ -510,6 +872,54 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 }
             }
 
+            // Fenced code blocks: ```...``` — monospace pink with dark background, fences hidden
+            if let codeRegex = try? NSRegularExpression(pattern: "```[^`]*?\n([\\s\\S]*?)\n```", options: []) {
+                for match in codeRegex.matches(in: text, range: fullRange) {
+                    guard match.numberOfRanges > 1 else { continue }
+                    let contentRange = match.range(at: 1)
+
+                    let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                    let codeBG = NSColor(white: 0.15, alpha: 1)
+                    storage.addAttribute(.font, value: codeFont, range: contentRange)
+                    storage.addAttribute(.foregroundColor, value: NSColor.systemPink, range: contentRange)
+                    storage.addAttribute(.backgroundColor, value: codeBG, range: contentRange)
+
+                    let codeParagraph = NSMutableParagraphStyle()
+                    codeParagraph.lineSpacing = 3
+                    codeParagraph.paragraphSpacing = 2
+                    codeParagraph.headIndent = 12
+                    codeParagraph.firstLineHeadIndent = 12
+                    storage.addAttribute(.paragraphStyle, value: codeParagraph, range: contentRange)
+
+                    let openFenceEnd = contentRange.location - 1
+                    if openFenceEnd > match.range.location {
+                        let openFence = NSRange(location: match.range.location, length: openFenceEnd - match.range.location)
+                        storage.addAttribute(.foregroundColor, value: NSColor.clear, range: openFence)
+                        storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 0.1), range: openFence)
+                        let hidePara = NSMutableParagraphStyle()
+                        hidePara.maximumLineHeight = 0.1
+                        hidePara.lineSpacing = 0
+                        hidePara.paragraphSpacing = 0
+                        hidePara.paragraphSpacingBefore = 0
+                        storage.addAttribute(.paragraphStyle, value: hidePara, range: openFence)
+                    }
+
+                    let closeStart = contentRange.location + contentRange.length + 1
+                    let closeLen = (match.range.location + match.range.length) - closeStart
+                    if closeLen > 0 {
+                        let closeFence = NSRange(location: closeStart, length: closeLen)
+                        storage.addAttribute(.foregroundColor, value: NSColor.clear, range: closeFence)
+                        storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 0.1), range: closeFence)
+                        let hidePara = NSMutableParagraphStyle()
+                        hidePara.maximumLineHeight = 0.1
+                        hidePara.lineSpacing = 0
+                        hidePara.paragraphSpacing = 0
+                        hidePara.paragraphSpacingBefore = 0
+                        storage.addAttribute(.paragraphStyle, value: hidePara, range: closeFence)
+                    }
+                }
+            }
+
             // Inline patterns (across the full text) — markers are hidden (clear + size 1)
             applyInlinePattern("\\*\\*(.+?)\\*\\*", to: storage, in: text, fullRange: fullRange) { matchRange, innerRange in
                 storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 14, weight: .bold), range: innerRange)
@@ -542,6 +952,44 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 1), range: endM)
             }
 
+            // <u>underline</u>
+            applyInlinePattern("<u>(.+?)</u>", to: storage, in: text, fullRange: fullRange) { matchRange, innerRange in
+                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: innerRange)
+                let startTag = NSRange(location: matchRange.location, length: 3)
+                let endTag = NSRange(location: matchRange.location + matchRange.length - 4, length: 4)
+                storage.addAttribute(.foregroundColor, value: tertiaryColor, range: startTag)
+                storage.addAttribute(.foregroundColor, value: tertiaryColor, range: endTag)
+                storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 1), range: startTag)
+                storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 1), range: endTag)
+            }
+
+            // [link text](url) — render as blue underlined + clickable, hide markdown syntax
+            let linkPattern = "\\[([^\\]]+)\\]\\(([^)]+)\\)"
+            if let linkRegex = try? NSRegularExpression(pattern: linkPattern) {
+                for match in linkRegex.matches(in: text, range: fullRange) {
+                    guard match.numberOfRanges > 2 else { continue }
+                    let fullMatch = match.range
+                    let textRange = match.range(at: 1)
+                    let urlRange = match.range(at: 2)
+                    let urlStr = nsText.substring(with: urlRange)
+
+                    storage.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: textRange)
+                    storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: textRange)
+                    if let url = URL(string: urlStr) {
+                        storage.addAttribute(.link, value: url, range: textRange)
+                        storage.addAttribute(.cursor, value: NSCursor.pointingHand, range: textRange)
+                    }
+
+                    let beforeText = NSRange(location: fullMatch.location, length: 1)
+                    let afterTextStart = textRange.location + textRange.length
+                    let afterText = NSRange(location: afterTextStart, length: fullMatch.location + fullMatch.length - afterTextStart)
+                    storage.addAttribute(.foregroundColor, value: tertiaryColor, range: beforeText)
+                    storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 1), range: beforeText)
+                    storage.addAttribute(.foregroundColor, value: tertiaryColor, range: afterText)
+                    storage.addAttribute(.font, value: NSFont.systemFont(ofSize: 1), range: afterText)
+                }
+            }
+
             // Replace image markdown lines with NSTextAttachment containing the actual image
             // Process in reverse order so range offsets stay valid
             let imagePattern = "!\\[[^\\]]*\\]\\((noteai-image://[^)]+)\\)"
@@ -570,13 +1018,34 @@ struct RichMarkdownEditor: NSViewRepresentable {
                     cell.image?.size = displaySize
                     attachment.attachmentCell = cell
 
-                    let attachmentString = NSMutableAttributedString(attachment: attachment)
-                    attachmentString.addAttributes([
+                    let alignStr = ImageStore.alignment(from: source)
+                    var attrs: [NSAttributedString.Key: Any] = [
                         Self.imageFilenameKey: filename,
                         Self.imageWidthKey: NSNumber(value: Double(targetWidth))
-                    ], range: NSRange(location: 0, length: attachmentString.length))
+                    ]
+                    if let alignStr { attrs[RichEditorTextView.imageAlignKey] = alignStr }
+
+                    let attachmentString = NSMutableAttributedString(attachment: attachment)
+                    attachmentString.addAttributes(attrs, range: NSRange(location: 0, length: attachmentString.length))
                     storage.replaceCharacters(in: match.range, with: attachmentString)
                 }
+            }
+
+            let alignKey = RichEditorTextView.imageAlignKey
+            let updatedFullRange = NSRange(location: 0, length: storage.length)
+            storage.enumerateAttribute(alignKey, in: updatedFullRange) { value, range, _ in
+                guard let alignStr = value as? String else { return }
+                let alignment: NSTextAlignment = switch alignStr {
+                    case "center": .center
+                    case "right": .right
+                    default: .left
+                }
+                let lineRange = (storage.string as NSString).lineRange(for: range)
+                let para = NSMutableParagraphStyle()
+                para.alignment = alignment
+                para.lineSpacing = 4
+                para.paragraphSpacing = 6
+                storage.addAttribute(.paragraphStyle, value: para, range: lineRange)
             }
 
             storage.endEditing()
@@ -605,6 +1074,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
             let fullRange = NSRange(location: 0, length: storage.length)
 
             var replacementTuples: [(NSRange, String)] = []
+            let alignKey = RichEditorTextView.imageAlignKey
             storage.enumerateAttribute(.attachment, in: fullRange) { value, range, _ in
                 guard value is NSTextAttachment else { return }
                 let filename =
@@ -613,8 +1083,12 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 let width =
                     (storage.attribute(Self.imageWidthKey, at: range.location, effectiveRange: nil) as? NSNumber)?
                         .doubleValue
-                let widthPart = width == nil ? "" : "?w=\(Int((width ?? 0).rounded()))"
-                let markdown = "![\(filename)](\(ImageStore.scheme)://\(filename)\(widthPart))"
+                let align = storage.attribute(alignKey, at: range.location, effectiveRange: nil) as? String
+                var params: [String] = []
+                if let w = width { params.append("w=\(Int(w.rounded()))") }
+                if let a = align, a != "left" { params.append("a=\(a)") }
+                let query = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
+                let markdown = "![\(filename)](\(ImageStore.scheme)://\(filename)\(query))"
                 replacementTuples.append((range, markdown))
             }
 
@@ -826,6 +1300,7 @@ enum MarkdownTransformStyle {
     case underline
     case strikethrough
     case inlineCode
+    case hyperlink
 
     func apply(to text: String) -> String {
         switch self {
@@ -834,6 +1309,7 @@ enum MarkdownTransformStyle {
         case .underline: return "<u>\(text)</u>"
         case .strikethrough: return "~~\(text)~~"
         case .inlineCode: return "`\(text)`"
+        case .hyperlink: return "[\(text)](url)"
         case .codeBlock:
             let trimmed = text.trimmingCharacters(in: .newlines)
             return "```\n\(trimmed)\n```"
@@ -888,6 +1364,12 @@ enum MarkdownTransformStyle {
         case .inlineCode:
             if text.hasPrefix("`") && text.hasSuffix("`") && !text.hasPrefix("``") && text.count > 2 {
                 return String(text.dropFirst(1).dropLast(1))
+            }
+        case .hyperlink:
+            if text.hasPrefix("[") && text.contains("](") && text.hasSuffix(")") {
+                if let bracketEnd = text.firstIndex(of: "]") {
+                    return String(text[text.index(after: text.startIndex)..<bracketEnd])
+                }
             }
         case .codeBlock:
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

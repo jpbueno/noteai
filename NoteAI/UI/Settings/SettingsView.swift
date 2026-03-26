@@ -215,8 +215,47 @@ struct AISettingsView: View {
         LLMProviderType(rawValue: providerRaw) ?? .openRouter
     }
 
+    @AppStorage("ttsVoice") private var ttsVoice = "nova"
+    @State private var ttsAPIKey = ""
+    @State private var isPreviewingVoice = false
+    @StateObject private var previewTTS = TextToSpeechService()
+
     var body: some View {
         Form {
+            Section("Text-to-Speech") {
+                HStack {
+                    Picker("Voice", selection: $ttsVoice) {
+                        ForEach(TextToSpeechService.voices, id: \.self) { voice in
+                            Text(voice.capitalized).tag(voice)
+                        }
+                    }
+                    Button {
+                        previewVoice()
+                    } label: {
+                        if isPreviewingVoice {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 18))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(isPreviewingVoice)
+                }
+                SecureField("TTS API Key (optional)", text: $ttsAPIKey)
+                    .onChange(of: ttsAPIKey) { _, newValue in
+                        TextToSpeechService.saveTTSKey(newValue)
+                    }
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle")
+                    Text("Uses your NVIDIA API key by default. Or paste an OpenAI key here to use OpenAI directly.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             // Transcription section
             Section("Transcription (On-Device)") {
                 Picker("Whisper Model", selection: $whisperModel) {
@@ -289,7 +328,10 @@ struct AISettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear(perform: loadKeysFromSecureStore)
+        .onAppear {
+            loadKeysFromSecureStore()
+            ttsAPIKey = TextToSpeechService.loadTTSKey()
+        }
         .onChange(of: openRouterKey) { _, newValue in
             APIKeyStore.save(newValue, for: .openRouter)
         }
@@ -484,6 +526,16 @@ struct AISettingsView: View {
         anthropicKey = APIKeyStore.load(for: .anthropic)
         openAIKey = APIKeyStore.load(for: .openAI)
         nvidiaKey = APIKeyStore.load(for: .nvidia)
+    }
+
+    private func previewVoice() {
+        previewTTS.stop()
+        isPreviewingVoice = true
+        let sample = "Hi, I'm the \(ttsVoice) voice. This is how I sound when reading your notes and reports in NoteAI."
+        previewTTS.speak(sample)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            isPreviewingVoice = false
+        }
     }
 }
 

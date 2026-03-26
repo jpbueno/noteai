@@ -60,4 +60,10 @@ enum ImageStore {
             return width
         }
     }
+
+    /// Optional alignment hint, e.g. `...?a=center`. Returns "left", "center", or "right".
+    static func alignment(from reference: String) -> String? {
+        guard let components = URLComponents(string: reference) else { return nil }
+        return components.queryItems?.first(where: { $0.name == "a" })?.value
+    }
 }

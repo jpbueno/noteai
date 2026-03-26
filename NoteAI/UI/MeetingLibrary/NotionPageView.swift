@@ -6,6 +6,7 @@ struct NotionPageView: View {
     @State var meeting: Meeting
     var summarizationStatus: MeetingManager.SummarizationStatus = .idle
     var meetingManager: MeetingManager?
+    @ObservedObject var ttsService: TextToSpeechService
     @State private var selectedTab: PageTab = .summary
     @State private var followUpDraft: String?
     @State private var isGeneratingFollowUp = false
@@ -83,6 +84,8 @@ struct NotionPageView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.textSecondary)
+
+                    ReadAloudButton(tts: ttsService, text: meetingSummaryText)
                 }
             }
             .font(.system(size: Theme.smallSize))
@@ -528,5 +531,14 @@ struct NotionPageView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .padding(.top, 8)
+    }
+
+    private var meetingSummaryText: String {
+        var parts: [String] = [meeting.title]
+        if !meeting.summary.decisions.isEmpty { parts.append("Key Decisions: " + meeting.summary.decisions.joined(separator: ". ")) }
+        if !meeting.summary.actionItems.isEmpty { parts.append("Action Items: " + meeting.summary.actionItems.map(\.task).joined(separator: ". ")) }
+        if !meeting.summary.topics.isEmpty { parts.append("Topics: " + meeting.summary.topics.joined(separator: ". ")) }
+        if !meeting.summary.openQuestions.isEmpty { parts.append("Open Questions: " + meeting.summary.openQuestions.joined(separator: ". ")) }
+        return parts.joined(separator: ". ")
     }
 }

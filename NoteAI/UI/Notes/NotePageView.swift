@@ -4,6 +4,7 @@ import SwiftUI
 struct NotePageView: View {
     @Binding var note: Note
     @ObservedObject var meetingManager: MeetingManager
+    @ObservedObject var ttsService: TextToSpeechService
 
     @State private var newTag = ""
     @State private var showTagField = false
@@ -123,44 +124,23 @@ struct NotePageView: View {
     // MARK: - Editor Toolbar
 
     private var editorToolbar: some View {
-        HStack(spacing: 12) {
-            Menu {
-                Button("Heading 1") { insertText("# ") }
-                Button("Heading 2") { insertText("## ") }
-                Button("Heading 3") { insertText("### ") }
-                Divider()
-                Button("Bold") { insertText("****", offset: 2) }
-                Button("Italic") { insertText("**", offset: 1) }
-                Divider()
-                Button("Bullet List") { insertText("- ") }
-                Button("Numbered List") { insertText("1. ") }
-                Button("Checkbox") { insertText("- [ ] ") }
-                Divider()
-                Button("Code Block") { insertText("```\n\n```", offset: 4) }
-                Button("Blockquote") { insertText("> ") }
-                Button("Horizontal Rule") { insertText("\n---\n") }
-            } label: {
-                Label("Insert", systemImage: "plus.square")
-                    .font(.system(size: 12))
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Spacer()
+                ReadAloudButton(tts: ttsService, text: note.content)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(note.content, forType: .string)
+                } label: {
+                    Label("Copy Markdown", systemImage: "doc.on.doc")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.textSecondary)
             }
-
-            Spacer()
-
-            Text("Select text for formatting toolbar")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textTertiary)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(note.content, forType: .string)
-            } label: {
-                Label("Copy Markdown", systemImage: "doc.on.doc")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.textSecondary)
+            .padding(.vertical, 4)
+            TTSPlayerView(tts: ttsService)
         }
-        .padding(.vertical, 8)
     }
 
     // MARK: - Editor Content

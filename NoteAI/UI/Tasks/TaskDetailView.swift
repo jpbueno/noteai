@@ -6,6 +6,7 @@ import AppKit
 struct TaskDetailView: View {
     @Binding var task: TaskItem
     @ObservedObject var meetingManager: MeetingManager
+    @ObservedObject var ttsService: TextToSpeechService
     /// Dedicated engine instance to avoid @MainActor isolation issues
     private let engine = SummarizationEngine()
 
@@ -21,26 +22,29 @@ struct TaskDetailView: View {
     @State private var pastedImage: NSImage?
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    taskHeader
-                    tagBar
-                    Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
-                    descriptionSection
-                    Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
-                    aiSection
-                    if !task.rawInput.isEmpty {
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        taskHeader
+                        tagBar
                         Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
-                        rawInputSection
+                        descriptionSection
+                        Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
+                        aiSection
+                        if !task.rawInput.isEmpty {
+                            Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
+                            rawInputSection
+                        }
                     }
+                    .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
+                    .padding(.horizontal, Theme.pagePadding)
+                    .padding(.top, 48)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .topLeading)
                 }
-                .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
-                .padding(.horizontal, Theme.pagePadding)
-                .padding(.top, 48)
-                .padding(.bottom, 24)
-                .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .topLeading)
             }
+            TTSPlayerView(tts: ttsService)
         }
         .background(Theme.contentBG)
         .onDrop(of: [.image, .fileURL], isTargeted: $isDragOver) { providers in
@@ -63,6 +67,8 @@ struct TaskDetailView: View {
                 Label(task.formattedDate, systemImage: "calendar")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
+
+                ReadAloudButton(tts: ttsService, text: "\(task.title). \(task.description)")
 
                 if let meetingID = task.sourceMeetingID,
                    let meeting = meetingManager.meetings.first(where: { $0.id == meetingID }) {

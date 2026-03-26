@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let meetingManager = MeetingManager()
     let authManager = GoogleAuthManager()
     let chatManager = ChatManager()
+    let ttsService = TextToSpeechService()
     private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -38,7 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let contentView = RootView(
             meetingManager: meetingManager,
             authManager: authManager,
-            chatManager: chatManager
+            chatManager: chatManager,
+            ttsService: ttsService
         )
         .frame(minWidth: 900, minHeight: 600)
 
@@ -55,6 +57,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         window.contentView = NSHostingView(rootView: contentView)
         window.center()
         window.makeKeyAndOrderFront(nil)
+
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { event in
+            guard event.clickCount == 2, let w = event.window, w == NSApp.keyWindow else { return event }
+            let locationInWindow = event.locationInWindow
+            let windowHeight = w.frame.height
+            let titleBarZone = windowHeight - locationInWindow.y
+            if titleBarZone < 38 {
+                w.zoom(nil)
+                return nil
+            }
+            return event
+        }
 
         self.mainWindow = window
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -85,10 +99,11 @@ struct RootView: View {
     @ObservedObject var meetingManager: MeetingManager
     @ObservedObject var authManager: GoogleAuthManager
     @ObservedObject var chatManager: ChatManager
+    @ObservedObject var ttsService: TextToSpeechService
 
     var body: some View {
         if authManager.isAuthenticated || UserDefaults.standard.bool(forKey: "skippedAuth") {
-            MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager)
+            MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager, ttsService: ttsService)
         } else {
             LoginView(authManager: authManager)
         }

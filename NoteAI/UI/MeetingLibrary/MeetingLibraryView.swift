@@ -12,11 +12,13 @@ struct MeetingLibraryView: View {
     @ObservedObject var meetingManager: MeetingManager
     @ObservedObject var authManager: GoogleAuthManager
     @ObservedObject var chatManager: ChatManager
+    @ObservedObject var ttsService: TextToSpeechService
     @State private var selection: SidebarSelection?
     @State private var settingsWindow: NSWindow?
     @State private var pulseAnimation = false
     @State private var showChatDrawer = false
     @State private var sidebarWidth: CGFloat = 220
+    @State private var sidebarCollapsed = false
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter()
@@ -30,43 +32,73 @@ struct MeetingLibraryView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: sidebarWidth)
-            // Draggable divider
-            Rectangle()
-                .fill(Theme.border)
-                .frame(width: 4)
-                .contentShape(Rectangle())
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.pop()
+            if sidebarCollapsed {
+                collapsedSidebarStrip
+            } else {
+                sidebar
+                    .frame(width: sidebarWidth)
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: 4)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                let newWidth = sidebarWidth + value.translation.width
+                                sidebarWidth = max(160, min(400, newWidth))
+                            }
+                    )
+            }
+            ZStack {
+                detail
+
+                if sidebarCollapsed {
+                    VStack {
+                        HStack(spacing: 10) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { sidebarCollapsed = false }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "brain.head.profile")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(Theme.textSecondary)
+                                    Text("NoteAI")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(Theme.textPrimary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 14)
+                            .padding(.top, 12)
+                            Spacer()
+                        }
+                        Spacer()
                     }
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 1)
-                        .onChanged { value in
-                            let newWidth = sidebarWidth + value.translation.width
-                            sidebarWidth = max(160, min(400, newWidth))
-                        }
-                )
-            ZStack(alignment: .bottomTrailing) {
-                detail
-                // Floating AI Assistant button
+
+                // Floating AI Assistant button (bottom-right)
                 if !showChatDrawer {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = true }
-                    } label: {
-                        Image(systemName: "brain.head.profile")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.white)
-                            .frame(width: 48, height: 48)
-                            .background(Color.accentColor, in: Circle())
-                            .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = true }
+                            } label: {
+                                Image(systemName: "brain.head.profile")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 48, height: 48)
+                                    .background(Color.accentColor, in: Circle())
+                                    .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(20)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .padding(20)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -102,23 +134,33 @@ struct MeetingLibraryView: View {
         }
     }
 
+    // MARK: - Collapsed sidebar strip
+
+    @ViewBuilder
+    private var collapsedSidebarStrip: some View {
+        EmptyView()
+    }
+
     // MARK: - Sidebar (Notion-style)
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // App logo — always visible
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: 18))
+                    .font(.system(size: 22))
                     .foregroundStyle(Theme.textSecondary)
                 Text("NoteAI")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
             .padding(.bottom, 16)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) { sidebarCollapsed = true }
+            }
 
             // User profile (if signed in)
             if let profile = authManager.userProfile {
@@ -550,7 +592,8 @@ struct MeetingLibraryView: View {
                   let index = meetingManager.t5tReports.firstIndex(where: { $0.id == id }) {
             T5TComposerView(
                 meetingManager: meetingManager,
-                report: $meetingManager.t5tReports[index]
+                report: $meetingManager.t5tReports[index],
+                ttsService: ttsService
             )
             .id(id)
         } else if case .newT5T = selection {
@@ -559,19 +602,21 @@ struct MeetingLibraryView: View {
                   let index = meetingManager.notes.firstIndex(where: { $0.id == id }) {
             NotePageView(
                 note: $meetingManager.notes[index],
-                meetingManager: meetingManager
+                meetingManager: meetingManager,
+                ttsService: ttsService
             )
             .id(id)
         } else if case .task(let id) = selection,
                   let index = meetingManager.tasks.firstIndex(where: { $0.id == id }) {
             TaskDetailView(
                 task: $meetingManager.tasks[index],
-                meetingManager: meetingManager
+                meetingManager: meetingManager,
+                ttsService: ttsService
             )
             .id(id)
         } else if case .meeting(let id) = selection,
                   let meeting = meetingManager.meetings.first(where: { $0.id == id }) {
-            NotionPageView(meeting: meeting, summarizationStatus: meetingManager.summarizationStatus, meetingManager: meetingManager)
+            NotionPageView(meeting: meeting, summarizationStatus: meetingManager.summarizationStatus, meetingManager: meetingManager, ttsService: ttsService)
                 .id(meeting.id)
         } else if meetingManager.state == .recording {
             // No specific item selected while recording — show live transcript

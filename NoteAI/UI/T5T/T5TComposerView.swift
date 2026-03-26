@@ -4,6 +4,7 @@ import SwiftUI
 struct T5TComposerView: View {
     @ObservedObject var meetingManager: MeetingManager
     @Binding var report: T5TReport
+    @ObservedObject var ttsService: TextToSpeechService
 
     @State private var showMeetingSelector = true
     @State private var selectedMeetingIDs: Set<UUID>
@@ -17,9 +18,10 @@ struct T5TComposerView: View {
     @State private var editableConfig: T5TConfig
     @State private var generationError: String?
 
-    init(meetingManager: MeetingManager, report: Binding<T5TReport>) {
+    init(meetingManager: MeetingManager, report: Binding<T5TReport>, ttsService: TextToSpeechService) {
         self.meetingManager = meetingManager
         self._report = report
+        self.ttsService = ttsService
         self._selectedMeetingIDs = State(initialValue: Set(report.wrappedValue.meetingIDs))
         self._selectedNoteIDs = State(initialValue: Set(report.wrappedValue.noteIDs))
         self._selectedTaskIDs = State(initialValue: Set(report.wrappedValue.taskIDs))
@@ -267,6 +269,8 @@ struct T5TComposerView: View {
                 Spacer()
 
                 if !report.sections.isEmpty {
+                    ReadAloudButton(tts: ttsService, text: report.emailBody)
+
                     Button {
                         copyToClipboard()
                     } label: {

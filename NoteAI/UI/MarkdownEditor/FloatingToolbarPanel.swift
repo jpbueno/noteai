@@ -105,14 +105,13 @@ final class FloatingToolbarPanel: NSPanel {
         guard let textView = targetTextView else { hide(); return }
         let selection = textView.selectedRange()
 
-        let nearImage = isNearImage(in: textView)
         let hasTextSelection = selection.length > 0
 
-        guard hasTextSelection || nearImage else { hide(); return }
+        guard hasTextSelection else { hide(); return }
 
-        stack.isHidden = !hasTextSelection
-        divider.isHidden = !hasTextSelection || !nearImage
-        imageStack.isHidden = !nearImage
+        stack.isHidden = false
+        divider.isHidden = true
+        imageStack.isHidden = true
 
         guard let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { hide(); return }

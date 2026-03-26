@@ -1,0 +1,96 @@
+import AppKit
+import SwiftUI
+import UserNotifications
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    let meetingManager = MeetingManager()
+    let authManager = GoogleAuthManager()
+    let chatManager = ChatManager()
+    private var mainWindow: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        chatManager.meetingManager = meetingManager
+        APIKeyStore.migrateLegacyKeysFromUserDefaults()
+        requestNotificationPermission()
+        registerGlobalShortcut()
+        // Ensure Dock icon stays the branded NoteAI icon even when launched via swift run.
+        if let appIcon = NSImage(named: NSImage.Name("AppIcon")) {
+            NSApplication.shared.applicationIconImage = appIcon
+        }
+        NSApplication.shared.setActivationPolicy(.regular)
+        showMainWindow()
+
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showMainWindow() }
+        return true
+    }
+
+    func showMainWindow() {
+        if let window = mainWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let contentView = RootView(
+            meetingManager: meetingManager,
+            authManager: authManager,
+            chatManager: chatManager
+        )
+        .frame(minWidth: 900, minHeight: 600)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "NoteAI"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = NSColor(red: 0.098, green: 0.098, blue: 0.098, alpha: 1)
+        window.contentView = NSHostingView(rootView: contentView)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+
+        self.mainWindow = window
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func requestNotificationPermission() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    private func registerGlobalShortcut() {
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 15 {
+                NotificationCenter.default.post(name: .toggleRecording, object: nil)
+            }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let toggleRecording = Notification.Name("toggleRecording")
+    static let navigateToNote = Notification.Name("navigateToNote")
+    static let toggleChatPanel = Notification.Name("toggleChatPanel")
+}
+
+/// Root view that shows either Login or the main app.
+struct RootView: View {
+    @ObservedObject var meetingManager: MeetingManager
+    @ObservedObject var authManager: GoogleAuthManager
+    @ObservedObject var chatManager: ChatManager
+
+    var body: some View {
+        if authManager.isAuthenticated || UserDefaults.standard.bool(forKey: "skippedAuth") {
+            MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager)
+        } else {
+            LoginView(authManager: authManager)
+        }
+    }
+}

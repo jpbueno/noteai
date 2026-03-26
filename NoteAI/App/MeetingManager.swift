@@ -1,0 +1,639 @@
+import Foundation
+import Combine
+
+/// Central orchestrator that coordinates audio capture, transcription, and summarization.
+@MainActor
+final class MeetingManager: ObservableObject {
+    enum State: Equatable {
+        case idle
+        case recording
+        case processing
+    }
+
+    @Published var state: State = .idle
+    @Published var currentTranscript: [TranscriptSegment] = []
+    @Published var meetings: [Meeting] = []
+    @Published var lastError: String?
+    @Published var recordingDuration: TimeInterval = 0
+    @Published var summarizationStatus: SummarizationStatus = .idle
+    @Published var searchQuery: String = ""
+    @Published var showMeetingNamePrompt = false
+    @Published var pendingMeetingName = ""
+
+    // Notes state
+    @Published var notes: [Note] = []
+
+    var filteredNotes: [Note] {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return notes }
+        let query = searchQuery.lowercased()
+        return notes.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.content.lowercased().contains(query) ||
+            $0.tags.contains(where: { $0.lowercased().contains(query) })
+        }
+    }
+
+    // Tasks state
+    @Published var tasks: [TaskItem] = []
+    @Published var taskSummarizing = false
+
+    var filteredTasks: [TaskItem] {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return tasks }
+        let query = searchQuery.lowercased()
+        return tasks.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.rawInput.lowercased().contains(query) ||
+            $0.tags.contains(where: { $0.lowercased().contains(query) })
+        }
+    }
+
+    // T5T state
+    @Published var t5tReports: [T5TReport] = []
+    @Published var t5tConfig: T5TConfig = .empty
+    @Published var t5tGenerationStatus: T5TGenerationStatus = .idle
+
+    enum T5TGenerationStatus: Equatable {
+        case idle
+        case generating(model: String)
+        case failed(error: String)
+    }
+
+    enum SummarizationStatus: Equatable {
+        case idle
+        case summarizing(model: String)
+        case failed(error: String)
+    }
+
+    var filteredMeetings: [Meeting] {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return meetings
+        }
+        let query = searchQuery.lowercased()
+        return meetings.filter { meeting in
+            meeting.title.lowercased().contains(query) ||
+            meeting.summary.topics.contains(where: { $0.lowercased().contains(query) }) ||
+            meeting.summary.decisions.contains(where: { $0.lowercased().contains(query) }) ||
+            meeting.summary.actionItems.contains(where: { $0.task.lowercased().contains(query) }) ||
+            meeting.transcript.contains(where: { $0.text.lowercased().contains(query) })
+        }
+    }
+    @Published var autoDetectEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(autoDetectEnabled, forKey: "autoDetectMeetings")
+            if autoDetectEnabled {
+                meetingDetector.startMonitoring()
+            } else {
+                meetingDetector.stopMonitoring()
+            }
+        }
+    }
+
+    let meetingDetector = MeetingDetector()
+
+    private let audioCaptureManager = AudioCaptureManager()
+    private let transcriptionEngine = TranscriptionEngine()
+    private let summarizationEngine = SummarizationEngine()
+    private let meetingStore = MeetingStore()
+    private let notificationManager = NotificationDelivery()
+
+    private var currentMeetingStart: Date?
+    private var recordingTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
+
+        loadMeetings()
+        loadNotes()
+        loadTasks()
+        loadT5TData()
+        setupToggleListener()
+        setupTranscriptionPipeline()
+        setupAutoDetection()
+    }
+
+    func toggleRecording() {
+        switch state {
+        case .idle:
+            startRecording()
+        case .recording:
+            stopRecording()
+        case .processing:
+            break
+        }
+    }
+
+    func startRecording() {
+        guard state == .idle else { return }
+        lastError = nil
+        state = .recording
+        currentTranscript = []
+        currentMeetingStart = Date()
+        recordingDuration = 0
+
+        // Start duration timer
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.currentMeetingStart else { return }
+                self.recordingDuration = Date().timeIntervalSince(start)
+            }
+        }
+
+        Task {
+            // Load model first so it's ready before audio buffers arrive
+            await transcriptionEngine.warmup()
+
+            do {
+                try await audioCaptureManager.startCapture()
+                print("[MeetingManager] Audio capture started successfully")
+            } catch {
+                print("[MeetingManager] Failed to start audio capture: \(error)")
+                lastError = "Audio capture failed: \(error.localizedDescription). Check Screen Recording and Microphone permissions in System Settings > Privacy & Security."
+                recordingTimer?.invalidate()
+                state = .idle
+            }
+        }
+    }
+
+    func stopRecording() {
+        guard state == .recording else { return }
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        audioCaptureManager.stopCapture()
+
+        let appName = meetingDetector.detectedApp ?? "Meeting"
+        let dateStr = currentMeetingStart?.formatted(date: .abbreviated, time: .shortened) ?? Date().formatted(date: .abbreviated, time: .shortened)
+        pendingMeetingName = "\(appName) — \(dateStr)"
+        showMeetingNamePrompt = true
+    }
+
+    func finishRecording(name: String) {
+        showMeetingNamePrompt = false
+        let title = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? pendingMeetingName
+            : name.trimmingCharacters(in: .whitespacesAndNewlines)
+        state = .processing
+
+        Task {
+            await transcriptionEngine.reset()
+
+            let transcript = currentTranscript
+            let transcriptText = transcript
+                .map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }
+                .joined(separator: "\n")
+
+            let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
+            summarizationStatus = .summarizing(model: modelName)
+
+            let summary: MeetingSummary
+            do {
+                summary = try await summarizationEngine.summarize(transcript: transcriptText)
+                summarizationStatus = .idle
+            } catch {
+                print("[MeetingManager] Summarization failed: \(error)")
+                lastError = "Summarization failed: \(error.localizedDescription)"
+                summarizationStatus = .failed(error: error.localizedDescription)
+                summary = MeetingSummary(
+                    decisions: [],
+                    actionItems: [],
+                    topics: ["Summarization failed: \(error.localizedDescription)"],
+                    openQuestions: ["Check Settings > AI to verify your API key and model are configured correctly."]
+                )
+            }
+
+            let meeting = Meeting(
+                id: UUID(),
+                title: title,
+                date: currentMeetingStart ?? Date(),
+                duration: Date().timeIntervalSince(currentMeetingStart ?? Date()),
+                transcript: transcript,
+                summary: summary
+            )
+
+            do {
+                try meetingStore.save(meeting: meeting)
+                meetings.insert(meeting, at: 0)
+            } catch {
+                print("Failed to save meeting: \(error)")
+            }
+
+            ExportManager.autoExportIfEnabled(meeting)
+            await notificationManager.sendSummaryReady(meetingTitle: meeting.title)
+            state = .idle
+        }
+    }
+
+    func toggleActionItem(meetingId: UUID, actionItemId: String) {
+        guard let index = meetings.firstIndex(where: { $0.id == meetingId }) else { return }
+        guard let itemIndex = meetings[index].summary.actionItems.firstIndex(where: { $0.id == actionItemId }) else { return }
+
+        meetings[index].summary.actionItems[itemIndex].isCompleted.toggle()
+
+        // Persist the change
+        do {
+            try meetingStore.save(meeting: meetings[index])
+        } catch {
+            print("Failed to save action item toggle: \(error)")
+        }
+    }
+
+    func draftFollowUp(for meeting: Meeting) async throws -> String {
+        try await summarizationEngine.draftFollowUp(meeting: meeting)
+    }
+
+    func resummarize(meeting: Meeting) async throws -> Meeting {
+        debugLog("resummarize called for meeting \(meeting.id), transcript count=\(meeting.transcript.count)")
+
+        let transcriptText = meeting.transcript
+            .map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }
+            .joined(separator: "\n")
+
+        debugLog("transcript text length=\(transcriptText.count)")
+
+        let summary: MeetingSummary
+        do {
+            summary = try await summarizationEngine.summarize(transcript: transcriptText)
+            debugLog("summarize succeeded, decisions=\(summary.decisions.count) items=\(summary.actionItems.count)")
+        } catch {
+            debugLog("summarize FAILED: \(error)")
+            throw error
+        }
+
+        var updated = meeting
+        updated.summary = summary
+
+        try meetingStore.save(meeting: updated)
+
+        if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+            meetings[index] = updated
+        }
+
+        debugLog("meeting updated and saved")
+        return updated
+    }
+
+    private func debugLog(_ message: String) {
+        let logFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("NoteAI/debug.log")
+        let line = "[\(Date())] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFile.path) {
+                if let handle = try? FileHandle(forWritingTo: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: logFile)
+            }
+        }
+    }
+
+    // MARK: - Notes
+
+    @discardableResult
+    func createNote(title: String = "Untitled", content: String = "", tags: [String] = [], sourceMeetingID: UUID? = nil) -> Note {
+        let note = Note(title: title, content: content, tags: tags, sourceMeetingID: sourceMeetingID)
+        do {
+            try meetingStore.saveNote(note)
+            notes.insert(note, at: 0)
+        } catch {
+            print("Failed to save note: \(error)")
+        }
+        return note
+    }
+
+    func updateNote(_ note: Note) {
+        var updated = note
+        updated.modifiedDate = Date()
+        do {
+            try meetingStore.saveNote(updated)
+            if let index = notes.firstIndex(where: { $0.id == note.id }) {
+                notes[index] = updated
+            }
+        } catch {
+            print("Failed to update note: \(error)")
+        }
+    }
+
+    func deleteNote(_ note: Note) {
+        do {
+            try meetingStore.deleteNote(id: note.id)
+            notes.removeAll { $0.id == note.id }
+        } catch {
+            print("Failed to delete note: \(error)")
+        }
+    }
+
+    func createNoteFromMeeting(_ meeting: Meeting) -> Note {
+        let markdown = ExportManager.exportAsMarkdown(meeting)
+        return createNote(
+            title: meeting.title,
+            content: markdown,
+            tags: meeting.summary.topics.prefix(5).map { $0 },
+            sourceMeetingID: meeting.id
+        )
+    }
+
+    // MARK: - Notion Import
+
+    func importNotesFromNotion(directoryURL: URL) throws -> NotionImporter.ImportResult {
+        let result = try NotionImporter.importNotes(from: directoryURL)
+        for note in result.imported {
+            do {
+                try meetingStore.saveNote(note)
+                notes.insert(note, at: 0)
+            } catch {
+                print("Failed to save imported note '\(note.title)': \(error)")
+            }
+        }
+        // Sort notes by modified date after bulk import
+        notes.sort { $0.modifiedDate > $1.modifiedDate }
+        return result
+    }
+
+    func notesInRange(start: Date, end: Date) -> [Note] {
+        notes.filter { $0.modifiedDate >= start && $0.modifiedDate <= end }
+    }
+
+    private func loadNotes() {
+        do {
+            notes = try meetingStore.fetchAllNotes()
+        } catch {
+            print("Failed to load notes: \(error)")
+        }
+    }
+
+    // MARK: - Tasks
+
+    @discardableResult
+    func createTask(title: String = "", rawInput: String = "", tags: [String] = [], sourceMeetingID: UUID? = nil, sourceNoteID: UUID? = nil) -> TaskItem {
+        let task = TaskItem(title: title, rawInput: rawInput, tags: tags, sourceMeetingID: sourceMeetingID, sourceNoteID: sourceNoteID)
+        do {
+            try meetingStore.saveTask(task)
+            tasks.insert(task, at: 0)
+        } catch {
+            print("Failed to save task: \(error)")
+        }
+        return task
+    }
+
+    func updateTask(_ task: TaskItem) {
+        var updated = task
+        updated.modifiedDate = Date()
+        do {
+            try meetingStore.saveTask(updated)
+            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+                tasks[index] = updated
+            }
+        } catch {
+            print("Failed to update task: \(error)")
+        }
+    }
+
+    func deleteTask(_ task: TaskItem) {
+        do {
+            try meetingStore.deleteTask(id: task.id)
+            tasks.removeAll { $0.id == task.id }
+        } catch {
+            print("Failed to delete task: \(error)")
+        }
+    }
+
+    func createTaskFromMeeting(_ meeting: Meeting) -> TaskItem {
+        let summaryText = meeting.summary.decisions.joined(separator: ". ")
+        let title = meeting.title
+        return createTask(title: title, rawInput: summaryText, tags: meeting.summary.topics.prefix(3).map { $0 }, sourceMeetingID: meeting.id)
+    }
+
+    func createTaskFromNote(_ note: Note) -> TaskItem {
+        return createTask(title: note.title, rawInput: String(note.content.prefix(500)), tags: note.tags, sourceNoteID: note.id)
+    }
+
+    func summarizeTaskInput(_ text: String) async throws -> String {
+        try await summarizationEngine.summarizeTaskInput(text: text)
+    }
+
+    func tasksInRange(start: Date, end: Date) -> [TaskItem] {
+        tasks.filter { $0.createdDate >= start && $0.createdDate <= end }
+    }
+
+    private func loadTasks() {
+        do {
+            tasks = try meetingStore.fetchAllTasks()
+        } catch {
+            print("Failed to load tasks: \(error)")
+        }
+    }
+
+    // MARK: - T5T
+
+    func meetingsInRange(start: Date, end: Date) -> [Meeting] {
+        meetings.filter { $0.date >= start && $0.date <= end }
+    }
+
+    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], taskIDs: [UUID] = []) async throws -> T5TReport {
+        let selectedMeetings = meetings.filter { meetingIDs.contains($0.id) }
+        let selectedNotes = notes.filter { noteIDs.contains($0.id) }
+        let selectedTasks = tasks.filter { taskIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
+            throw T5TError.noMeetingsSelected
+        }
+
+        let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
+        t5tGenerationStatus = .generating(model: modelName)
+
+        let sections: T5TSections
+        do {
+            sections = try await summarizationEngine.generateT5T(
+                meetings: selectedMeetings,
+                notes: selectedNotes,
+                tasks: selectedTasks,
+                config: t5tConfig,
+                periodStart: periodStart,
+                periodEnd: periodEnd
+            )
+            t5tGenerationStatus = .idle
+        } catch {
+            t5tGenerationStatus = .failed(error: error.localizedDescription)
+            throw error
+        }
+
+        let report = T5TReport(
+            id: UUID(),
+            title: t5tConfig.isComplete ? t5tConfig.subjectLine : "T5T — \(formatPeriod(start: periodStart, end: periodEnd))",
+            createdDate: Date(),
+            periodStart: periodStart,
+            periodEnd: periodEnd,
+            meetingIDs: meetingIDs,
+            noteIDs: noteIDs,
+            taskIDs: taskIDs,
+            sections: sections,
+            status: .draft
+        )
+
+        try meetingStore.saveT5TReport(report)
+        t5tReports.insert(report, at: 0)
+        return report
+    }
+
+    func addT5TReport(_ report: T5TReport) {
+        do {
+            try meetingStore.saveT5TReport(report)
+            t5tReports.insert(report, at: 0)
+        } catch {
+            print("Failed to save new T5T report: \(error)")
+        }
+    }
+
+    func updateT5TReport(_ report: T5TReport) {
+        do {
+            try meetingStore.saveT5TReport(report)
+            if let index = t5tReports.firstIndex(where: { $0.id == report.id }) {
+                t5tReports[index] = report
+            }
+        } catch {
+            print("Failed to save T5T report: \(error)")
+        }
+    }
+
+    func deleteT5TReport(_ report: T5TReport) {
+        do {
+            try meetingStore.deleteT5TReport(id: report.id)
+            t5tReports.removeAll { $0.id == report.id }
+        } catch {
+            print("Failed to delete T5T report: \(error)")
+        }
+    }
+
+    func regenerateT5T(report: T5TReport) async throws -> T5TReport {
+        let selectedMeetings = meetings.filter { report.meetingIDs.contains($0.id) }
+        let selectedNotes = notes.filter { report.noteIDs.contains($0.id) }
+        let selectedTasks = tasks.filter { report.taskIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
+            throw T5TError.noMeetingsSelected
+        }
+
+        let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
+        t5tGenerationStatus = .generating(model: modelName)
+
+        let sections: T5TSections
+        do {
+            sections = try await summarizationEngine.generateT5T(
+                meetings: selectedMeetings,
+                notes: selectedNotes,
+                tasks: selectedTasks,
+                config: t5tConfig,
+                periodStart: report.periodStart,
+                periodEnd: report.periodEnd
+            )
+            t5tGenerationStatus = .idle
+        } catch {
+            t5tGenerationStatus = .failed(error: error.localizedDescription)
+            throw error
+        }
+
+        var updated = report
+        updated.sections = sections
+        updateT5TReport(updated)
+        return updated
+    }
+
+    func saveT5TConfig(_ config: T5TConfig) {
+        t5tConfig = config
+        do {
+            try meetingStore.saveT5TConfig(config)
+        } catch {
+            print("Failed to save T5T config: \(error)")
+        }
+    }
+
+    private func loadT5TData() {
+        do {
+            t5tReports = try meetingStore.fetchAllT5TReports()
+            t5tConfig = try meetingStore.loadT5TConfig() ?? .empty
+        } catch {
+            print("Failed to load T5T data: \(error)")
+        }
+    }
+
+    private func formatPeriod(start: Date, end: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d"
+        return "\(fmt.string(from: start))–\(fmt.string(from: end))"
+    }
+
+    func deleteMeeting(_ meeting: Meeting) {
+        do {
+            try meetingStore.delete(meetingId: meeting.id)
+            meetings.removeAll { $0.id == meeting.id }
+        } catch {
+            print("Failed to delete meeting: \(error)")
+        }
+    }
+
+    // MARK: - Private
+
+    private func loadMeetings() {
+        do {
+            meetings = try meetingStore.fetchAll()
+        } catch {
+            print("Failed to load meetings: \(error)")
+        }
+    }
+
+    private func setupToggleListener() {
+        NotificationCenter.default.publisher(for: .toggleRecording)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.toggleRecording()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func setupTranscriptionPipeline() {
+        audioCaptureManager.onAudioBuffer = { [weak self] buffer in
+            guard let self else { return }
+            Task {
+                do {
+                    let segments = try await self.transcriptionEngine.transcribe(audioBuffer: buffer)
+                    await MainActor.run {
+                        self.currentTranscript.append(contentsOf: segments)
+                    }
+                } catch {
+                    print("Transcription error: \(error)")
+                }
+            }
+        }
+    }
+
+    private func setupAutoDetection() {
+        meetingDetector.onMeetingStarted = { [weak self] in
+            guard let self else { return }
+            print("[MeetingManager] Auto-detection triggered — starting recording")
+            self.startRecording()
+        }
+
+        meetingDetector.onMeetingEnded = { [weak self] in
+            guard let self else { return }
+            print("[MeetingManager] Auto-detection: meeting ended — stopping recording")
+            self.stopRecording()
+        }
+
+        // Start monitoring if previously enabled
+        if autoDetectEnabled {
+            meetingDetector.startMonitoring()
+        }
+    }
+}
+
+enum T5TError: LocalizedError {
+    case noMeetingsSelected
+
+    var errorDescription: String? {
+        switch self {
+        case .noMeetingsSelected:
+            return "No meetings selected for T5T generation."
+        }
+    }
+}

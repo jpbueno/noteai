@@ -1,52 +1,143 @@
 # NoteAI
 
-NoteAI is a macOS app for recording meetings, transcribing audio, generating AI summaries, and creating T5T reports.
+Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
 
-## Highlights
+1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB persistence
+2. **Web app** — Next.js SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
 
-- Record and transcribe meetings (mic + app audio capture where permitted)
-- Structured summaries with decisions, action items, topics, and open questions
-- Notes and tasks linked to meetings
-- T5T report generation from meetings, notes, and tasks
-- Optional Google sign-in and Notion markdown import
+Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
 
-## Tech Stack
+## Features
 
-- Swift + SwiftUI (macOS 14+)
-- GRDB (SQLite persistence)
-- WhisperKit (on-device transcription)
+- Record and transcribe meetings (mic + system audio capture)
+- Structured AI summaries with decisions, action items, topics, and open questions
+- Rich text notes with markdown, tags, and meeting linking
+- Task management with AI summarization
+- T5T (Top 5 Things) report generation from meetings, notes, and tasks
+- AI chat sidebar for querying meeting content
+- Text-to-speech playback
 - Configurable LLM backends (OpenRouter, Anthropic, OpenAI, NVIDIA)
 
 ## Project Layout
 
-- `NoteAI/` - application source code
-- `NoteAITests/` - unit tests
-- `NoteAI.xcodeproj/` - Xcode project
-- `Package.swift` - Swift Package manifest for dependencies
-- `generate_icon.swift` - app icon generation utility
-- `simulate_meeting.swift` - local simulation utility
-- `generate_previews.swift` - preview generation utility
-
-## Build and Run (Xcode CLI)
-
-```bash
-xcodebuild -project "NoteAI.xcodeproj" -scheme "NoteAI" -configuration Debug -derivedDataPath ".xcode-build" build
-open ".xcode-build/Build/Products/Debug/NoteAI.app"
+```
+NoteAI/                   macOS app source (SwiftUI + GRDB + WhisperKit)
+NoteAITests/              macOS unit tests
+web/                      Web app source (Next.js + Turso)
+  src/
+    app/                  Pages, API routes
+    components/           React components
+    lib/                  Shared logic (types, hooks, audio, AI, db)
+  public/                 Static assets
+NoteAI.xcodeproj/         Xcode project
+Package.swift             Swift Package manifest
 ```
 
-## Deploy Local Build to /Applications
+## Tech Stack
+
+### macOS App
+- Swift 5.9 + SwiftUI (macOS 14.2+)
+- GRDB (SQLite persistence)
+- WhisperKit (on-device transcription via Apple Neural Engine)
+- ProcessTap / ScreenCaptureKit for system audio capture
+
+### Web App
+- Next.js 16 + React 19 + TypeScript 5
+- Tailwind CSS 4
+- Tiptap (rich text editor)
+- Turso (hosted SQLite)
+- Deployed on Cloudflare Workers via OpenNext
+
+---
+
+## macOS App
+
+### Build & Run
 
 ```bash
-xcodebuild -project "NoteAI.xcodeproj" -scheme "NoteAI" -configuration Debug -derivedDataPath ".xcode-build" build
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
+open .xcode-build/Build/Products/Debug/NoteAI.app
+```
+
+### Deploy to /Applications
+
+```bash
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
 ditto ".xcode-build/Build/Products/Debug/NoteAI.app" "/Applications/NoteAI.app"
-open -a "/Applications/NoteAI.app"
 ```
+
+### Requirements
+- macOS 14.2+
+- Screen Recording permission (for system audio capture)
+- Microphone permission
+
+---
+
+## Web App
+
+### Local Development
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open http://localhost:3000.
+
+### Environment Variables
+
+Create `web/.env.local`:
+
+```
+TURSO_DATABASE_URL=libsql://your-db.turso.io
+TURSO_AUTH_TOKEN=your-turso-token
+NOTEAI_AUTH_SECRET=any-random-string
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_ALLOWED_EMAILS=you@example.com
+```
+
+### Deploy to Cloudflare Workers
+
+```bash
+cd web
+npm run build:cf
+CLOUDFLARE_API_TOKEN=your-token npm run deploy:cf
+```
+
+Set secrets on Cloudflare:
+```bash
+echo "value" | npx wrangler secret put TURSO_DATABASE_URL
+echo "value" | npx wrangler secret put TURSO_AUTH_TOKEN
+echo "value" | npx wrangler secret put NOTEAI_AUTH_SECRET
+echo "value" | npx wrangler secret put GOOGLE_CLIENT_ID
+echo "value" | npx wrangler secret put GOOGLE_ALLOWED_EMAILS
+```
+
+### API Access
+
+The web app exposes a REST API for programmatic access (agents, scripts, etc.). Authenticate with a Bearer token derived from `NOTEAI_AUTH_SECRET`.
+
+Get your API key by visiting `/api/auth/apikey` while logged in.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/data/notes` | List all notes |
+| POST | `/api/data/notes` | Create/update a note |
+| GET | `/api/data/tasks` | List all tasks |
+| POST | `/api/data/tasks` | Create/update a task |
+| GET | `/api/data/meetings` | List all meetings |
+| GET | `/api/data/t5tReports` | List all T5T reports |
+| POST | `/api/data/t5tReports` | Create/update a report |
+
+All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id>` for deletion.
+
+---
 
 ## Security Notes
 
-- LLM API keys are stored in macOS Keychain.
-- Legacy API keys previously stored in `UserDefaults` are migrated to Keychain on launch.
-- OAuth tokens are stored in Keychain.
-- Do not commit local build artifacts or generated runtime files.
-
-See `SECURITY.md` for reporting and secure development guidance.
+- **macOS**: LLM API keys stored in macOS Keychain, never UserDefaults
+- **Web**: API keys stored server-side as Cloudflare Worker secrets, never exposed to the browser
+- **Web**: Google OAuth with HMAC-signed session cookies
+- **Web**: Bearer token auth for programmatic API access
+- Do not commit `.env*` files or build artifacts

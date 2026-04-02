@@ -140,16 +140,18 @@ actor TranscriptionEngine {
         // Convert AVAudioPCMBuffer to float array
         var audioArray = bufferToFloatArray(audioBuffer)
 
-        // Skip truly silent buffers (very low threshold to not miss quiet speech)
+        // Normalize FIRST — Bluetooth/AirPod audio from remote participants
+        // can be very quiet and gets rejected by the silence check otherwise
+        audioArray = normalizeAudio(audioArray)
+
+        // Skip truly silent buffers (post-normalization)
         let energy = computeRMS(audioArray)
-        guard energy > 0.001 else {
+        guard energy > 0.0001 else {
             let bufferDuration = Float(audioBuffer.frameLength) / Float(audioBuffer.format.sampleRate)
             elapsedTime += bufferDuration
+            log("skipped silent buffer: energy=\(energy)")
             return []
         }
-
-        // Normalize quiet audio so remote participants aren't missed
-        audioArray = normalizeAudio(audioArray)
 
         // Feed previous context so Whisper maintains consistent spelling
         // of names, acronyms, and technical terms across chunks

@@ -181,7 +181,8 @@ print("  Total meetings in DB: \(count)")
 print("  DB path: \(dbPath)")
 
 // Also export as Markdown to verify format
-let mdPath = "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI/test_output.md"
+let scriptDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let mdPath = "\(scriptDir)/test_output.md"
 var md = "---\n"
 md += "title: \"Microsoft Teams — Mar 19, 2026, 2:00 PM\"\n"
 md += "date: \(ISO8601DateFormatter().string(from: Date()))\n"

@@ -4,7 +4,7 @@ import AppKit
 import CoreGraphics
 
 let s: CGFloat = 512
-let outDir = "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI/icon_previews"
+let outDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("icon_previews").path
 let colorSpace = CGColorSpaceCreateDeviceRGB()
 
 func save(_ image: NSImage, name: String) {

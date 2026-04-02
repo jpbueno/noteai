@@ -3,8 +3,8 @@ import CoreAudio
 import ScreenCaptureKit
 
 /// Orchestrates audio capture:
-/// 1. ProcessTap (macOS 14.2+) for direct per-process audio capture from Teams
-/// 2. ScreenCaptureKit app-audio capture as fallback
+/// 1. ProcessTap (macOS 14.2+) for direct per-process audio capture from a meeting app
+/// 2. ScreenCaptureKit ALL desktop audio capture as fallback (any app, any speaker)
 /// 3. Microphone capture for the local user's voice
 ///
 /// All audio is resampled to 16kHz mono before being delivered to the transcription engine.
@@ -18,6 +18,23 @@ final class AudioCaptureManager: NSObject {
 
     private let appAudioRing = AudioBufferRing(capacity: 60)
     private let micAudioRing = AudioBufferRing(capacity: 60)
+
+    private func log(_ msg: String) {
+        let logDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("NoteAI")
+        try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        let logFile = logDir.appendingPathComponent("audio_capture.log")
+        let line = "[\(Date())] \(msg)\n"
+        if let data = line.data(using: .utf8) {
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            } else {
+                try? data.write(to: logFile)
+            }
+        }
+    }
     private var isCapturing = false
 
     /// Cached converters keyed by source sample rate to avoid creating one per buffer
@@ -38,6 +55,7 @@ final class AudioCaptureManager: NSObject {
         // Try to capture meeting app audio
         let appCaptureStarted = await startAppAudioCapture()
         if !appCaptureStarted {
+            log("WARNING: No app audio — mic only (meeting participants won't be transcribed)")
             print("[AudioCapture] No app audio capture available — mic only mode")
         }
 
@@ -48,6 +66,7 @@ final class AudioCaptureManager: NSObject {
         }
         microphoneCapture = mic
         isCapturing = true
+        log("Capture started: mic=true appAudio=\(appCaptureStarted)")
         print("[AudioCapture] Capture started (mic + \(appCaptureStarted ? "app audio" : "no app audio"))")
     }
 
@@ -80,6 +99,7 @@ final class AudioCaptureManager: NSObject {
         // anything that triggers the system prompt
         let hasScreenPermission = CGPreflightScreenCaptureAccess()
         if !hasScreenPermission {
+            log("No Screen Recording permission — app audio disabled")
             print("[AudioCapture] No Screen Recording permission — skipping app audio, mic only")
             return false
         }
@@ -93,35 +113,43 @@ final class AudioCaptureManager: NSObject {
                         self?.handleAppAudioBuffer(buffer)
                     }
                     processTap = tap
+                    log("ProcessTap OK: PID=\(app.processIdentifier) app=\(app.localizedName ?? "unknown")")
                     print("[AudioCapture] ProcessTap capturing PID \(app.processIdentifier) (\(app.localizedName ?? "unknown"))")
                     return true
                 } catch {
+                    log("ProcessTap FAILED: \(error)")
                     print("[AudioCapture] ProcessTap failed: \(error) — trying ScreenCaptureKit")
                 }
             }
         }
 
-        // Strategy 2: ScreenCaptureKit — app-specific audio capture
-        if let scApp = await findSCKMeetingApp() {
-            do {
-                try await startSCKAudioCapture(app: scApp)
-                print("[AudioCapture] ScreenCaptureKit capturing \(scApp.applicationName)")
-                return true
-            } catch {
-                print("[AudioCapture] SCK audio capture failed: \(error)")
-            }
+        // Strategy 2: ScreenCaptureKit — capture ALL desktop audio
+        // Not limited to a specific meeting app — captures any audio output
+        // so it works regardless of which app is producing sound
+        do {
+            try await startSCKDesktopAudioCapture()
+            log("ScreenCaptureKit desktop audio OK")
+            print("[AudioCapture] ScreenCaptureKit capturing all desktop audio")
+            return true
+        } catch {
+            log("ScreenCaptureKit desktop audio FAILED: \(error)")
+            print("[AudioCapture] SCK desktop audio failed: \(error)")
         }
 
         return false
     }
 
-    private func startSCKAudioCapture(app: SCRunningApplication) async throws {
+    private func startSCKDesktopAudioCapture() async throws {
         let content = try await SCShareableContent.current
         guard let display = content.displays.first else {
             throw AudioCaptureError.screenCaptureNotAvailable
         }
 
-        let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+        // Exclude our own app to avoid feedback loops
+        let selfApp = content.applications.first { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
+        let excludeApps = selfApp.map { [$0] } ?? []
+
+        let filter = SCContentFilter(display: display, excludingApplications: excludeApps, exceptingWindows: [])
 
         let config = SCStreamConfiguration()
         config.width = 2
@@ -141,28 +169,6 @@ final class AudioCaptureManager: NSObject {
         try stream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream.startCapture()
         scStream = stream
-    }
-
-    private func findSCKMeetingApp() async -> SCRunningApplication? {
-        let meetingBundleIDs: Set<String> = [
-            "com.microsoft.teams",
-            "com.microsoft.teams2",
-            "com.google.Chrome",
-            "com.microsoft.edgemac",
-            "company.thebrowser.Browser",
-            "com.apple.Safari",
-            "com.brave.Browser",
-            "org.mozilla.firefox",
-        ]
-
-        guard let content = try? await SCShareableContent.current else { return nil }
-
-        // Prefer Teams over browsers
-        let teamsIDs: Set<String> = ["com.microsoft.teams", "com.microsoft.teams2"]
-        if let teams = content.applications.first(where: { teamsIDs.contains($0.bundleIdentifier) }) {
-            return teams
-        }
-        return content.applications.first { meetingBundleIDs.contains($0.bundleIdentifier) }
     }
 
     // MARK: - Audio handling with resampling

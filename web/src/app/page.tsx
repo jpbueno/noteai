@@ -1,0 +1,452 @@
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { FileText } from "lucide-react";
+import BrainHeadIcon from "@/components/BrainHeadIcon";
+import Sidebar from "@/components/Sidebar";
+import MeetingDetail from "@/components/MeetingDetail";
+import NoteEditor from "@/components/NoteEditor";
+import TaskDetail from "@/components/TaskDetail";
+import T5TComposer from "@/components/T5TComposer";
+import ChatPanel from "@/components/ChatPanel";
+import Settings from "@/components/Settings";
+import LiveTranscript from "@/components/LiveTranscript";
+import { db } from "@/lib/db";
+import type { SidebarSelection } from "@/lib/types";
+import {
+  useMeetings,
+  useNotes,
+  useTasks,
+  useT5TReports,
+  useChatMessages,
+  useSearch,
+  useRecording,
+  triggerRefresh,
+} from "@/lib/hooks";
+import { v4 as uuid } from "uuid";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: { credential: string }) => void; auto_select?: boolean }) => void;
+          renderButton: (element: HTMLElement, config: { theme?: string; size?: string; width?: number; shape?: string; text?: string }) => void;
+        };
+      };
+    };
+  }
+}
+
+function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () => void }) {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const buttonRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !window.google) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (response) => {
+          setLoading(true);
+          setError("");
+          try {
+            const res = await fetch("/api/auth", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ credential: response.credential }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+              onSuccess();
+            } else {
+              setError(data.error || "Sign-in failed");
+            }
+          } catch {
+            setError("Connection failed");
+          }
+          setLoading(false);
+        },
+      });
+      window.google.accounts.id.renderButton(node, {
+        theme: "filled_black",
+        size: "large",
+        width: 320,
+        shape: "pill",
+        text: "signin_with",
+      });
+    },
+    [clientId, onSuccess],
+  );
+
+  return (
+    <div className="flex items-center justify-center h-screen bg-content">
+      <div className="w-80 space-y-6 text-center">
+        <div className="flex items-center gap-2.5 justify-center mb-2">
+          <BrainHeadIcon className="w-8 h-8 text-text-secondary" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-2xl font-semibold text-text-primary">NoteAI</span>
+            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+          </div>
+        </div>
+        <p className="text-sm text-text-tertiary">Sign in to access your meetings and notes</p>
+        <div className="flex justify-center">
+          {loading ? (
+            <p className="text-sm text-text-secondary">Signing in...</p>
+          ) : (
+            <div ref={buttonRef} />
+          )}
+        </div>
+        {error && <p className="text-sm text-danger">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [mounted, setMounted] = useState(false);
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
+  const [googleClientId, setGoogleClientId] = useState("");
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    fetch("/api/auth")
+      .then(async (res) => {
+        const data = await res.json();
+        if (!data.required || data.authenticated) {
+          setAuthState("authenticated");
+        } else {
+          setGoogleClientId(data.clientId || "");
+          setAuthState("login");
+        }
+      })
+      .catch(() => setAuthState("login"));
+  }, []);
+
+  const meetings = useMeetings();
+  const notes = useNotes();
+  const tasks = useTasks();
+  const t5tReports = useT5TReports();
+  const chatMessages = useChatMessages();
+  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
+
+  const [selection, setSelection] = useState<SidebarSelection>(null);
+  const [showChat, setShowChat] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
+  const isDragging = useRef(false);
+
+  const { query, setQuery, filteredMeetings, filteredNotes, filteredTasks } =
+    useSearch(meetings, notes, tasks);
+
+  const handleNewNote = useCallback(async () => {
+    const note = {
+      id: uuid(),
+      title: "Untitled",
+      content: "",
+      tags: [],
+      createdDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+      sourceMeetingID: null,
+    };
+    await db.notes.add(note);
+    triggerRefresh();
+    setSelection({ type: "note", id: note.id });
+  }, []);
+
+  const handleNewTask = useCallback(async () => {
+    const task = {
+      id: uuid(),
+      title: "",
+      description: "",
+      rawInput: "",
+      tags: [],
+      status: "pending" as const,
+      createdDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+      sourceMeetingID: null,
+      sourceNoteID: null,
+    };
+    await db.tasks.add(task);
+    triggerRefresh();
+    setSelection({ type: "task", id: task.id });
+  }, []);
+
+  const handleNewT5T = useCallback(async () => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 14);
+
+    const meetingsInRange = meetings.filter((m) => {
+      const d = new Date(m.date);
+      return d >= start && d <= end;
+    });
+
+    const report = {
+      id: uuid(),
+      title: "Top 5 Things – Inference Ops | NALA | SA",
+      createdDate: new Date().toISOString(),
+      periodStart: start.toISOString(),
+      periodEnd: end.toISOString(),
+      meetingIDs: meetingsInRange.map((m) => m.id),
+      noteIDs: [],
+      taskIDs: [],
+      sections: { insights: [], accountUpdates: [], futurePlans: [] },
+      status: "draft" as const,
+    };
+    await db.t5tReports.add(report);
+    triggerRefresh();
+    setSelection({ type: "t5t", id: report.id });
+  }, [meetings]);
+
+  const handleStopRecording = useCallback(async () => {
+    const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
+    const meeting = await stopRecording(title || undefined);
+    if (meeting) {
+      setSelection({ type: "meeting", id: meeting.id });
+    }
+  }, [stopRecording]);
+
+  const handleDeleteMeeting = useCallback(
+    async (id: string) => {
+      await db.meetings.delete(id);
+      triggerRefresh();
+      if (selection?.type === "meeting" && selection.id === id) setSelection(null);
+    },
+    [selection]
+  );
+
+  const handleDeleteNote = useCallback(
+    async (id: string) => {
+      await db.notes.delete(id);
+      triggerRefresh();
+      if (selection?.type === "note" && selection.id === id) setSelection(null);
+    },
+    [selection]
+  );
+
+  const handleDeleteTask = useCallback(
+    async (id: string) => {
+      await db.tasks.delete(id);
+      triggerRefresh();
+      if (selection?.type === "task" && selection.id === id) setSelection(null);
+    },
+    [selection]
+  );
+
+  const handleDeleteT5T = useCallback(
+    async (id: string) => {
+      await db.t5tReports.delete(id);
+      triggerRefresh();
+      if (selection?.type === "t5t" && selection.id === id) setSelection(null);
+    },
+    [selection]
+  );
+
+  const handleTogglePin = useCallback(
+    async (type: "meeting" | "note" | "task" | "t5t", id: string) => {
+      const table = { meeting: meetings, note: notes, task: tasks, t5t: t5tReports }[type];
+      const item = table.find((i) => i.id === id);
+      if (!item) return;
+      const newPinned = item.pinned ? 0 : 1;
+      const dbTable = { meeting: db.meetings, note: db.notes, task: db.tasks, t5t: db.t5tReports }[type];
+      await dbTable.update(id, { pinned: newPinned });
+      triggerRefresh();
+    },
+    [meetings, notes, tasks, t5tReports]
+  );
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "R") {
+        e.preventDefault();
+        if (recordingState === "recording") {
+          handleStopRecording();
+        } else if (recordingState === "idle") {
+          startRecording();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        setShowChat((prev) => !prev);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>("[data-search-input]")?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [recordingState, startRecording, handleStopRecording]);
+
+  if (!mounted || authState === "loading") return null;
+  if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
+
+  const renderDetail = () => {
+    if (!selection) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-3">
+          <FileText className="w-9 h-9 text-text-tertiary" />
+          <p className="text-base font-medium text-text-secondary">
+            Select a meeting, note, or report
+          </p>
+          <p className="text-xs text-text-tertiary">
+            Or start a recording to capture a new meeting
+          </p>
+        </div>
+      );
+    }
+
+    if (selection.type === "liveTranscript") {
+      return (
+        <LiveTranscript
+          duration={duration}
+          segments={liveTranscript}
+          interimText={interimText}
+          onStop={handleStopRecording}
+          capturingTabAudio={capturingTabAudio}
+        />
+      );
+    }
+
+    if (selection.type === "settings") {
+      return <Settings />;
+    }
+
+    if (selection.type === "meeting") {
+      const meeting = meetings.find((m) => m.id === selection.id);
+      if (meeting) return <MeetingDetail meeting={meeting} onNavigate={setSelection} />;
+    }
+
+    if (selection.type === "note") {
+      const note = notes.find((n) => n.id === selection.id);
+      if (note) return <NoteEditor note={note} onNavigate={setSelection} />;
+    }
+
+    if (selection.type === "task") {
+      const task = tasks.find((t) => t.id === selection.id);
+      if (task) return <TaskDetail task={task} onNavigate={setSelection} />;
+    }
+
+    if (selection.type === "t5t") {
+      const report = t5tReports.find((r) => r.id === selection.id);
+      if (report)
+        return (
+          <T5TComposer
+            report={report}
+            meetings={meetings}
+            notes={notes}
+            tasks={tasks}
+            onNavigate={setSelection}
+          />
+        );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="relative h-screen bg-content">
+      {/* Fixed header — always visible, never moves */}
+      <div
+        onClick={() => setSidebarCollapsed((v) => !v)}
+        className="fixed top-0 left-0 z-30 flex items-center gap-2.5 px-3.5 py-3 cursor-pointer hover:opacity-80 transition-opacity"
+        style={{ height: 52 }}
+      >
+        <BrainHeadIcon className="w-[22px] h-[22px] text-text-secondary" />
+        <div className="flex flex-col leading-tight">
+          <span className="text-lg font-semibold text-text-primary">NoteAI</span>
+          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+        </div>
+      </div>
+
+      <div className="flex h-screen">
+        {/* Sidebar — slides via negative margin, always in DOM */}
+        <div
+          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${isDragging.current ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
+          style={{ width: sidebarWidth, marginLeft: sidebarCollapsed ? -sidebarWidth : 0 }}
+        >
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-20 hover:bg-accent/40 active:bg-accent/60 transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              isDragging.current = true;
+              const startX = e.clientX;
+              const startWidth = sidebarWidth;
+              const onMove = (ev: MouseEvent) => {
+                const newWidth = Math.max(160, Math.min(400, startWidth + ev.clientX - startX));
+                setSidebarWidth(newWidth);
+              };
+              const onUp = () => {
+                isDragging.current = false;
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+              };
+              document.body.style.cursor = "col-resize";
+              document.body.style.userSelect = "none";
+              document.addEventListener("mousemove", onMove);
+              document.addEventListener("mouseup", onUp);
+            }}
+          />
+          <Sidebar
+            meetings={filteredMeetings}
+            notes={filteredNotes}
+            tasks={filteredTasks}
+            t5tReports={t5tReports}
+            selection={selection}
+            onSelect={setSelection}
+            searchQuery={query}
+            onSearchChange={setQuery}
+            recordingState={recordingState}
+            recordingDuration={duration}
+            onStartRecording={(micDeviceId, captureTab) => {
+              startRecording(micDeviceId, captureTab);
+              setSelection({ type: "liveTranscript" });
+            }}
+            onStopRecording={handleStopRecording}
+            onNewNote={handleNewNote}
+            onNewTask={handleNewTask}
+            onNewT5T={handleNewT5T}
+            onDeleteMeeting={handleDeleteMeeting}
+            onDeleteNote={handleDeleteNote}
+            onDeleteTask={handleDeleteTask}
+            onDeleteT5T={handleDeleteT5T}
+            onTogglePin={handleTogglePin}
+          />
+        </div>
+
+        {/* Main content */}
+        <div className="flex-1 relative bg-content overflow-hidden">
+          {renderDetail()}
+
+          {/* Floating chat button */}
+          {!showChat && (
+            <button
+              onClick={() => setShowChat(true)}
+              className="absolute bottom-5 right-5 flex items-center justify-center w-12 h-12 rounded-full bg-accent text-white shadow-lg shadow-black/30 hover:bg-accent/80 transition-colors z-10"
+            >
+              <BrainHeadIcon className="w-[22px] h-[22px]" />
+            </button>
+          )}
+        </div>
+
+        {/* Chat drawer */}
+        {showChat && (
+          <>
+            <div className="w-px bg-border" />
+            <div className="w-[340px] flex-shrink-0">
+              <ChatPanel
+                messages={chatMessages}
+                onClose={() => setShowChat(false)}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

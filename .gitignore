@@ -39,3 +39,11 @@ icon_previews/
 *.mlmodel
 *.mlmodelc
 *.mlpackage
+
+# Web app
+web/node_modules/
+web/.next/
+web/.open-next/
+web/.env*
+web/.wrangler/
+.next/

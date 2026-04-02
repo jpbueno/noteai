@@ -55,7 +55,7 @@ func savePNG(_ image: NSImage, size: Int, to path: String) {
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
 }
 
-let basePath = "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI/NoteAI/Assets.xcassets/AppIcon.appiconset"
+let basePath = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("NoteAI/Assets.xcassets/AppIcon.appiconset").path
 let sizes: [(Int, String)] = [
     (16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
     (32, "icon_32x32.png"), (64, "icon_32x32@2x.png"),

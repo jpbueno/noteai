@@ -1,0 +1,308 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-sidebar: #191919;
+  --color-content: #1f1f1f;
+  --color-hover: #252525;
+  --color-selected: #2b2b2b;
+  --color-border: #2e2e2e;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e0e0e0;
+  --color-text-tertiary: #b0b0b0;
+  --color-section-header: #cccccc;
+  --color-accent: #5b9bd5;
+  --color-danger: #e03e3e;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+body {
+  background: var(--color-content);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+::selection {
+  background: rgba(91, 155, 213, 0.3);
+}
+
+input,
+textarea,
+select {
+  background: var(--color-hover);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--color-accent);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+@keyframes pulse-recording {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.recording-pulse {
+  animation: pulse-recording 1.5s ease-in-out infinite;
+}
+
+/* ---------- Markdown body (used by MeetingDetail etc.) ---------- */
+
+.markdown-body {
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.markdown-body h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.markdown-body h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+
+.markdown-body h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.markdown-body p {
+  margin-bottom: 10px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-bottom: 10px;
+  padding-left: 24px;
+}
+
+.markdown-body li {
+  margin-bottom: 4px;
+}
+
+.markdown-body code {
+  background: var(--color-hover);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono), monospace;
+}
+
+.markdown-body pre {
+  background: var(--color-sidebar);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+  margin-bottom: 12px;
+}
+
+.markdown-body a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--color-border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--color-hover);
+  font-weight: 600;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 20px 0;
+}
+
+.markdown-body input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--color-accent);
+}
+
+/* ---------- Tiptap rich text editor ---------- */
+
+.tiptap-editor {
+  line-height: 1.7;
+  font-size: 15px;
+  color: var(--color-text-primary);
+  caret-color: var(--color-accent);
+}
+
+.tiptap-editor:focus {
+  outline: none;
+}
+
+.tiptap-editor > *:first-child {
+  margin-top: 0;
+}
+
+.tiptap-editor p {
+  margin-bottom: 8px;
+}
+
+.tiptap-editor h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  line-height: 1.3;
+}
+
+.tiptap-editor h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  line-height: 1.35;
+}
+
+.tiptap-editor ul {
+  list-style: disc;
+  margin-bottom: 10px;
+  padding-left: 24px;
+}
+
+.tiptap-editor ol {
+  list-style: decimal;
+  margin-bottom: 10px;
+  padding-left: 24px;
+}
+
+.tiptap-editor li {
+  margin-bottom: 4px;
+}
+
+.tiptap-editor li p {
+  margin-bottom: 2px;
+}
+
+.tiptap-editor code {
+  background: var(--color-hover);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono), monospace;
+  color: #e5c07b;
+}
+
+.tiptap-editor pre {
+  background: var(--color-sidebar);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.tiptap-editor pre code {
+  background: none;
+  padding: 0;
+  color: var(--color-text-primary);
+}
+
+.tiptap-editor blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+  margin: 12px 0;
+  font-style: italic;
+}
+
+.tiptap-editor a,
+.tiptap-editor .editor-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tiptap-editor hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 20px 0;
+}
+
+.tiptap-editor img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+/* Placeholder */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  color: var(--color-text-tertiary);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Selection highlight — skip images (handled by ResizableImage NodeView) */
+.tiptap-editor .ProseMirror-selectednode:not(.resizable-image-wrapper) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.tiptap-editor .resizable-image-wrapper.ProseMirror-selectednode {
+  outline: none;
+}

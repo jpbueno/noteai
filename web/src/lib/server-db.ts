@@ -54,8 +54,13 @@ async function query(sql: string, args: (string | number | null)[] = []): Promis
   }
 
   const columns = (result.cols || []).map((c: { name: string }) => c.name);
-  const rows = (result.rows || []).map((r: { value: string | null }[]) =>
-    r.map((cell) => cell.value)
+  const rows = (result.rows || []).map((r: { type: string; value: string | null }[]) =>
+    r.map((cell) => {
+      if (cell.value === null) return null;
+      if (cell.type === "integer") return parseInt(cell.value, 10);
+      if (cell.type === "float") return parseFloat(cell.value);
+      return cell.value;
+    })
   );
 
   return { columns, rows };
@@ -67,8 +72,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', date TEXT NOT NULL, duration REAL NOT NULL DEFAULT 0, transcript TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '{}')`,
   `CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Untitled', content TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT)`,
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', rawInput TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT, sourceNoteID TEXT)`,
-  `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft')`,
+  `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', dailyLogIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft')`,
+  `CREATE TABLE IF NOT EXISTS dailyLogs (id TEXT PRIMARY KEY, date TEXT NOT NULL, sections TEXT NOT NULL DEFAULT '[]', linkedMeetingIDs TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS chatMessages (id TEXT PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', timestamp TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
 ];
 
@@ -77,6 +84,10 @@ const MIGRATIONS = [
   "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE t5tReports ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE todos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE todos ADD COLUMN dueDate TEXT",
+  "ALTER TABLE dailyLogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE t5tReports ADD COLUMN dailyLogIDs TEXT NOT NULL DEFAULT '[]'",
 ];
 
 let _initialized = false;
@@ -98,7 +109,8 @@ const JSON_COLS: Record<string, string[]> = {
   meetings: ["transcript", "summary"],
   notes: ["tags"],
   tasks: ["tags"],
-  t5tReports: ["meetingIDs", "noteIDs", "taskIDs", "sections"],
+  t5tReports: ["meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections"],
+  dailyLogs: ["sections", "linkedMeetingIDs"],
 };
 
 function serializeRow(table: string, row: Record<string, unknown>): Record<string, unknown> {
@@ -132,8 +144,10 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   meetings: ["id", "title", "date", "duration", "transcript", "summary", "pinned"],
   notes: ["id", "title", "content", "tags", "createdDate", "modifiedDate", "sourceMeetingID", "pinned"],
   tasks: ["id", "title", "description", "rawInput", "tags", "status", "createdDate", "modifiedDate", "sourceMeetingID", "sourceNoteID", "pinned"],
-  t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "sections", "status", "pinned"],
+  t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections", "status", "pinned"],
+  dailyLogs: ["id", "date", "sections", "linkedMeetingIDs", "createdDate", "modifiedDate", "pinned"],
   chatMessages: ["id", "role", "content", "timestamp"],
+  todos: ["id", "title", "description", "completed", "dueDate", "createdDate", "modifiedDate", "pinned"],
   settings: ["key", "value"],
 };
 
@@ -151,7 +165,7 @@ function stripInvalidColumns(table: string, data: Record<string, unknown>): Reco
 
 // CRUD
 
-const VALID_TABLES = ["meetings", "notes", "tasks", "t5tReports", "chatMessages", "settings"];
+const VALID_TABLES = ["meetings", "notes", "tasks", "t5tReports", "dailyLogs", "chatMessages", "todos", "settings"];
 
 export async function getAll(table: string): Promise<Record<string, unknown>[]> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
@@ -159,7 +173,8 @@ export async function getAll(table: string): Promise<Record<string, unknown>[]> 
   let orderCol = "id";
   let pinPrefix = "";
   if (table === "meetings") { orderCol = "date"; pinPrefix = "pinned DESC, "; }
-  else if (["notes", "tasks", "t5tReports"].includes(table)) { orderCol = "createdDate"; pinPrefix = "pinned DESC, "; }
+  else if (table === "dailyLogs") { orderCol = "date"; pinPrefix = "pinned DESC, "; }
+  else if (["notes", "tasks", "t5tReports", "todos"].includes(table)) { orderCol = "createdDate"; pinPrefix = "pinned DESC, "; }
   else if (table === "chatMessages") orderCol = "timestamp";
   const result = await query(`SELECT * FROM ${table} ORDER BY ${pinPrefix}${orderCol} DESC`);
   return result.rows.map((r) => deserializeRow(table, result.columns, r));

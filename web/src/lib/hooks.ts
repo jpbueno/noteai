@@ -5,8 +5,9 @@ import { db } from "./db";
 import type {
   Meeting,
   Note,
-  TaskItem,
+  TodoItem,
   T5TReport,
+  DailyLog,
   ChatMessage,
   SidebarSelection,
   MeetingSummary,
@@ -55,12 +56,16 @@ export function useNotes() {
   return useRefreshable<Note>(() => db.notes.toArray() as Promise<Note[]>);
 }
 
-export function useTasks() {
-  return useRefreshable<TaskItem>(() => db.tasks.toArray() as Promise<TaskItem[]>);
+export function useTodos() {
+  return useRefreshable<TodoItem>(() => db.todos.toArray() as Promise<TodoItem[]>);
 }
 
 export function useT5TReports() {
   return useRefreshable<T5TReport>(() => db.t5tReports.toArray() as Promise<T5TReport[]>);
+}
+
+export function useDailyLogs() {
+  return useRefreshable<DailyLog>(() => db.dailyLogs.toArray() as Promise<DailyLog[]>);
 }
 
 export function useChatMessages() {
@@ -75,7 +80,7 @@ export function useSelection() {
 export function useSearch(
   meetings: Meeting[],
   notes: Note[],
-  tasks: TaskItem[]
+  todos: TodoItem[]
 ) {
   const [query, setQuery] = useState("");
   const q = query.toLowerCase().trim();
@@ -97,15 +102,15 @@ export function useSearch(
       )
     : notes;
 
-  const filteredTasks = q
-    ? tasks.filter(
+  const filteredTodos = q
+    ? todos.filter(
         (t) =>
           t.title.toLowerCase().includes(q) ||
           t.description.toLowerCase().includes(q)
       )
-    : tasks;
+    : todos;
 
-  return { query, setQuery, filteredMeetings, filteredNotes, filteredTasks };
+  return { query, setQuery, filteredMeetings, filteredNotes, filteredTodos };
 }
 
 export function useRecording() {
@@ -159,7 +164,14 @@ export function useRecording() {
       }, 1000);
     } catch (err) {
       console.error("Failed to start recording:", err);
-      alert("Could not access microphone. Please grant permission and try again.");
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Permission denied") || msg.includes("NotAllowed")) {
+        alert("Microphone permission denied. Please allow microphone access and try again.");
+      } else if (msg.includes("NotFound") || msg.includes("Requested device not found")) {
+        alert("No microphone found. Please connect a microphone and try again.");
+      } else {
+        alert(`Recording failed: ${msg}`);
+      }
     }
   }, []);
 

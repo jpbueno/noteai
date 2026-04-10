@@ -4,25 +4,25 @@ import { useState, useEffect } from "react";
 import {
   Search,
   FileText,
-  CheckCircle,
-  Circle,
+  CheckSquare,
   ListChecks,
   Mic,
   Square,
   Settings,
   StickyNote,
   AudioWaveform,
+  BookOpen,
   Plus,
   X,
   ChevronDown,
-  Pin,
 } from "lucide-react";
 
 import type {
   Meeting,
   Note,
-  TaskItem,
+  TodoItem,
   T5TReport,
+  DailyLog,
   SidebarSelection,
 } from "@/lib/types";
 import { type RecordingState, getAudioInputDevices } from "@/lib/audio";
@@ -31,8 +31,9 @@ import { formatDuration, formatDate } from "@/lib/hooks";
 interface SidebarProps {
   meetings: Meeting[];
   notes: Note[];
-  tasks: TaskItem[];
+  todos: TodoItem[];
   t5tReports: T5TReport[];
+  dailyLogs: DailyLog[];
   selection: SidebarSelection;
   onSelect: (sel: SidebarSelection) => void;
   searchQuery: string;
@@ -42,20 +43,22 @@ interface SidebarProps {
   onStartRecording: (micDeviceId?: string, captureTab?: boolean) => void;
   onStopRecording: () => void;
   onNewNote: () => void;
-  onNewTask: () => void;
+  onNewTodo: () => void;
   onNewT5T: () => void;
+  onNewDailyLog: () => void;
   onDeleteMeeting: (id: string) => void;
   onDeleteNote: (id: string) => void;
-  onDeleteTask: (id: string) => void;
+  onDeleteTodo: (id: string) => void;
   onDeleteT5T: (id: string) => void;
-  onTogglePin: (type: "meeting" | "note" | "task" | "t5t", id: string) => void;
+  onDeleteDailyLog: (id: string) => void;
 }
 
 export default function Sidebar({
   meetings,
   notes,
-  tasks,
+  todos,
   t5tReports,
+  dailyLogs,
   selection,
   onSelect,
   searchQuery,
@@ -65,13 +68,14 @@ export default function Sidebar({
   onStartRecording,
   onStopRecording,
   onNewNote,
-  onNewTask,
+  onNewTodo,
   onNewT5T,
+  onNewDailyLog,
   onDeleteMeeting,
   onDeleteNote,
-  onDeleteTask,
+  onDeleteTodo,
   onDeleteT5T,
-  onTogglePin,
+  onDeleteDailyLog,
 }: SidebarProps) {
   const [mics, setMics] = useState<{ deviceId: string; label: string }[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>("");
@@ -163,6 +167,21 @@ export default function Sidebar({
 
       {/* Scrollable lists */}
       <div className="flex-1 overflow-y-auto pt-2 pb-2">
+        {/* Daily Logs */}
+        <SidebarSection title="Daily Logs" icon={BookOpen} action={{ label: "Today", onClick: onNewDailyLog }}>
+          {dailyLogs.map((d) => (
+            <SidebarItem
+              key={d.id}
+              icon={<BookOpen className={`w-[13px] h-[13px] text-text-tertiary`} />}
+              label={`${d.date} — ${d.sections.filter((s) => s.content.trim()).length} sections`}
+              selected={isSelected("dailyLog", d.id)}
+              onClick={() => onSelect({ type: "dailyLog", id: d.id })}
+              onDelete={() => onDeleteDailyLog(d.id)}
+            />
+          ))}
+          {dailyLogs.length === 0 && <EmptyHint text="No daily logs yet" />}
+        </SidebarSection>
+
         {/* T5T Reports */}
         <SidebarSection title="T5T Reports" icon={ListChecks} action={{ label: "New", onClick: onNewT5T }}>
           {t5tReports.map((r) => (
@@ -173,8 +192,6 @@ export default function Sidebar({
               selected={isSelected("t5t", r.id)}
               onClick={() => onSelect({ type: "t5t", id: r.id })}
               onDelete={() => onDeleteT5T(r.id)}
-              pinned={!!r.pinned}
-              onTogglePin={() => onTogglePin("t5t", r.id)}
             />
           ))}
           {t5tReports.length === 0 && <EmptyHint text="No T5T reports yet" />}
@@ -190,35 +207,36 @@ export default function Sidebar({
               selected={isSelected("note", n.id)}
               onClick={() => onSelect({ type: "note", id: n.id })}
               onDelete={() => onDeleteNote(n.id)}
-              pinned={!!n.pinned}
-              onTogglePin={() => onTogglePin("note", n.id)}
             />
           ))}
           {notes.length === 0 && !searchQuery && <EmptyHint text="No notes yet" />}
         </SidebarSection>
 
-        {/* Tasks */}
-        <SidebarSection title="Tasks" icon={CheckCircle} action={{ label: "New", onClick: onNewTask }}>
-          {tasks.map((t) => (
-            <SidebarItem
-              key={t.id}
-              icon={
-                t.status === "completed" ? (
-                  <CheckCircle className="w-[13px] h-[13px] text-green-500" />
-                ) : (
-                  <Circle className="w-[13px] h-[13px] text-text-tertiary" />
-                )
-              }
-              label={t.title ? `${formatDate(t.createdDate)} ${t.title}` : "New Task"}
-              selected={isSelected("task", t.id)}
-              onClick={() => onSelect({ type: "task", id: t.id })}
-              onDelete={() => onDeleteTask(t.id)}
-              strikethrough={t.status === "completed"}
-              pinned={!!t.pinned}
-              onTogglePin={() => onTogglePin("task", t.id)}
-            />
-          ))}
-          {tasks.length === 0 && !searchQuery && <EmptyHint text="No tasks yet" />}
+        {/* Todos */}
+        <SidebarSection title="Todos" icon={CheckSquare} action={{ label: "New", onClick: onNewTodo }}>
+          {todos.map((t) => {
+            const overdue = !t.completed && t.dueDate && new Date(t.dueDate) < new Date(new Date().toDateString());
+            return (
+              <SidebarItem
+                key={t.id}
+                icon={
+                  t.completed ? (
+                    <CheckSquare className="w-[13px] h-[13px] text-green-500" />
+                  ) : overdue ? (
+                    <Square className="w-[13px] h-[13px] text-red-400" />
+                  ) : (
+                    <Square className="w-[13px] h-[13px] text-text-tertiary" />
+                  )
+                }
+                label={t.title ? `${formatDate(t.createdDate)} ${t.title}` : "New Todo"}
+                selected={isSelected("todo", t.id)}
+                onClick={() => onSelect({ type: "todo", id: t.id })}
+                onDelete={() => onDeleteTodo(t.id)}
+                strikethrough={!!t.completed}
+              />
+            );
+          })}
+          {todos.length === 0 && !searchQuery && <EmptyHint text="No todos yet" />}
         </SidebarSection>
 
         {/* Meetings */}
@@ -231,8 +249,6 @@ export default function Sidebar({
               selected={isSelected("meeting", m.id)}
               onClick={() => onSelect({ type: "meeting", id: m.id })}
               onDelete={() => onDeleteMeeting(m.id)}
-              pinned={!!m.pinned}
-              onTogglePin={() => onTogglePin("meeting", m.id)}
             />
           ))}
           {meetings.length === 0 && (
@@ -297,8 +313,6 @@ function SidebarItem({
   onClick,
   onDelete,
   strikethrough,
-  pinned,
-  onTogglePin,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -306,8 +320,6 @@ function SidebarItem({
   onClick: () => void;
   onDelete: () => void;
   strikethrough?: boolean;
-  pinned?: boolean;
-  onTogglePin?: () => void;
 }) {
   return (
     <div className="group px-1 relative">
@@ -327,18 +339,8 @@ function SidebarItem({
         >
           {label}
         </span>
-        {pinned && <Pin className="w-3 h-3 text-accent flex-shrink-0 rotate-45" />}
       </button>
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onTogglePin && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
-            className={`${pinned ? "text-accent" : "text-text-tertiary hover:text-accent"}`}
-            title={pinned ? "Unpin" : "Pin"}
-          >
-            <Pin className="w-3 h-3 rotate-45" />
-          </button>
-        )}
         <button
           onClick={(e) => {
             e.stopPropagation();

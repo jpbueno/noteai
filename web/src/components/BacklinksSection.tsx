@@ -29,7 +29,6 @@ function toSelection(item: BacklinkItem): SidebarSelection {
   const map: Record<string, SidebarSelection> = {
     meeting: { type: "meeting", id: item.id },
     note: { type: "note", id: item.id },
-    task: { type: "task", id: item.id },
     t5t: { type: "t5t", id: item.id },
   };
   return map[item.type] || null;

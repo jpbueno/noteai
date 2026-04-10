@@ -6,18 +6,21 @@ import BrainHeadIcon from "@/components/BrainHeadIcon";
 import Sidebar from "@/components/Sidebar";
 import MeetingDetail from "@/components/MeetingDetail";
 import NoteEditor from "@/components/NoteEditor";
-import TaskDetail from "@/components/TaskDetail";
+import TodoDetail from "@/components/TodoDetail";
 import T5TComposer from "@/components/T5TComposer";
+import DailyLogEditor from "@/components/DailyLogEditor";
 import ChatPanel from "@/components/ChatPanel";
 import Settings from "@/components/Settings";
 import LiveTranscript from "@/components/LiveTranscript";
-import { db } from "@/lib/db";
-import type { SidebarSelection } from "@/lib/types";
+import { db, getT5TConfig } from "@/lib/db";
+import type { SidebarSelection, T5TConfig, TaskItem } from "@/lib/types";
+import { DEFAULT_T5T_CONFIG } from "@/lib/types";
 import {
   useMeetings,
   useNotes,
-  useTasks,
+  useTodos,
   useT5TReports,
+  useDailyLogs,
   useChatMessages,
   useSearch,
   useRecording,
@@ -85,7 +88,7 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
           <BrainHeadIcon className="w-8 h-8 text-text-secondary" />
           <div className="flex flex-col leading-tight">
             <span className="text-2xl font-semibold text-text-primary">NoteAI</span>
-            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
           </div>
         </div>
         <p className="text-sm text-text-tertiary">Sign in to access your meetings and notes</p>
@@ -125,8 +128,9 @@ export default function Home() {
 
   const meetings = useMeetings();
   const notes = useNotes();
-  const tasks = useTasks();
+  const todos = useTodos();
   const t5tReports = useT5TReports();
+  const dailyLogs = useDailyLogs();
   const chatMessages = useChatMessages();
   const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
 
@@ -136,8 +140,61 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(220);
   const isDragging = useRef(false);
 
-  const { query, setQuery, filteredMeetings, filteredNotes, filteredTasks } =
-    useSearch(meetings, notes, tasks);
+  const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
+    useSearch(meetings, notes, todos);
+
+  // One-time migration: convert any remaining tasks into daily logs, then delete them
+  const migrationDone = useRef(false);
+  useEffect(() => {
+    if (migrationDone.current) return;
+    migrationDone.current = true;
+    (async () => {
+      const tasks: TaskItem[] = await db.tasks.toArray() as TaskItem[];
+      if (tasks.length === 0) return;
+
+      let config: T5TConfig;
+      try { config = await getT5TConfig(); } catch { config = DEFAULT_T5T_CONFIG; }
+
+      for (const task of tasks) {
+        const date = task.createdDate.slice(0, 10);
+        const existingLogs: { id: string; date: string; sections: { name: string; content: string }[] }[] =
+          await db.dailyLogs.toArray() as never[];
+        const existing = existingLogs.find((d) => d.date === date);
+
+        const sectionName = task.status === "completed" ? "Project Work" : "In-Progress & Carry-Over";
+        const line = `- [Task] ${task.title}${task.description ? ": " + task.description : ""} [${task.status}]`;
+
+        if (existing) {
+          const newSections = existing.sections.map((s) => {
+            if (s.name === sectionName) {
+              return { ...s, content: s.content ? s.content + "\n" + line : line };
+            }
+            return s;
+          });
+          // If the section didn't exist, add it
+          if (!newSections.find((s) => s.name === sectionName)) {
+            newSections.push({ name: sectionName, content: line });
+          }
+          await db.dailyLogs.update(existing.id, { sections: newSections, modifiedDate: new Date().toISOString() });
+        } else {
+          const sections = config.dailyTemplate.map((t) => ({
+            name: t.name,
+            content: t.name === sectionName ? line : "",
+          }));
+          await db.dailyLogs.add({
+            id: uuid(),
+            date,
+            sections,
+            linkedMeetingIDs: [],
+            createdDate: new Date().toISOString(),
+            modifiedDate: new Date().toISOString(),
+          });
+        }
+        await db.tasks.delete(task.id);
+      }
+      triggerRefresh();
+    })();
+  }, []);
 
   const handleNewNote = useCallback(async () => {
     const note = {
@@ -154,29 +211,86 @@ export default function Home() {
     setSelection({ type: "note", id: note.id });
   }, []);
 
-  const handleNewTask = useCallback(async () => {
-    const task = {
+  const handleNewTodo = useCallback(async () => {
+    const todo = {
       id: uuid(),
       title: "",
       description: "",
-      rawInput: "",
-      tags: [],
-      status: "pending" as const,
+      completed: 0,
+      dueDate: null,
       createdDate: new Date().toISOString(),
       modifiedDate: new Date().toISOString(),
-      sourceMeetingID: null,
-      sourceNoteID: null,
     };
-    await db.tasks.add(task);
+    await db.todos.add(todo);
     triggerRefresh();
-    setSelection({ type: "task", id: task.id });
+    setSelection({ type: "todo", id: todo.id });
   }, []);
 
+  const handleNewDailyLog = useCallback(async () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Check if log for today already exists
+    const existing = dailyLogs.find((d) => d.date === today);
+    if (existing) {
+      setSelection({ type: "dailyLog", id: existing.id });
+      return;
+    }
+
+    // Load config for daily template
+    let config: T5TConfig;
+    try {
+      config = await getT5TConfig();
+    } catch {
+      config = DEFAULT_T5T_CONFIG;
+    }
+
+    // Create sections from template
+    const sections = config.dailyTemplate.map((t) => ({
+      name: t.name,
+      content: "",
+    }));
+
+    // Auto-link today's meetings
+    const todayMeetings = meetings.filter(
+      (m) => m.date.slice(0, 10) === today,
+    );
+
+    const log = {
+      id: uuid(),
+      date: today,
+      sections,
+      linkedMeetingIDs: todayMeetings.map((m) => m.id),
+      createdDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+    };
+    await db.dailyLogs.add(log);
+    triggerRefresh();
+    setSelection({ type: "dailyLog", id: log.id });
+  }, [dailyLogs, meetings]);
+
   const handleNewT5T = useCallback(async () => {
+    // Default to last 7 days (Mon-Fri work week)
     const end = new Date();
     const start = new Date();
-    start.setDate(start.getDate() - 14);
+    start.setDate(start.getDate() - 7);
 
+    // Load config for title
+    let config: T5TConfig;
+    try {
+      config = await getT5TConfig();
+    } catch {
+      config = DEFAULT_T5T_CONFIG;
+    }
+
+    const title = config.identity.team
+      ? `Weekly Report – ${config.identity.team}`
+      : "Weekly Report";
+
+    // Auto-select daily logs and meetings in range
+    const logsInRange = dailyLogs.filter((d) => {
+      const date = new Date(d.date + "T12:00:00");
+      return date >= start && date <= end;
+    });
     const meetingsInRange = meetings.filter((m) => {
       const d = new Date(m.date);
       return d >= start && d <= end;
@@ -184,20 +298,21 @@ export default function Home() {
 
     const report = {
       id: uuid(),
-      title: "Top 5 Things – Inference Ops | NALA | SA",
+      title,
       createdDate: new Date().toISOString(),
       periodStart: start.toISOString(),
       periodEnd: end.toISOString(),
+      dailyLogIDs: logsInRange.map((d) => d.id),
       meetingIDs: meetingsInRange.map((m) => m.id),
       noteIDs: [],
       taskIDs: [],
-      sections: { insights: [], accountUpdates: [], futurePlans: [] },
+      sections: [],
       status: "draft" as const,
     };
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
-  }, [meetings]);
+  }, [meetings, dailyLogs]);
 
   const handleStopRecording = useCallback(async () => {
     const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
@@ -225,11 +340,11 @@ export default function Home() {
     [selection]
   );
 
-  const handleDeleteTask = useCallback(
+  const handleDeleteTodo = useCallback(
     async (id: string) => {
-      await db.tasks.delete(id);
+      await db.todos.delete(id);
       triggerRefresh();
-      if (selection?.type === "task" && selection.id === id) setSelection(null);
+      if (selection?.type === "todo" && selection.id === id) setSelection(null);
     },
     [selection]
   );
@@ -243,18 +358,16 @@ export default function Home() {
     [selection]
   );
 
-  const handleTogglePin = useCallback(
-    async (type: "meeting" | "note" | "task" | "t5t", id: string) => {
-      const table = { meeting: meetings, note: notes, task: tasks, t5t: t5tReports }[type];
-      const item = table.find((i) => i.id === id);
-      if (!item) return;
-      const newPinned = item.pinned ? 0 : 1;
-      const dbTable = { meeting: db.meetings, note: db.notes, task: db.tasks, t5t: db.t5tReports }[type];
-      await dbTable.update(id, { pinned: newPinned });
+  const handleDeleteDailyLog = useCallback(
+    async (id: string) => {
+      await db.dailyLogs.delete(id);
       triggerRefresh();
+      if (selection?.type === "dailyLog" && selection.id === id) setSelection(null);
     },
-    [meetings, notes, tasks, t5tReports]
+    [selection]
   );
+
+
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -324,9 +437,14 @@ export default function Home() {
       if (note) return <NoteEditor note={note} onNavigate={setSelection} />;
     }
 
-    if (selection.type === "task") {
-      const task = tasks.find((t) => t.id === selection.id);
-      if (task) return <TaskDetail task={task} onNavigate={setSelection} />;
+    if (selection.type === "todo") {
+      const todo = todos.find((t) => t.id === selection.id);
+      if (todo) return <TodoDetail todo={todo} />;
+    }
+
+    if (selection.type === "dailyLog") {
+      const log = dailyLogs.find((d) => d.id === selection.id);
+      if (log) return <DailyLogEditor log={log} />;
     }
 
     if (selection.type === "t5t") {
@@ -337,7 +455,7 @@ export default function Home() {
             report={report}
             meetings={meetings}
             notes={notes}
-            tasks={tasks}
+            dailyLogs={dailyLogs}
             onNavigate={setSelection}
           />
         );
@@ -357,7 +475,7 @@ export default function Home() {
         <BrainHeadIcon className="w-[22px] h-[22px] text-text-secondary" />
         <div className="flex flex-col leading-tight">
           <span className="text-lg font-semibold text-text-primary">NoteAI</span>
-          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
         </div>
       </div>
 
@@ -395,8 +513,9 @@ export default function Home() {
           <Sidebar
             meetings={filteredMeetings}
             notes={filteredNotes}
-            tasks={filteredTasks}
+            todos={filteredTodos}
             t5tReports={t5tReports}
+            dailyLogs={dailyLogs}
             selection={selection}
             onSelect={setSelection}
             searchQuery={query}
@@ -409,13 +528,14 @@ export default function Home() {
             }}
             onStopRecording={handleStopRecording}
             onNewNote={handleNewNote}
-            onNewTask={handleNewTask}
+            onNewTodo={handleNewTodo}
             onNewT5T={handleNewT5T}
+            onNewDailyLog={handleNewDailyLog}
             onDeleteMeeting={handleDeleteMeeting}
             onDeleteNote={handleDeleteNote}
-            onDeleteTask={handleDeleteTask}
+            onDeleteTodo={handleDeleteTodo}
             onDeleteT5T={handleDeleteT5T}
-            onTogglePin={handleTogglePin}
+            onDeleteDailyLog={handleDeleteDailyLog}
           />
         </div>
 

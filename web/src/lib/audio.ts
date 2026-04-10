@@ -135,10 +135,20 @@ export class AudioRecorder {
     // Worker-based timers that survive background tab throttling
     this.workerTimer = new WorkerTimer();
 
-    // 1. Get mic permission first so enumerateDevices() returns labels
-    const micStream = await navigator.mediaDevices.getUserMedia({
-      audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-    });
+    // 1. Get mic permission first so enumerateDevices() returns labels.
+    //    If the requested device is gone (stale ID), fall back to default mic.
+    let micStream: MediaStream;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+      });
+    } catch (err) {
+      if (micDeviceId && err instanceof DOMException && err.name === "NotFoundError") {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } else {
+        throw err;
+      }
+    }
     this.micStream = micStream;
 
     // 2. Try BlackHole for system audio loopback (captures ALL speaker output)
@@ -239,50 +249,62 @@ export class AudioRecorder {
   // --- Whisper polling ---
 
   private startWhisperPolling(): void {
-    // First poll after 8s, then every 12s
+    // Only poll Whisper when we have system/tab audio (both speakers).
+    // With mic-only, SpeechRecognition is sufficient and Whisper would
+    // just produce duplicates.
+    if (!this.hasTabAudio) return;
+
+    // First poll after 10s, then every 15s
     setTimeout(() => {
       if (!this.stopped) this.sendToWhisper();
-    }, 8000);
+    }, 10000);
     if (this.workerTimer) {
       this.whisperId = this.workerTimer.setInterval(() => {
         if (!this.stopped) this.sendToWhisper();
-      }, 12000);
+      }, 15000);
     }
   }
 
   private async sendToWhisper(): Promise<void> {
     if (this.whisperBusy || this.chunks.length === 0) return;
-    if (this.chunks.length === this.lastWhisperChunkCount) return;
+    if (this.chunks.length <= this.lastWhisperChunkCount) return;
 
     this.whisperBusy = true;
     this.lastWhisperChunkCount = this.chunks.length;
-    // Send the full accumulated blob — partial chunks lack valid webm headers
+
+    // Always send the full recording from chunk 0 — webm container headers live
+    // in the first chunk and later chunks are not valid standalone files.
+    // The deduplication logic below strips already-transcribed text.
     const blob = new Blob(this.chunks, { type: "audio/webm" });
 
-    // Use the last 100 chars of previous transcription as prompt context
-    // This helps Whisper maintain coherence and reduces hallucinations
-    const promptContext = this.lastWhisperText.slice(-100) || undefined;
+    // Use last transcription as prompt context to maintain coherence
+    const promptContext = this.lastWhisperText.slice(-150) || undefined;
 
     try {
-      const fullText = await whisperTranscribe(blob, promptContext);
-      if (fullText && this.onTranscript) {
-        // Extract only the NEW text that wasn't in the previous transcription
-        let newText = fullText;
+      const text = await whisperTranscribe(blob, promptContext);
+      if (text && this.onTranscript) {
+        // Deduplicate: strip any leading text that matches the tail of last result
+        let cleaned = text.trim();
         if (this.lastWhisperText) {
-          // Find where the old text ends in the new text
-          // Use the last 50 chars of old text as anchor to find overlap
-          const anchor = this.lastWhisperText.slice(-50).trim();
-          if (anchor.length > 10) {
-            const overlapIdx = fullText.indexOf(anchor);
-            if (overlapIdx >= 0) {
-              newText = fullText.slice(overlapIdx + anchor.length).trim();
+          const lastTail = this.lastWhisperText.slice(-80).trim().toLowerCase();
+          const candidateHead = cleaned.slice(0, 120).toLowerCase();
+          // If the new text starts with the tail of the old text, skip the overlap
+          if (lastTail.length > 20) {
+            // Try progressively shorter suffixes of the old tail
+            for (let len = lastTail.length; len >= 20; len -= 5) {
+              const suffix = lastTail.slice(-len);
+              const idx = candidateHead.indexOf(suffix);
+              if (idx >= 0) {
+                cleaned = cleaned.slice(idx + suffix.length).trim();
+                break;
+              }
             }
           }
         }
-        this.lastWhisperText = fullText;
+        this.lastWhisperText = text.trim();
 
-        if (newText) {
-          this.onTranscript(newText, true);
+        if (cleaned) {
+          this.onTranscript(cleaned, true);
         }
       }
     } catch (err) {
@@ -329,7 +351,17 @@ export class AudioRecorder {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0].transcript.trim();
-        if (text && this.onTranscript) {
+        if (!text || !this.onTranscript) continue;
+
+        if (this.hasTabAudio) {
+          // When we have system audio, Whisper handles final segments (it hears
+          // both speakers). SpeechRecognition only provides interim previews.
+          if (!result.isFinal) {
+            this.onTranscript(text, false);
+          }
+          // Drop SpeechRecognition finals — Whisper will produce the authoritative version.
+        } else {
+          // Mic-only mode: SpeechRecognition is the only transcription source.
           this.onTranscript(text, result.isFinal);
         }
       }

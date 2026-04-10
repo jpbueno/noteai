@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAll, getById, upsert, remove, clearTable, bulkUpsert } from "@/lib/server-db";
 
-const VALID = ["meetings", "notes", "tasks", "t5tReports", "chatMessages", "settings"];
+const VALID = ["meetings", "notes", "tasks", "t5tReports", "dailyLogs", "chatMessages", "todos", "settings"];
 
 type Params = { params: Promise<{ table: string }> };
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FileText } from "lucide-react";
+import HomeDashboard from "@/components/HomeDashboard";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import Sidebar from "@/components/Sidebar";
 import MeetingDetail from "@/components/MeetingDetail";
@@ -399,15 +400,11 @@ export default function Home() {
   const renderDetail = () => {
     if (!selection) {
       return (
-        <div className="flex flex-col items-center justify-center h-full gap-3">
-          <FileText className="w-9 h-9 text-text-tertiary" />
-          <p className="text-base font-medium text-text-secondary">
-            Select a meeting, note, or report
-          </p>
-          <p className="text-xs text-text-tertiary">
-            Or start a recording to capture a new meeting
-          </p>
-        </div>
+        <HomeDashboard
+          todos={todos}
+          onSelect={setSelection}
+          onNewTodo={handleNewTodo}
+        />
       );
     }
 

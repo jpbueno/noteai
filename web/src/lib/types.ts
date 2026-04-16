@@ -1,3 +1,12 @@
+export type CoachInsightType = "key_insight" | "talking_point" | "technical_answer" | "action_item" | "follow_up";
+
+export interface CoachInsight {
+  id: string;
+  timestamp: string;
+  type: CoachInsightType;
+  content: string;
+}
+
 export interface TranscriptSegment {
   id: number;
   text: string;

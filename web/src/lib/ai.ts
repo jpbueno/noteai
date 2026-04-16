@@ -1,4 +1,4 @@
-import type { LLMProvider, MeetingTemplate, MeetingSummary } from "./types";
+import type { LLMProvider, MeetingTemplate, MeetingSummary, CoachInsight, CoachInsightType } from "./types";
 import { getSetting } from "./db";
 
 async function proxyChat(params: {
@@ -134,4 +134,62 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   }
 
   return data.text || "";
+}
+
+const COACH_SYSTEM_PROMPT = `You are a real-time AI meeting coach for an NVIDIA engineer. Analyze the live meeting transcript and provide NEW, actionable insights. Your role is to help the user contribute effectively during the call.
+
+Categories (use exactly these type values):
+- key_insight: Important observations, patterns, or context about what's being discussed
+- talking_point: Suggested things the user could say or ask right now
+- technical_answer: When a technical question is raised, provide a concise answer
+- action_item: When someone commits to something or an action item is mentioned
+- follow_up: Things that should be followed up on after the meeting
+
+Rules:
+- Be concise — each insight should be 1-3 sentences max
+- Focus on what's ACTIONABLE right now during the meeting
+- Do NOT repeat insights already provided
+- Prioritize quality over quantity — 1-4 new insights per analysis
+- If there's nothing new or useful to add, return an empty array
+
+Return ONLY a JSON array (no markdown fences, no extra text):
+[{"type": "key_insight", "content": "..."}, ...]`;
+
+export async function analyzeTranscriptLive(
+  fullTranscript: string,
+  previousInsights: string[],
+): Promise<CoachInsight[]> {
+  const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
+  const model = (await getSetting("llm_model")) || "anthropic/claude-sonnet-4";
+
+  const previousSummary = previousInsights.length > 0
+    ? `\n\nPreviously identified insights (do NOT repeat):\n${previousInsights.map((p, i) => `${i + 1}. ${p}`).join("\n")}`
+    : "";
+
+  const content = await chatCompletion({
+    provider,
+    model,
+    messages: [
+      { role: "system", content: COACH_SYSTEM_PROMPT },
+      { role: "user", content: `Live transcript so far:\n\n${fullTranscript}${previousSummary}\n\nProvide new insights only.` },
+    ],
+    temperature: 0.3,
+    maxTokens: 1000,
+  });
+
+  try {
+    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item: { type?: string; content?: string }) => item.type && item.content)
+      .map((item: { type: string; content: string }) => ({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: item.type as CoachInsightType,
+        content: item.content,
+      }));
+  } catch {
+    return [];
+  }
 }

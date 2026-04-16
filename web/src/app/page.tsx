@@ -26,6 +26,7 @@ import {
   useRecording,
   triggerRefresh,
 } from "@/lib/hooks";
+import { useAICoach } from "@/lib/useAICoach";
 import { v4 as uuid } from "uuid";
 
 declare global {
@@ -132,6 +133,7 @@ export default function Home() {
   const t5tReports = useT5TReports();
   const chatMessages = useChatMessages();
   const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
+  const { insights: coachInsights, isAnalyzing: coachAnalyzing, enabled: coachEnabled, setEnabled: setCoachEnabled } = useAICoach(liveTranscript, recordingState === "recording");
 
   const [selection, setSelection] = useState<SidebarSelection>(null);
   const [showChat, setShowChat] = useState(false);
@@ -320,6 +322,10 @@ export default function Home() {
           interimText={interimText}
           onStop={handleStopRecording}
           capturingTabAudio={capturingTabAudio}
+          coachInsights={coachInsights}
+          coachAnalyzing={coachAnalyzing}
+          coachEnabled={coachEnabled}
+          onToggleCoach={() => setCoachEnabled(!coachEnabled)}
         />
       );
     }

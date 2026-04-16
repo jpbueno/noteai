@@ -13,6 +13,7 @@ import type {
   Meeting,
   Note,
   TaskItem,
+  TodoItem,
 } from "./types";
 import { chatWithAI } from "./ai";
 
@@ -36,7 +37,7 @@ ${identity.team ? `Team: ${identity.team}` : ""}
 ## Report Sections
 Generate content for these sections: ${sectionNames}
 
-## Section Mapping (Daily Log -> Report)
+## Section Mapping (Source -> Report)
 ${mappingDesc}
 
 ## Core T5T Principles
@@ -127,35 +128,34 @@ CRITICAL: Return ONLY the JSON object. No markdown fences. No additional text.`;
 // ===== Context Builder =====
 
 function buildSourceContext(
-  dailyLogs: DailyLog[],
+  todos: TodoItem[],
   meetings: Meeting[],
   notes: Note[],
-  tasks: TaskItem[],
   config: T5TConfig,
 ): string {
   const parts: string[] = [];
 
-  // Daily logs — primary source, organized by date with section names
-  if (dailyLogs.length > 0) {
-    parts.push("# Daily Logs (Primary Source)\n");
-    const sorted = [...dailyLogs].sort((a, b) => a.date.localeCompare(b.date));
-    for (const log of sorted) {
-      parts.push(`## ${log.date}`);
-      for (const section of log.sections) {
-        if (!section.content.trim()) continue;
-        // Check classification
-        const templateSection = config.dailyTemplate.find(
-          (t) => t.name === section.name
-        );
-        const isPersonal = templateSection?.classification === "personal";
-        if (isPersonal) {
-          parts.push(`### ${section.name} [PERSONAL - EXCLUDE FROM REPORT]`);
-          parts.push("(Content excluded per classification)");
-        } else {
-          parts.push(`### ${section.name}`);
-          parts.push(section.content);
-        }
-        parts.push("");
+  // Todos — primary source, organized by status and due date
+  if (todos.length > 0) {
+    parts.push("# Tasks / Todos (Primary Source)\n");
+
+    const completed = todos.filter((t) => t.completed);
+    const pending = todos.filter((t) => !t.completed);
+
+    if (completed.length > 0) {
+      parts.push("## Completed");
+      for (const t of completed) {
+        const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
+        parts.push(`- [DONE] ${t.title || "Untitled"}${due}${t.description ? ": " + t.description.slice(0, 400) : ""}`);
+      }
+      parts.push("");
+    }
+
+    if (pending.length > 0) {
+      parts.push("## In Progress / Pending");
+      for (const t of pending) {
+        const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
+        parts.push(`- [PENDING] ${t.title || "Untitled"}${due}${t.description ? ": " + t.description.slice(0, 400) : ""}`);
       }
       parts.push("");
     }
@@ -192,15 +192,6 @@ function buildSourceContext(
       parts.push(n.content.slice(0, 800));
       parts.push("");
     }
-  }
-
-  // Tasks — supplementary source
-  if (tasks.length > 0) {
-    parts.push("# Tasks\n");
-    for (const t of tasks) {
-      parts.push(`- ${t.title || "Untitled"} [${t.status}]${t.description ? ": " + t.description.slice(0, 200) : ""}`);
-    }
-    parts.push("");
   }
 
   return parts.join("\n");
@@ -327,15 +318,14 @@ export function runQualityChecks(
 
 export async function generateT5TReport(
   config: T5TConfig,
-  dailyLogs: DailyLog[],
+  todos: TodoItem[],
   meetings: Meeting[],
   notes: Note[],
-  tasks: TaskItem[],
   periodStart: string,
   periodEnd: string,
 ): Promise<T5TReportSection[]> {
   const systemPrompt = buildSystemPrompt(config);
-  const context = buildSourceContext(dailyLogs, meetings, notes, tasks, config);
+  const context = buildSourceContext(todos, meetings, notes, config);
 
   const startDate = new Date(periodStart).toLocaleDateString("en-US", {
     month: "2-digit",

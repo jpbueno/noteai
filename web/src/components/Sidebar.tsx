@@ -11,7 +11,6 @@ import {
   Settings,
   StickyNote,
   AudioWaveform,
-  BookOpen,
   Plus,
   X,
   ChevronDown,
@@ -22,7 +21,6 @@ import type {
   Note,
   TodoItem,
   T5TReport,
-  DailyLog,
   SidebarSelection,
 } from "@/lib/types";
 import { type RecordingState, getAudioInputDevices } from "@/lib/audio";
@@ -33,7 +31,6 @@ interface SidebarProps {
   notes: Note[];
   todos: TodoItem[];
   t5tReports: T5TReport[];
-  dailyLogs: DailyLog[];
   selection: SidebarSelection;
   onSelect: (sel: SidebarSelection) => void;
   searchQuery: string;
@@ -45,12 +42,10 @@ interface SidebarProps {
   onNewNote: () => void;
   onNewTodo: () => void;
   onNewT5T: () => void;
-  onNewDailyLog: () => void;
   onDeleteMeeting: (id: string) => void;
   onDeleteNote: (id: string) => void;
   onDeleteTodo: (id: string) => void;
   onDeleteT5T: (id: string) => void;
-  onDeleteDailyLog: (id: string) => void;
 }
 
 export default function Sidebar({
@@ -58,7 +53,6 @@ export default function Sidebar({
   notes,
   todos,
   t5tReports,
-  dailyLogs,
   selection,
   onSelect,
   searchQuery,
@@ -70,12 +64,10 @@ export default function Sidebar({
   onNewNote,
   onNewTodo,
   onNewT5T,
-  onNewDailyLog,
   onDeleteMeeting,
   onDeleteNote,
   onDeleteTodo,
   onDeleteT5T,
-  onDeleteDailyLog,
 }: SidebarProps) {
   const [mics, setMics] = useState<{ deviceId: string; label: string }[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>("");
@@ -167,21 +159,6 @@ export default function Sidebar({
 
       {/* Scrollable lists */}
       <div className="flex-1 overflow-y-auto pt-2 pb-2">
-        {/* Daily Logs */}
-        <SidebarSection title="Daily Logs" icon={BookOpen} action={{ label: "Today", onClick: onNewDailyLog }} onTitleClick={() => onSelect({ type: "dailyLogList" })}>
-          {dailyLogs.map((d) => (
-            <SidebarItem
-              key={d.id}
-              icon={<BookOpen className={`w-[13px] h-[13px] text-text-tertiary`} />}
-              label={`${d.date} — ${d.sections.filter((s) => s.content.trim()).length} sections`}
-              selected={isSelected("dailyLog", d.id)}
-              onClick={() => onSelect({ type: "dailyLog", id: d.id })}
-              onDelete={() => onDeleteDailyLog(d.id)}
-            />
-          ))}
-          {dailyLogs.length === 0 && <EmptyHint text="No daily logs yet" />}
-        </SidebarSection>
-
         {/* T5T Reports */}
         <SidebarSection title="T5T Reports" icon={ListChecks} action={{ label: "New", onClick: onNewT5T }} onTitleClick={() => onSelect({ type: "t5tList" })}>
           {t5tReports.map((r) => (

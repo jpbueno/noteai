@@ -18,14 +18,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Calendar,
-  BookOpen,
   CheckCircle,
 } from "lucide-react";
 import type {
   T5TReport,
   T5TReportSection,
   T5TConfig,
-  DailyLog,
+  TodoItem,
   Meeting,
   Note,
   SidebarSelection,
@@ -48,7 +47,7 @@ import { v4 as uuid } from "uuid";
 type WizardStep = "sources" | "generate" | "export";
 
 const STEPS: { id: WizardStep; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "sources", label: "Sources", icon: BookOpen },
+  { id: "sources", label: "Sources", icon: CheckCircle },
   { id: "generate", label: "Generate & Edit", icon: Sparkles },
   { id: "export", label: "Export", icon: Mail },
 ];
@@ -59,7 +58,7 @@ interface T5TComposerProps {
   report: T5TReport;
   meetings: Meeting[];
   notes: Note[];
-  dailyLogs: DailyLog[];
+  todos: TodoItem[];
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
@@ -67,14 +66,14 @@ export default function T5TComposer({
   report,
   meetings,
   notes,
-  dailyLogs,
+  todos,
   onNavigate,
 }: T5TComposerProps) {
   const [step, setStep] = useState<WizardStep>("sources");
   const [config, setConfig] = useState<T5TConfig>(DEFAULT_T5T_CONFIG);
   const [sections, setSections] = useState<T5TReportSection[]>(report.sections);
-  const [selectedDailyLogIDs, setSelectedDailyLogIDs] = useState<Set<string>>(
-    new Set(report.dailyLogIDs || []),
+  const [selectedTodoIDs, setSelectedTodoIDs] = useState<Set<string>>(
+    new Set(report.todoIDs || report.taskIDs || []),
   );
   const [selectedMeetingIDs, setSelectedMeetingIDs] = useState<Set<string>>(
     new Set(report.meetingIDs),
@@ -102,7 +101,7 @@ export default function T5TComposer({
   useEffect(() => {
     if (prevIdRef.current !== report.id) {
       setSections(report.sections);
-      setSelectedDailyLogIDs(new Set(report.dailyLogIDs || []));
+      setSelectedTodoIDs(new Set(report.todoIDs || report.taskIDs || []));
       setSelectedMeetingIDs(new Set(report.meetingIDs));
       setSelectedNoteIDs(new Set(report.noteIDs));
       setStep("sources");
@@ -139,12 +138,12 @@ export default function T5TComposer({
 
   const saveSources = useCallback(
     async (
-      dlIDs: Set<string>,
+      tIDs: Set<string>,
       mIDs: Set<string>,
       nIDs: Set<string>,
     ) => {
       await db.t5tReports.update(report.id, {
-        dailyLogIDs: Array.from(dlIDs),
+        todoIDs: Array.from(tIDs),
         meetingIDs: Array.from(mIDs),
         noteIDs: Array.from(nIDs),
       });
@@ -156,11 +155,11 @@ export default function T5TComposer({
   // ===== Source Toggles =====
 
   const toggleSource = (
-    type: "dailyLog" | "meeting" | "note",
+    type: "todo" | "meeting" | "note",
     id: string,
   ) => {
     const setters = {
-      dailyLog: setSelectedDailyLogIDs,
+      todo: setSelectedTodoIDs,
       meeting: setSelectedMeetingIDs,
       note: setSelectedNoteIDs,
     };
@@ -168,10 +167,10 @@ export default function T5TComposer({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      const dl = type === "dailyLog" ? next : selectedDailyLogIDs;
+      const t = type === "todo" ? next : selectedTodoIDs;
       const m = type === "meeting" ? next : selectedMeetingIDs;
       const n = type === "note" ? next : selectedNoteIDs;
-      saveSources(dl, m, n);
+      saveSources(t, m, n);
       return next;
     });
   };
@@ -194,8 +193,8 @@ export default function T5TComposer({
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const linkedDailyLogs = dailyLogs.filter((d) =>
-        selectedDailyLogIDs.has(d.id),
+      const linkedTodos = todos.filter((t) =>
+        selectedTodoIDs.has(t.id),
       );
       const linkedMeetings = meetings.filter((m) =>
         selectedMeetingIDs.has(m.id),
@@ -204,10 +203,9 @@ export default function T5TComposer({
 
       const generated = await generateT5TReport(
         config,
-        linkedDailyLogs,
+        linkedTodos,
         linkedMeetings,
         linkedNotes,
-        [],
         report.periodStart,
         report.periodEnd,
       );
@@ -230,8 +228,8 @@ export default function T5TComposer({
   const regenerateSection = async (sectionName: string) => {
     setIsGenerating(true);
     try {
-      const linkedDailyLogs = dailyLogs.filter((d) =>
-        selectedDailyLogIDs.has(d.id),
+      const linkedTodos = todos.filter((t) =>
+        selectedTodoIDs.has(t.id),
       );
       const linkedMeetings = meetings.filter((m) =>
         selectedMeetingIDs.has(m.id),
@@ -240,10 +238,9 @@ export default function T5TComposer({
 
       const generated = await generateT5TReport(
         config,
-        linkedDailyLogs,
+        linkedTodos,
         linkedMeetings,
         linkedNotes,
-        [],
         report.periodStart,
         report.periodEnd,
       );
@@ -333,18 +330,13 @@ export default function T5TComposer({
 
   // ===== Derived Data =====
 
-  const periodLogs = dailyLogs.filter((d) => {
-    const date = new Date(d.date + "T12:00:00");
-    return date >= new Date(report.periodStart) && date <= new Date(report.periodEnd);
-  });
-
   const periodMeetings = meetings.filter((m) => {
     const date = new Date(m.date);
     return date >= new Date(report.periodStart) && date <= new Date(report.periodEnd);
   });
 
   const totalSources =
-    selectedDailyLogIDs.size +
+    selectedTodoIDs.size +
     selectedMeetingIDs.size +
     selectedNoteIDs.size;
 
@@ -425,12 +417,11 @@ export default function T5TComposer({
         <div className="max-w-4xl mx-auto px-8 py-6">
           {step === "sources" && (
             <SourcesStep
-              dailyLogs={periodLogs}
-              allDailyLogs={dailyLogs}
+              todos={todos}
               meetings={periodMeetings}
               allMeetings={meetings}
               notes={notes}
-              selectedDailyLogIDs={selectedDailyLogIDs}
+              selectedTodoIDs={selectedTodoIDs}
               selectedMeetingIDs={selectedMeetingIDs}
               selectedNoteIDs={selectedNoteIDs}
               onToggle={toggleSource}
@@ -480,12 +471,11 @@ export default function T5TComposer({
 // ===== Step 1: Sources =====
 
 function SourcesStep({
-  dailyLogs,
-  allDailyLogs,
+  todos,
   meetings,
   allMeetings,
   notes,
-  selectedDailyLogIDs,
+  selectedTodoIDs,
   selectedMeetingIDs,
   selectedNoteIDs,
   onToggle,
@@ -493,71 +483,92 @@ function SourcesStep({
   onGenerate,
   onNavigate,
 }: {
-  dailyLogs: DailyLog[];
-  allDailyLogs: DailyLog[];
+  todos: TodoItem[];
   meetings: Meeting[];
   allMeetings: Meeting[];
   notes: Note[];
-  selectedDailyLogIDs: Set<string>;
+  selectedTodoIDs: Set<string>;
   selectedMeetingIDs: Set<string>;
   selectedNoteIDs: Set<string>;
-  onToggle: (type: "dailyLog" | "meeting" | "note", id: string) => void;
+  onToggle: (type: "todo" | "meeting" | "note", id: string) => void;
   isGenerating: boolean;
   onGenerate: () => void;
   onNavigate?: (sel: SidebarSelection) => void;
 }) {
+  const completedTodos = todos.filter((t) => t.completed);
+  const pendingTodos = todos.filter((t) => !t.completed);
+
   return (
     <div className="space-y-6">
       <p className="text-sm text-text-secondary">
-        Select the sources to include in this report. Daily logs are the primary
-        data source — meetings and notes provide supplementary context.
+        Select the sources to include in this report. Todos are the primary
+        input — meetings and notes provide supplementary context.
       </p>
 
-      {/* Daily Logs */}
+      {/* Todos — primary source */}
       <SourceSection
-        title="Daily Logs"
-        icon={BookOpen}
-        badge={`${selectedDailyLogIDs.size}/${dailyLogs.length} in period`}
+        title="Todos"
+        icon={CheckCircle}
+        badge={`${selectedTodoIDs.size}/${todos.length} selected`}
       >
-        {dailyLogs.length > 0 ? (
+        {todos.length > 0 ? (
           <div className="space-y-1">
-            {dailyLogs.map((d) => (
-              <SourceItem
-                key={d.id}
-                checked={selectedDailyLogIDs.has(d.id)}
-                onChange={() => onToggle("dailyLog", d.id)}
-                label={`${d.date} — ${d.sections.filter((s) => s.content.trim()).length} sections`}
-                onClick={() => onNavigate?.({ type: "dailyLog", id: d.id })}
-              />
-            ))}
+            {/* Select all / none */}
+            <div className="flex items-center gap-3 mb-2">
+              <button
+                onClick={() => {
+                  for (const t of todos) {
+                    if (!selectedTodoIDs.has(t.id)) onToggle("todo", t.id);
+                  }
+                }}
+                className="text-[11px] text-accent hover:underline"
+              >
+                Select all
+              </button>
+              <button
+                onClick={() => {
+                  for (const t of todos) {
+                    if (selectedTodoIDs.has(t.id)) onToggle("todo", t.id);
+                  }
+                }}
+                className="text-[11px] text-text-tertiary hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+            {pendingTodos.length > 0 && (
+              <>
+                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-1">Pending</p>
+                {pendingTodos.map((t) => (
+                  <SourceItem
+                    key={t.id}
+                    checked={selectedTodoIDs.has(t.id)}
+                    onChange={() => onToggle("todo", t.id)}
+                    label={`${t.title || "Untitled"}${t.dueDate ? " (due: " + t.dueDate + ")" : ""}`}
+                    onClick={() => onNavigate?.({ type: "todo", id: t.id })}
+                  />
+                ))}
+              </>
+            )}
+            {completedTodos.length > 0 && (
+              <>
+                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-2">Completed</p>
+                {completedTodos.map((t) => (
+                  <SourceItem
+                    key={t.id}
+                    checked={selectedTodoIDs.has(t.id)}
+                    onChange={() => onToggle("todo", t.id)}
+                    label={`${t.title || "Untitled"}${t.dueDate ? " (due: " + t.dueDate + ")" : ""}`}
+                    onClick={() => onNavigate?.({ type: "todo", id: t.id })}
+                  />
+                ))}
+              </>
+            )}
           </div>
         ) : (
           <p className="text-xs text-text-tertiary">
-            No daily logs for this period. Create daily logs to improve report
-            quality.
+            No todos available. Create todos to use as report input.
           </p>
-        )}
-        {/* Also show logs outside period */}
-        {allDailyLogs.filter((d) => !dailyLogs.includes(d)).length > 0 && (
-          <details className="mt-2">
-            <summary className="text-xs text-text-tertiary cursor-pointer hover:text-text-secondary">
-              {allDailyLogs.length - dailyLogs.length} log(s) outside period
-            </summary>
-            <div className="space-y-1 mt-1">
-              {allDailyLogs
-                .filter((d) => !dailyLogs.includes(d))
-                .map((d) => (
-                  <SourceItem
-                    key={d.id}
-                    checked={selectedDailyLogIDs.has(d.id)}
-                    onChange={() => onToggle("dailyLog", d.id)}
-                    label={`${d.date} — ${d.sections.filter((s) => s.content.trim()).length} sections`}
-                    onClick={() => onNavigate?.({ type: "dailyLog", id: d.id })}
-                    dimmed
-                  />
-                ))}
-            </div>
-          </details>
         )}
       </SourceSection>
 
@@ -641,7 +652,7 @@ function SourcesStep({
           )}
           {isGenerating ? "Generating T5T Report..." : "Generate with AI"}
         </button>
-        {selectedDailyLogIDs.size === 0 &&
+        {selectedTodoIDs.size === 0 &&
           selectedMeetingIDs.size === 0 &&
           selectedNoteIDs.size === 0 && (
             <p className="text-xs text-orange-400 mt-2">

@@ -4,7 +4,6 @@ import {
   FileText,
   StickyNote,
   ListChecks,
-  BookOpen,
   AudioWaveform,
   Calendar,
   Clock,
@@ -15,7 +14,6 @@ import type {
   Meeting,
   Note,
   T5TReport,
-  DailyLog,
   SidebarSelection,
 } from "@/lib/types";
 import { formatDate, formatDuration } from "@/lib/hooks";
@@ -31,14 +29,15 @@ export function NoteListView({
   onSelect: (sel: SidebarSelection) => void;
   onNew: () => void;
 }) {
-  const sorted = [...notes].sort(
+  const items = Array.isArray(notes) ? notes : [];
+  const sorted = [...items].sort(
     (a, b) => new Date(b.modifiedDate).getTime() - new Date(a.modifiedDate).getTime()
   );
 
   return (
     <ListShell
       title="Notes"
-      count={sorted.length}
+      count={items.length}
       icon={<StickyNote className="w-5 h-5 text-text-tertiary" />}
       onNew={onNew}
       newLabel="New Note"
@@ -47,10 +46,11 @@ export function NoteListView({
       emptyHint="Create your first note to get started"
     >
       {sorted.map((n) => {
-        const snippet = n.content
+        const snippet = (n.content || "")
           .replace(/[#*_`>\-\[\]()!]/g, "")
           .slice(0, 120)
           .trim();
+        const tags = Array.isArray(n.tags) ? n.tags : [];
         return (
           <button
             key={n.id}
@@ -69,10 +69,10 @@ export function NoteListView({
             {snippet && (
               <p className="text-xs text-text-tertiary truncate pl-5.5">{snippet}</p>
             )}
-            {n.tags.length > 0 && (
+            {tags.length > 0 && (
               <div className="flex items-center gap-1.5 pl-5.5">
                 <Tag className="w-3 h-3 text-text-tertiary" />
-                {n.tags.slice(0, 4).map((t) => (
+                {tags.slice(0, 4).map((t) => (
                   <span
                     key={t}
                     className="text-[11px] px-1.5 py-0.5 rounded bg-hover text-text-secondary"
@@ -80,8 +80,8 @@ export function NoteListView({
                     {t}
                   </span>
                 ))}
-                {n.tags.length > 4 && (
-                  <span className="text-[11px] text-text-tertiary">+{n.tags.length - 4}</span>
+                {tags.length > 4 && (
+                  <span className="text-[11px] text-text-tertiary">+{tags.length - 4}</span>
                 )}
               </div>
             )}
@@ -101,14 +101,15 @@ export function MeetingListView({
   meetings: Meeting[];
   onSelect: (sel: SidebarSelection) => void;
 }) {
-  const sorted = [...meetings].sort(
+  const items = Array.isArray(meetings) ? meetings : [];
+  const sorted = [...items].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
 
   return (
     <ListShell
       title="Meetings"
-      count={sorted.length}
+      count={items.length}
       icon={<AudioWaveform className="w-5 h-5 text-text-tertiary" />}
       emptyIcon={<AudioWaveform className="w-9 h-9 text-text-tertiary" />}
       emptyText="No meetings yet"
@@ -152,66 +153,6 @@ export function MeetingListView({
   );
 }
 
-// ── Daily Logs ─────────────────────────────────────────
-
-export function DailyLogListView({
-  dailyLogs,
-  onSelect,
-  onNew,
-}: {
-  dailyLogs: DailyLog[];
-  onSelect: (sel: SidebarSelection) => void;
-  onNew: () => void;
-}) {
-  const sorted = [...dailyLogs].sort(
-    (a, b) => b.date.localeCompare(a.date)
-  );
-
-  return (
-    <ListShell
-      title="Daily Logs"
-      count={sorted.length}
-      icon={<BookOpen className="w-5 h-5 text-text-tertiary" />}
-      onNew={onNew}
-      newLabel="+ Today"
-      emptyIcon={<BookOpen className="w-9 h-9 text-text-tertiary" />}
-      emptyText="No daily logs yet"
-      emptyHint="Start today's log to track your work"
-    >
-      {sorted.map((d) => {
-        const filledSections = d.sections.filter((s) => s.content.trim());
-        const day = new Date(d.date + "T12:00:00");
-        const dayName = day.toLocaleDateString("en-US", { weekday: "short" });
-        return (
-          <button
-            key={d.id}
-            onClick={() => onSelect({ type: "dailyLog", id: d.id })}
-            className="flex flex-col gap-1 w-full px-4 py-3 rounded-lg hover:bg-hover transition-colors text-left"
-          >
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
-              <span className="text-sm font-medium text-text-primary truncate flex-1">
-                {d.date}
-                <span className="text-text-tertiary font-normal ml-1.5">{dayName}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-2 pl-5.5 text-xs text-text-tertiary">
-              <span>{filledSections.length} sections filled</span>
-              {d.linkedMeetingIDs.length > 0 && (
-                <span>{d.linkedMeetingIDs.length} linked meetings</span>
-              )}
-              {filledSections.length > 0 && (
-                <span className="truncate max-w-[200px]">
-                  {filledSections.map((s) => s.name).join(", ")}
-                </span>
-              )}
-            </div>
-          </button>
-        );
-      })}
-    </ListShell>
-  );
-}
 
 // ── T5T Reports ────────────────────────────────────────
 
@@ -224,14 +165,15 @@ export function T5TListView({
   onSelect: (sel: SidebarSelection) => void;
   onNew: () => void;
 }) {
-  const sorted = [...reports].sort(
+  const items = Array.isArray(reports) ? reports : [];
+  const sorted = [...items].sort(
     (a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime()
   );
 
   return (
     <ListShell
       title="T5T Reports"
-      count={sorted.length}
+      count={items.length}
       icon={<ListChecks className="w-5 h-5 text-text-tertiary" />}
       onNew={onNew}
       newLabel="New Report"
@@ -240,9 +182,10 @@ export function T5TListView({
       emptyHint="Create your first weekly report"
     >
       {sorted.map((r) => {
-        const start = new Date(r.periodStart).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        const end = new Date(r.periodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        const filledSections = r.sections.filter((s) => s.content.trim());
+        const start = r.periodStart ? new Date(r.periodStart).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+        const end = r.periodEnd ? new Date(r.periodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+        const sections = r.sections || [];
+        const filledSections = sections.filter((s) => s.content?.trim());
         return (
           <button
             key={r.id}
@@ -270,7 +213,7 @@ export function T5TListView({
                 {start} — {end}
               </span>
               {filledSections.length > 0 && (
-                <span>{filledSections.length}/{r.sections.length} sections</span>
+                <span>{filledSections.length}/{sections.length} sections</span>
               )}
             </div>
           </button>

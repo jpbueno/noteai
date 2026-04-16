@@ -3,14 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FileText } from "lucide-react";
 import HomeDashboard from "@/components/HomeDashboard";
-import { NoteListView, MeetingListView, DailyLogListView, T5TListView } from "@/components/SectionListView";
+import { NoteListView, MeetingListView, T5TListView } from "@/components/SectionListView";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import Sidebar from "@/components/Sidebar";
 import MeetingDetail from "@/components/MeetingDetail";
 import NoteEditor from "@/components/NoteEditor";
 import TodoDetail from "@/components/TodoDetail";
 import T5TComposer from "@/components/T5TComposer";
-import DailyLogEditor from "@/components/DailyLogEditor";
 import ChatPanel from "@/components/ChatPanel";
 import Settings from "@/components/Settings";
 import LiveTranscript from "@/components/LiveTranscript";
@@ -22,7 +21,6 @@ import {
   useNotes,
   useTodos,
   useT5TReports,
-  useDailyLogs,
   useChatMessages,
   useSearch,
   useRecording,
@@ -132,7 +130,6 @@ export default function Home() {
   const notes = useNotes();
   const todos = useTodos();
   const t5tReports = useT5TReports();
-  const dailyLogs = useDailyLogs();
   const chatMessages = useChatMessages();
   const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
 
@@ -145,7 +142,7 @@ export default function Home() {
   const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
     useSearch(meetings, notes, todos);
 
-  // One-time migration: convert any remaining tasks into daily logs, then delete them
+  // One-time migration: clean up any remaining old TaskItems
   const migrationDone = useRef(false);
   useEffect(() => {
     if (migrationDone.current) return;
@@ -153,45 +150,7 @@ export default function Home() {
     (async () => {
       const tasks: TaskItem[] = await db.tasks.toArray() as TaskItem[];
       if (tasks.length === 0) return;
-
-      let config: T5TConfig;
-      try { config = await getT5TConfig(); } catch { config = DEFAULT_T5T_CONFIG; }
-
       for (const task of tasks) {
-        const date = task.createdDate.slice(0, 10);
-        const existingLogs: { id: string; date: string; sections: { name: string; content: string }[] }[] =
-          await db.dailyLogs.toArray() as never[];
-        const existing = existingLogs.find((d) => d.date === date);
-
-        const sectionName = task.status === "completed" ? "Project Work" : "In-Progress & Carry-Over";
-        const line = `- [Task] ${task.title}${task.description ? ": " + task.description : ""} [${task.status}]`;
-
-        if (existing) {
-          const newSections = existing.sections.map((s) => {
-            if (s.name === sectionName) {
-              return { ...s, content: s.content ? s.content + "\n" + line : line };
-            }
-            return s;
-          });
-          // If the section didn't exist, add it
-          if (!newSections.find((s) => s.name === sectionName)) {
-            newSections.push({ name: sectionName, content: line });
-          }
-          await db.dailyLogs.update(existing.id, { sections: newSections, modifiedDate: new Date().toISOString() });
-        } else {
-          const sections = config.dailyTemplate.map((t) => ({
-            name: t.name,
-            content: t.name === sectionName ? line : "",
-          }));
-          await db.dailyLogs.add({
-            id: uuid(),
-            date,
-            sections,
-            linkedMeetingIDs: [],
-            createdDate: new Date().toISOString(),
-            modifiedDate: new Date().toISOString(),
-          });
-        }
         await db.tasks.delete(task.id);
       }
       triggerRefresh();
@@ -228,48 +187,6 @@ export default function Home() {
     setSelection({ type: "todo", id: todo.id });
   }, []);
 
-  const handleNewDailyLog = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Check if log for today already exists
-    const existing = dailyLogs.find((d) => d.date === today);
-    if (existing) {
-      setSelection({ type: "dailyLog", id: existing.id });
-      return;
-    }
-
-    // Load config for daily template
-    let config: T5TConfig;
-    try {
-      config = await getT5TConfig();
-    } catch {
-      config = DEFAULT_T5T_CONFIG;
-    }
-
-    // Create sections from template
-    const sections = config.dailyTemplate.map((t) => ({
-      name: t.name,
-      content: "",
-    }));
-
-    // Auto-link today's meetings
-    const todayMeetings = meetings.filter(
-      (m) => m.date.slice(0, 10) === today,
-    );
-
-    const log = {
-      id: uuid(),
-      date: today,
-      sections,
-      linkedMeetingIDs: todayMeetings.map((m) => m.id),
-      createdDate: new Date().toISOString(),
-      modifiedDate: new Date().toISOString(),
-    };
-    await db.dailyLogs.add(log);
-    triggerRefresh();
-    setSelection({ type: "dailyLog", id: log.id });
-  }, [dailyLogs, meetings]);
-
   const handleNewT5T = useCallback(async () => {
     // Default to last 7 days (Mon-Fri work week)
     const end = new Date();
@@ -288,11 +205,7 @@ export default function Home() {
       ? `Weekly Report – ${config.identity.team}`
       : "Weekly Report";
 
-    // Auto-select daily logs and meetings in range
-    const logsInRange = dailyLogs.filter((d) => {
-      const date = new Date(d.date + "T12:00:00");
-      return date >= start && date <= end;
-    });
+    // Auto-select all todos and meetings in range
     const meetingsInRange = meetings.filter((m) => {
       const d = new Date(m.date);
       return d >= start && d <= end;
@@ -304,17 +217,18 @@ export default function Home() {
       createdDate: new Date().toISOString(),
       periodStart: start.toISOString(),
       periodEnd: end.toISOString(),
-      dailyLogIDs: logsInRange.map((d) => d.id),
+      dailyLogIDs: [],
       meetingIDs: meetingsInRange.map((m) => m.id),
       noteIDs: [],
       taskIDs: [],
+      todoIDs: todos.map((t) => t.id),
       sections: [],
       status: "draft" as const,
     };
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
-  }, [meetings, dailyLogs]);
+  }, [meetings, todos]);
 
   const handleStopRecording = useCallback(async () => {
     const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
@@ -359,17 +273,6 @@ export default function Home() {
     },
     [selection]
   );
-
-  const handleDeleteDailyLog = useCallback(
-    async (id: string) => {
-      await db.dailyLogs.delete(id);
-      triggerRefresh();
-      if (selection?.type === "dailyLog" && selection.id === id) setSelection(null);
-    },
-    [selection]
-  );
-
-
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -433,10 +336,6 @@ export default function Home() {
       return <MeetingListView meetings={meetings} onSelect={setSelection} />;
     }
 
-    if (selection.type === "dailyLogList") {
-      return <DailyLogListView dailyLogs={dailyLogs} onSelect={setSelection} onNew={handleNewDailyLog} />;
-    }
-
     if (selection.type === "t5tList") {
       return <T5TListView reports={t5tReports} onSelect={setSelection} onNew={handleNewT5T} />;
     }
@@ -456,11 +355,6 @@ export default function Home() {
       if (todo) return <TodoDetail todo={todo} />;
     }
 
-    if (selection.type === "dailyLog") {
-      const log = dailyLogs.find((d) => d.id === selection.id);
-      if (log) return <DailyLogEditor log={log} />;
-    }
-
     if (selection.type === "t5t") {
       const report = t5tReports.find((r) => r.id === selection.id);
       if (report)
@@ -469,7 +363,7 @@ export default function Home() {
             report={report}
             meetings={meetings}
             notes={notes}
-            dailyLogs={dailyLogs}
+            todos={todos}
             onNavigate={setSelection}
           />
         );
@@ -529,7 +423,6 @@ export default function Home() {
             notes={filteredNotes}
             todos={filteredTodos}
             t5tReports={t5tReports}
-            dailyLogs={dailyLogs}
             selection={selection}
             onSelect={setSelection}
             searchQuery={query}
@@ -544,12 +437,10 @@ export default function Home() {
             onNewNote={handleNewNote}
             onNewTodo={handleNewTodo}
             onNewT5T={handleNewT5T}
-            onNewDailyLog={handleNewDailyLog}
             onDeleteMeeting={handleDeleteMeeting}
             onDeleteNote={handleDeleteNote}
             onDeleteTodo={handleDeleteTodo}
             onDeleteT5T={handleDeleteT5T}
-            onDeleteDailyLog={handleDeleteDailyLog}
           />
         </div>
 

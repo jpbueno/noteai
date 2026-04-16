@@ -103,6 +103,7 @@ export interface T5TReport {
   meetingIDs: string[];
   noteIDs: string[];
   taskIDs: string[];
+  todoIDs: string[];
   dailyLogIDs: string[];
   sections: T5TReportSection[];
   status: "draft" | "finalized";
@@ -321,7 +322,6 @@ export type SidebarSelection =
   | { type: "meetingList" }
   | { type: "noteList" }
   | { type: "t5tList" }
-  | { type: "dailyLogList" }
   | { type: "settings" }
   | { type: "liveTranscript" }
   | null;

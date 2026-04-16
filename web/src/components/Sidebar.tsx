@@ -168,7 +168,7 @@ export default function Sidebar({
       {/* Scrollable lists */}
       <div className="flex-1 overflow-y-auto pt-2 pb-2">
         {/* Daily Logs */}
-        <SidebarSection title="Daily Logs" icon={BookOpen} action={{ label: "Today", onClick: onNewDailyLog }}>
+        <SidebarSection title="Daily Logs" icon={BookOpen} action={{ label: "Today", onClick: onNewDailyLog }} onTitleClick={() => onSelect({ type: "dailyLogList" })}>
           {dailyLogs.map((d) => (
             <SidebarItem
               key={d.id}
@@ -183,7 +183,7 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* T5T Reports */}
-        <SidebarSection title="T5T Reports" icon={ListChecks} action={{ label: "New", onClick: onNewT5T }}>
+        <SidebarSection title="T5T Reports" icon={ListChecks} action={{ label: "New", onClick: onNewT5T }} onTitleClick={() => onSelect({ type: "t5tList" })}>
           {t5tReports.map((r) => (
             <SidebarItem
               key={r.id}
@@ -198,7 +198,7 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Notes */}
-        <SidebarSection title="Notes" icon={StickyNote} action={{ label: "New", onClick: onNewNote }}>
+        <SidebarSection title="Notes" icon={StickyNote} action={{ label: "New", onClick: onNewNote }} onTitleClick={() => onSelect({ type: "noteList" })}>
           {notes.map((n) => (
             <SidebarItem
               key={n.id}
@@ -213,7 +213,7 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Todos */}
-        <SidebarSection title="Todos" icon={CheckSquare} action={{ label: "New", onClick: onNewTodo }}>
+        <SidebarSection title="Todos" icon={CheckSquare} action={{ label: "New", onClick: onNewTodo }} onTitleClick={() => onSelect(null)}>
           {todos.map((t) => {
             const overdue = !t.completed && t.dueDate && new Date(t.dueDate) < new Date(new Date().toDateString());
             return (
@@ -240,7 +240,7 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Meetings */}
-        <SidebarSection title="Meetings" icon={AudioWaveform}>
+        <SidebarSection title="Meetings" icon={AudioWaveform} onTitleClick={() => onSelect({ type: "meetingList" })}>
           {meetings.map((m) => (
             <SidebarItem
               key={m.id}
@@ -275,17 +275,22 @@ function SidebarSection({
   title,
   icon: Icon,
   action,
+  onTitleClick,
   children,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   action?: { label: string; onClick: () => void };
+  onTitleClick?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <div className="flex items-center px-3.5 pt-3 pb-1">
-        <div className="flex items-center gap-1.5 flex-1">
+        <div
+          className={`flex items-center gap-1.5 flex-1 ${onTitleClick ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+          onClick={onTitleClick}
+        >
           <Icon className="w-3.5 h-3.5 text-text-secondary" />
           <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
             {title}

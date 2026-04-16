@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FileText } from "lucide-react";
 import HomeDashboard from "@/components/HomeDashboard";
+import { NoteListView, MeetingListView, DailyLogListView, T5TListView } from "@/components/SectionListView";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import Sidebar from "@/components/Sidebar";
 import MeetingDetail from "@/components/MeetingDetail";
@@ -422,6 +423,22 @@ export default function Home() {
 
     if (selection.type === "settings") {
       return <Settings />;
+    }
+
+    if (selection.type === "noteList") {
+      return <NoteListView notes={notes} onSelect={setSelection} onNew={handleNewNote} />;
+    }
+
+    if (selection.type === "meetingList") {
+      return <MeetingListView meetings={meetings} onSelect={setSelection} />;
+    }
+
+    if (selection.type === "dailyLogList") {
+      return <DailyLogListView dailyLogs={dailyLogs} onSelect={setSelection} onNew={handleNewDailyLog} />;
+    }
+
+    if (selection.type === "t5tList") {
+      return <T5TListView reports={t5tReports} onSelect={setSelection} onNew={handleNewT5T} />;
     }
 
     if (selection.type === "meeting") {

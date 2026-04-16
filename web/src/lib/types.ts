@@ -318,6 +318,10 @@ export type SidebarSelection =
   | { type: "t5t"; id: string }
   | { type: "todo"; id: string }
   | { type: "dailyLog"; id: string }
+  | { type: "meetingList" }
+  | { type: "noteList" }
+  | { type: "t5tList" }
+  | { type: "dailyLogList" }
   | { type: "settings" }
   | { type: "liveTranscript" }
   | null;

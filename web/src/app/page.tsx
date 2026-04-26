@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { FileText } from "lucide-react";
 import HomeDashboard from "@/components/HomeDashboard";
 import { NoteListView, MeetingListView, T5TListView } from "@/components/SectionListView";
 import BrainHeadIcon from "@/components/BrainHeadIcon";

@@ -78,9 +78,6 @@ export interface TodoItem {
   createdDate: string;
   modifiedDate: string;
   pinned?: number;
-  // Google Docs sync tracking (manager's running log). 0/1 flag + ISO timestamp.
-  syncedToGoogleDocs?: number;
-  googleDocsSyncedAt?: string | null;
 }
 
 // ===== Daily Logs =====

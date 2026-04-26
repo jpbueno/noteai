@@ -4,9 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ChevronDown,
   ChevronRight,
-  Plus,
   Clock,
-  Eye,
   EyeOff,
 } from "lucide-react";
 import type { DailyLog, DailyLogSection, T5TConfig } from "@/lib/types";

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import {
   Search,
   FileText,
@@ -13,7 +12,6 @@ import {
   AudioWaveform,
   Plus,
   X,
-  ChevronDown,
 } from "lucide-react";
 
 import type {
@@ -23,7 +21,7 @@ import type {
   T5TReport,
   SidebarSelection,
 } from "@/lib/types";
-import { type RecordingState, getAudioInputDevices } from "@/lib/audio";
+import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
 
 interface SidebarProps {
@@ -69,19 +67,6 @@ export default function Sidebar({
   onDeleteTodo,
   onDeleteT5T,
 }: SidebarProps) {
-  const [mics, setMics] = useState<{ deviceId: string; label: string }[]>([]);
-  const [selectedMic, setSelectedMic] = useState<string>("");
-  const [captureTab, setCaptureTab] = useState(true);
-
-  useEffect(() => {
-    getAudioInputDevices().then((devices) => {
-      setMics(devices);
-      if (devices.length > 0 && !selectedMic) {
-        setSelectedMic(devices[0].deviceId);
-      }
-    });
-  }, []);
-
   const isSelected = (type: string, id: string) =>
     selection?.type === type && "id" in selection && selection.id === id;
 

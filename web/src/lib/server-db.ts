@@ -94,8 +94,6 @@ const MIGRATIONS = [
   "ALTER TABLE t5tReports ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE todos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE todos ADD COLUMN dueDate TEXT",
-  "ALTER TABLE todos ADD COLUMN syncedToGoogleDocs INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE todos ADD COLUMN googleDocsSyncedAt TEXT",
   "ALTER TABLE dailyLogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE t5tReports ADD COLUMN dailyLogIDs TEXT NOT NULL DEFAULT '[]'",
 ];
@@ -161,7 +159,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections", "status", "pinned"],
   dailyLogs: ["id", "date", "sections", "linkedMeetingIDs", "createdDate", "modifiedDate", "pinned"],
   chatMessages: ["id", "role", "content", "timestamp"],
-  todos: ["id", "title", "description", "completed", "dueDate", "createdDate", "modifiedDate", "pinned", "syncedToGoogleDocs", "googleDocsSyncedAt"],
+  todos: ["id", "title", "description", "completed", "dueDate", "createdDate", "modifiedDate", "pinned"],
   settings: ["key", "value"],
 };
 

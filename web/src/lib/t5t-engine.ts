@@ -190,7 +190,6 @@ export interface QualityCheck {
 
 export function runQualityChecks(
   sections: T5TReportSection[],
-  _config: T5TConfig,
 ): QualityCheck[] {
   const checks: QualityCheck[] = [];
 
@@ -433,8 +432,6 @@ Return the JSON object with accountUpdates and futurePlans as specified.`;
 export function buildReportMarkdown(
   config: T5TConfig,
   sections: T5TReportSection[],
-  _periodStart: string,
-  _periodEnd: string,
 ): string {
   const { identity, emailSettings } = config;
 
@@ -500,8 +497,6 @@ export function buildReportMarkdown(
 
 export function buildEmailSubject(
   config: T5TConfig,
-  _periodStart: string,
-  _periodEnd: string,
 ): string {
   const { identity } = config;
   const format = config.emailSettings.subjectFormat || "Top 5 Things - {{focus}} | {{region}} | {{roleShort}}";

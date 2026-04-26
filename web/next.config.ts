@@ -1,11 +1,20 @@
 import type { NextConfig } from "next";
 
+const isDevelopment = process.env.NODE_ENV !== "production";
+const scriptSrc = [
+  "script-src 'self' 'unsafe-inline'",
+  isDevelopment ? "'unsafe-eval'" : "",
+  "https://accounts.google.com/gsi/client",
+]
+  .filter(Boolean)
+  .join(" ");
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client",
+  scriptSrc,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",

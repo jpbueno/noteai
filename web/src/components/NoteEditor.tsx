@@ -19,7 +19,7 @@ interface NoteEditorProps {
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function NoteEditor({ note, onNavigate }: NoteEditorProps) {
+export default function NoteEditor({ note }: NoteEditorProps) {
   const tts = useTTS();
   const [title, setTitle] = useState(note.title);
   const [tags, setTags] = useState(note.tags);

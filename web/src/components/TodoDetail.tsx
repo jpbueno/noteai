@@ -68,27 +68,7 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
     setDirty(false);
     setSaving(false);
 
-    // Fire-and-forget Google Docs sync. The endpoint dedupes on the
-    // syncedToGoogleDocs flag and skips empty titles, so it's safe to call on
-    // every save. Errors (not configured, network, etc.) surface only in the
-    // browser console — UI save success shouldn't depend on Google.
-    if (title.trim() && !todo.syncedToGoogleDocs) {
-      fetch("/api/integrations/google-docs/sync-todo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ todoId: todo.id }),
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            console.warn("[google-docs] sync-todo failed", res.status, body);
-          } else {
-            triggerRefresh();
-          }
-        })
-        .catch((err) => console.warn("[google-docs] sync-todo error", err));
-    }
-  }, [todo.id, todo.syncedToGoogleDocs, title, description, dueDate]);
+  }, [todo.id, title, description, dueDate]);
 
   const toggleCompleted = useCallback(async () => {
     const newVal = !completed;
@@ -147,14 +127,6 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
               {formatDueLabel(dueDate)}
             </span>
           )}
-          {todo.syncedToGoogleDocs ? (
-            <span
-              className="px-2 py-0.5 rounded text-xs font-medium bg-blue-500/10 text-blue-300"
-              title={todo.googleDocsSyncedAt ? `Synced to manager doc on ${new Date(todo.googleDocsSyncedAt).toLocaleString()}` : "Synced to manager doc"}
-            >
-              Synced to Docs
-            </span>
-          ) : null}
         </div>
 
         <div className="border-t border-border mb-6" />

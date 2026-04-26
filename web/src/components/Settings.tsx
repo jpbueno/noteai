@@ -13,7 +13,7 @@ import {
   EyeOff,
   Save,
 } from "lucide-react";
-import type { LLMProvider, MeetingTemplate, T5TConfig, T5TManager, T5TReportTemplateSection, T5TDailyTemplateSection, T5TSectionMapping } from "@/lib/types";
+import type { LLMProvider, MeetingTemplate, T5TConfig } from "@/lib/types";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import { LLM_PROVIDERS, MEETING_TEMPLATES, DEFAULT_T5T_CONFIG } from "@/lib/types";
 import { db, getSetting, isSettingConfigured, setSetting, getT5TConfig, saveT5TConfig } from "@/lib/db";

@@ -70,7 +70,7 @@ interface TaskDetailProps {
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function TaskDetail({ task, onNavigate }: TaskDetailProps) {
+export default function TaskDetail({ task }: TaskDetailProps) {
   const tts = useTTS();
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);

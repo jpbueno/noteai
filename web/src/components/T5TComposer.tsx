@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Plus,
   X,
   Sparkles,
   Loader2,
@@ -181,7 +180,7 @@ export default function T5TComposer({
       save(generated);
 
       // Run quality checks
-      const checks = runQualityChecks(generated, config);
+      const checks = runQualityChecks(generated);
       setQualityChecks(checks);
 
       setStep("generate");
@@ -216,7 +215,7 @@ export default function T5TComposer({
         );
         setSections(newSections);
         save(newSections);
-        const checks = runQualityChecks(newSections, config);
+        const checks = runQualityChecks(newSections);
         setQualityChecks(checks);
       }
     } catch (err) {
@@ -229,7 +228,7 @@ export default function T5TComposer({
   // ===== Export =====
 
   const getFullMarkdown = () =>
-    buildReportMarkdown(config, sections, report.periodStart, report.periodEnd);
+    buildReportMarkdown(config, sections);
 
   const getOutlookHtml = () =>
     createOutlookHtmlDocument(getFullMarkdown(), config);
@@ -286,7 +285,7 @@ export default function T5TComposer({
 
   const handleOpenMailto = () => {
     const subject = encodeURIComponent(
-      buildEmailSubject(config, report.periodStart, report.periodEnd),
+      buildEmailSubject(config),
     );
     const body = encodeURIComponent(getFullMarkdown());
     const to = encodeURIComponent(config.identity.email || "");
@@ -338,7 +337,7 @@ export default function T5TComposer({
 
           {/* Step navigation */}
           <div className="flex items-center gap-1">
-            {STEPS.map((s, i) => {
+            {STEPS.map((s) => {
               const Icon = s.icon;
               const isActive = step === s.id;
               const isPast =

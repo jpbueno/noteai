@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -86,5 +86,29 @@ test("web app uses crypto.randomUUID instead of the uuid dependency", () => {
   for (const path of paths) {
     const source = read(path);
     assert.doesNotMatch(source, /from ["']uuid["']/);
+  }
+});
+
+test("development CSP permits React dev tooling eval without weakening production", () => {
+  const nextConfig = read("./next.config.ts");
+
+  assert.match(nextConfig, /process\.env\.NODE_ENV\s*!==\s*"production"/);
+  assert.match(nextConfig, /'unsafe-eval'/);
+  assert.match(nextConfig, /scriptSrc/);
+});
+
+test("Google Docs sync feature is removed from the web app", () => {
+  const packageJson = read("./package.json");
+  const todoDetail = read("./src/components/TodoDetail.tsx");
+  const types = read("./src/lib/types.ts");
+  const apiDir = new URL("./src/app/api/integrations/", import.meta.url);
+
+  assert.equal(existsSync(new URL("./GOOGLE_DOCS_SETUP.md", import.meta.url)), false);
+  assert.equal(existsSync(new URL("./src/lib/google-docs.ts", import.meta.url)), false);
+  assert.doesNotMatch(todoDetail, /google-docs|sync-todo|syncedToGoogleDocs/i);
+  assert.doesNotMatch(types, /syncedToGoogleDocs|googleDocsSyncedAt|Google Docs sync/i);
+  assert.doesNotMatch(packageJson, /googleapis/);
+  if (existsSync(apiDir)) {
+    assert.equal(readdirSync(apiDir).includes("google-docs"), false);
   }
 });

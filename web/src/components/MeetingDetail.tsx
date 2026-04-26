@@ -26,7 +26,7 @@ interface MeetingDetailProps {
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function MeetingDetail({ meeting, onNavigate }: MeetingDetailProps) {
+export default function MeetingDetail({ meeting }: MeetingDetailProps) {
   const { summary } = meeting;
   const hasSummary = summary.wasSummarized && !summaryEmpty(summary);
   const [activeTab, setActiveTab] = useState<Tab>(hasSummary ? "summary" : "transcript");

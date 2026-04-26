@@ -5,7 +5,7 @@ const ENDPOINTS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   openai: "https://api.openai.com/v1/chat/completions",
-  nvidia: "https://inference-api.nvidia.com/v1/chat/completions",
+  nvidia: "https://integrate.api.nvidia.com/v1/chat/completions",
 };
 
 const MAX_CHAT_MESSAGES = 40;
@@ -95,9 +95,25 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
-      await response.text();
+      const upstreamText = await response.text();
+      let upstreamDetail = "";
+      try {
+        const parsed = JSON.parse(upstreamText);
+        upstreamDetail =
+          typeof parsed?.detail === "string"
+            ? parsed.detail
+            : typeof parsed?.error === "string"
+              ? parsed.error
+              : "";
+      } catch {
+        upstreamDetail = "";
+      }
       return NextResponse.json(
-        { error: `LLM request failed (${response.status})` },
+        {
+          error: `LLM request failed (${response.status})${
+            upstreamDetail ? `: ${upstreamDetail}` : ""
+          }`,
+        },
         { status: response.status }
       );
     }

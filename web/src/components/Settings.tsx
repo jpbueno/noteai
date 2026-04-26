@@ -58,15 +58,13 @@ const POPULAR_MODELS: Record<LLMProvider, { id: string; name: string }[]> = {
     { id: "o3-mini", name: "o3-mini" },
   ],
   nvidia: [
-    { id: "azure/anthropic/claude-opus-4-6", name: "Claude Opus 4.6" },
-    { id: "azure/anthropic/claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "azure/anthropic/claude-opus-4-5", name: "Claude Opus 4.5" },
-    { id: "azure/anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5" },
-    { id: "azure/anthropic/claude-haiku-4-5", name: "Claude Haiku 4.5" },
-    { id: "nvcf/nvidia/llama-3.3-nemotron-super-49b-v1.5", name: "Nemotron Super 49B v1.5" },
-    { id: "nvcf/meta/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
-    { id: "nvcf/openai/gpt-oss-120b", name: "GPT OSS 120B" },
-    { id: "nvidia/qwen/qwen3-next-80b-a3b-instruct", name: "Qwen 3 Next 80B" },
+    { id: "nvidia/llama-3.3-nemotron-super-49b-v1.5", name: "Nemotron Super 49B v1.5" },
+    { id: "nvidia/llama-3.1-nemotron-ultra-253b-v1", name: "Nemotron Ultra 253B v1" },
+    { id: "nvidia/llama-3.1-nemotron-70b-instruct", name: "Nemotron 70B Instruct" },
+    { id: "meta/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
+    { id: "mistralai/mistral-nemotron", name: "Mistral Nemotron" },
+    { id: "openai/gpt-oss-120b", name: "GPT OSS 120B" },
+    { id: "qwen/qwen3-next-80b-a3b-instruct", name: "Qwen 3 Next 80B" },
   ],
 };
 

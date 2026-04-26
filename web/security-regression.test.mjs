@@ -112,3 +112,14 @@ test("Google Docs sync feature is removed from the web app", () => {
     assert.equal(readdirSync(apiDir).includes("google-docs"), false);
   }
 });
+
+test("NVIDIA provider uses current API catalog endpoint and model IDs", () => {
+  const chatRoute = read("./src/app/api/chat/route.ts");
+  const settings = read("./src/components/Settings.tsx");
+
+  assert.match(chatRoute, /https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/);
+  assert.doesNotMatch(chatRoute, /inference-api\.nvidia\.com/);
+  assert.match(settings, /nvidia\/llama-3\.3-nemotron-super-49b-v1\.5/);
+  assert.doesNotMatch(settings, /nvcf\/nvidia/);
+  assert.doesNotMatch(settings, /azure\/anthropic/);
+});

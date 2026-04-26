@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NoteAI Web
 
-## Getting Started
+Next.js 16 SPA for NoteAI, deployed to Cloudflare Workers with OpenNext.
 
-First, run the development server:
+Production: https://noteai-web.noteai-jp.workers.dev
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+src/
+  app/
+    page.tsx                 Main SPA shell and selection/layout orchestration
+    api/                     Server routes for auth, data, AI, transcription, TTS
+  components/                React views and editors
+  components/extensions/     Tiptap extensions
+  lib/
+    types.ts                 Shared entity types
+    db.ts                    Client REST wrapper
+    server-db.ts             Turso HTTP persistence and schema
+    repositories.ts          Typed persistence adapters over db.ts
+    library.ts               Entity drafts, search, source selection, selection clearing
+    hooks.ts                 Fetch/refresh hooks and recording state hook
+    recording-workflow.ts    Recording completion, transcription fallback, summary fallback
+    ai.ts                    LLM/transcription transport helpers
+    ai-tasks.ts              Prompt construction and response parsing
+    assistant-actions.ts     AI chat action parsing and execution
+    audio.ts                 Browser recording and speech recognition
+    tts.ts                   Text-to-speech playback helpers
+    content-utils.ts         Markdown/HTML conversion
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The UI components should stay thin. Put reusable meeting, note, task, T5T, recording, and AI behavior in `src/lib/*` modules before wiring it into React views.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Local Development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Open http://localhost:3000.
 
-To learn more about Next.js, take a look at the following resources:
+## Environment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Create `.env.local`:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+TURSO_DATABASE_URL=libsql://your-db.turso.io
+TURSO_AUTH_TOKEN=your-turso-token
+NOTEAI_AUTH_SECRET=any-random-string
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_ALLOWED_EMAILS=you@example.com
+```
 
-## Deploy on Vercel
+API keys for LLM/TTS providers are stored in the app settings table and read server-side only.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Validation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npx tsc --noEmit --pretty false
+npm run build
+```
+
+## Cloudflare Deployment
+
+```bash
+npm run build:cf
+npm run deploy:cf
+```
+
+The worker name is configured in `wrangler.jsonc` as `noteai-web`.

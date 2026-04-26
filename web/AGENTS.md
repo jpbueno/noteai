@@ -4,6 +4,18 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## NoteAI Web Architecture
+
+- This app deploys to Cloudflare Workers via OpenNext, not Vercel.
+- Keep React components focused on view state and event wiring.
+- Put reusable behavior in `src/lib/`:
+  - `library.ts` for entity drafts, search, source selection, and selection clearing
+  - `recording-workflow.ts` for stop-recording completion and fallback behavior
+  - `ai-tasks.ts` for prompt construction and JSON parsing
+  - `assistant-actions.ts` for AI chat action parsing and execution
+  - `repositories.ts` for typed persistence adapters
+- Validate with `npm run lint`, `npx tsc --noEmit --pretty false`, and `npm run build`.
+
 <!-- VERCEL BEST PRACTICES START -->
 ## Best practices for developing on Vercel
 

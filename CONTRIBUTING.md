@@ -12,13 +12,17 @@
 - Prefer SwiftUI composition and clear state ownership.
 - Avoid introducing plaintext secret storage.
 - Add comments only where logic is non-obvious.
+- Put reusable Swift workflow/search/AI parsing behavior in `MeetingCaptureWorkflow`, `LibraryOperations`, and `AITasks`.
+- Put reusable web entity, recording, AI, and assistant-action behavior in `web/src/lib/*` modules instead of embedding it in React components.
 
 ## Validation Before PR
 
-- Build succeeds:
-  - `xcodebuild -project "NoteAI.xcodeproj" -scheme "NoteAI" -configuration Debug -derivedDataPath ".xcode-build" build`
-- Run tests:
-  - `xcodebuild -project "NoteAI.xcodeproj" -scheme "NoteAI" -configuration Debug -derivedDataPath ".xcode-build" test`
+- Swift tests:
+  - `swift test`
+- Web lint/type/build:
+  - `cd web && npm run lint`
+  - `cd web && npx tsc --noEmit --pretty false`
+  - `cd web && npm run build`
 - Confirm no accidental artifacts are included.
 
 ## Commit Hygiene

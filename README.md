@@ -22,16 +22,26 @@ Both support: meeting recording/transcription, LLM summarization, notes, tasks, 
 
 ```
 NoteAI/                   macOS app source (SwiftUI + GRDB + WhisperKit)
+  App/                    App entry, MeetingManager, meeting capture workflow
+  Storage/                GRDB store, typed repositories, library operations
+  Summarization/          LLM provider clients and AI task parsing/formatting
 NoteAITests/              macOS unit tests
 web/                      Web app source (Next.js + Turso)
   src/
     app/                  Pages, API routes
     components/           React components
-    lib/                  Shared logic (types, hooks, audio, AI, db)
+    lib/                  Domain modules, hooks, audio, AI, typed repositories
   public/                 Static assets
 NoteAI.xcodeproj/         Xcode project
 Package.swift             Swift Package manifest
 ```
+
+### Architecture Notes
+
+The app keeps UI orchestration thin by pushing reusable behavior into deeper domain modules:
+
+- **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns search/range/default-title behavior; `AITasks` owns JSON extraction, prompt formatting, and summary/T5T parsing; repository protocols document the persistence seams around `MeetingStore`.
+- **Web**: `recording-workflow.ts` owns recording completion and fallback behavior; `library.ts` owns entity drafts, search, source selection, and delete-selection rules; `ai-tasks.ts` owns prompt construction and response parsing; `assistant-actions.ts` owns AI action parsing/execution; `repositories.ts` provides typed persistence adapters over `db.ts`.
 
 ## Tech Stack
 
@@ -99,6 +109,8 @@ GOOGLE_ALLOWED_EMAILS=you@example.com
 
 ### Deploy to Cloudflare Workers
 
+Production is deployed at: https://noteai-web.noteai-jp.workers.dev
+
 ```bash
 cd web
 npm run build:cf
@@ -141,3 +153,13 @@ All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id
 - **Web**: Google OAuth with HMAC-signed session cookies
 - **Web**: Bearer token auth for programmatic API access
 - Do not commit `.env*` files or build artifacts
+
+## Validation
+
+```bash
+swift test
+cd web
+npm run lint
+npx tsc --noEmit --pretty false
+npm run build
+```

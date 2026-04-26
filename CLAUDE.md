@@ -15,23 +15,27 @@ Both support: meeting recording/transcription, LLM summarization, notes, tasks, 
 
 **Target**: macOS 14.2+ | **Swift**: 5.9 | **Bundle ID**: `com.noteai.app`
 
-### Architecture: MVVM + Actor-Based Services
+### Architecture: MVVM + Actor-Based Services + Deep Domain Modules
 
 ```
 NoteAI/
-  App/              # Entry point, AppDelegate, MeetingManager (central orchestrator)
+  App/              # Entry point, AppDelegate, MeetingManager, MeetingCaptureWorkflow
   Audio/            # ProcessTap, ScreenCaptureKit, mic capture, ring buffer, TTS
   Transcription/    # WhisperKit engine (actor-based, hallucination filtering)
-  Summarization/    # LLM abstraction (OpenRouter, Anthropic, OpenAI, NVIDIA)
+  Summarization/    # LLM abstraction, AI task parsing/formatting
   MeetingDetection/ # Auto-detect Teams/browser audio activity
-  Storage/          # GRDB persistence, models (Meeting, Note, TaskItem, T5TReport, ChatMessage)
+  Storage/          # GRDB persistence, repositories, library operations, models
   Auth/             # Google OAuth 2.0 + PKCE, Keychain, API key management
   Delivery/         # Export (Markdown/JSON), Notion import, notifications
   UI/               # SwiftUI views organized by feature area
 ```
 
 ### Key Components
-- **MeetingManager** (`App/MeetingManager.swift`) — Central state orchestrator (~650 lines), coordinates all services
+- **MeetingManager** (`App/MeetingManager.swift`) — UI-bound state orchestrator; delegates reusable workflow/search/AI parsing behavior to deeper modules
+- **MeetingCaptureWorkflow** (`App/MeetingCaptureWorkflow.swift`) — Transcript text formatting, summary fallback, and meeting completion helpers
+- **LibraryOperations** (`Storage/LibraryOperations.swift`) — Search, date-range selection, and T5T default title behavior
+- **AITasks** (`Summarization/AITasks.swift`) — JSON extraction, meeting summary parsing, T5T parsing, and summary prompt formatting
+- **Repositories** (`Storage/Repositories.swift`) — Protocol seams for meetings, notes, tasks, and T5T persistence
 - **TranscriptionEngine** (`Transcription/TranscriptionEngine.swift`) — Actor, WhisperKit with hallucination filtering
 - **SummarizationEngine** (`Summarization/SummarizationEngine.swift`) — Multi-provider LLM, template-based prompts
 - **MeetingStore** (`Storage/MeetingStore.swift`) — GRDB persistence layer, CRUD for all models
@@ -84,7 +88,7 @@ Project is managed via `project.yml` (XcodeGen). Regenerate Xcode project with `
 web/src/
   app/
     layout.tsx         # Root layout (dark theme, Geist fonts)
-    page.tsx           # Main SPA shell — all UI state lives here
+    page.tsx           # Main SPA shell — selection/layout orchestration
     globals.css        # Tailwind + dark theme vars + markdown styling
     api/
       chat/route.ts    # LLM chat proxy (OpenRouter, Anthropic, OpenAI, NVIDIA)
@@ -109,8 +113,13 @@ web/src/
     types.ts           # All TypeScript interfaces (mirrors Swift models)
     db.ts              # Client-side API wrapper (REST calls to Next.js routes)
     server-db.ts       # Turso HTTP client (server-side only)
-    hooks.ts           # Data fetching hooks (2s polling), recording, search
-    ai.ts              # LLM integration (summarize, chat, transcribe)
+    hooks.ts           # Data fetching hooks and recording hook
+    library.ts         # Entity drafts, library search, source selection, selection clearing
+    recording-workflow.ts # Recording completion, fallback transcription/summary behavior
+    ai.ts              # LLM transport-facing helpers
+    ai-tasks.ts        # Prompt construction and response parsing for AI tasks
+    assistant-actions.ts # AI chat action parsing/execution
+    repositories.ts    # Typed persistence adapters over db.ts
     audio.ts           # Browser Web Audio API + Speech Recognition
     tts.ts             # TTS with chunking + prefetching
     content-utils.ts   # Markdown <-> HTML (marked + Turndown)
@@ -128,7 +137,7 @@ web/src/
 2. On stop: audio blob → `/api/transcribe` (Whisper proxy) → full transcript
 3. Summarization: transcript → `/api/chat` (LLM proxy) → structured JSON summary
 4. Persistence: all data → `/api/data/[table]` → Turso SQLite (server-side)
-5. Polling: `useRefreshable` hooks poll every 2s, `triggerRefresh()` for immediate updates
+5. Refresh: `useRefreshable` fetches on mount and after `triggerRefresh()` mutations
 
 ### Web Dependencies
 
@@ -163,7 +172,7 @@ npm run build && npm start
 - `TURSO_DATABASE_URL` — Turso database URL
 - `TURSO_AUTH_TOKEN` — Turso auth token
 
-Deployed on **Vercel**. Cloudflare tunnel origins allowed for dev (`*.trycloudflare.com`).
+Deployed on **Cloudflare Workers** via OpenNext at `https://noteai-web.noteai-jp.workers.dev`.
 
 ---
 
@@ -195,14 +204,16 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Use `@ObservedObject` / `@EnvironmentObject` for SwiftUI state binding
 - Prefer `async/await` over Combine for new async work
 - Secrets go in Keychain via `KeychainHelper`, never UserDefaults
+- Put reusable workflow/search/AI parsing behavior in `MeetingCaptureWorkflow`, `LibraryOperations`, or `AITasks` instead of growing `MeetingManager`
 
 ### TypeScript (Web)
 - All components are `"use client"` — this is a client-rendered SPA
 - Types defined in `lib/types.ts` — keep in sync with Swift models
 - Data access via `lib/db.ts` wrapper → API routes → `lib/server-db.ts` → Turso
 - External API calls (LLM, TTS, transcription) always proxied through API routes — never call from client
-- Custom hooks in `lib/hooks.ts` for data fetching (2s polling pattern)
+- Custom hooks in `lib/hooks.ts` for data fetching and recording state
 - Mutation pattern: call `db.*`, then `triggerRefresh()` for immediate UI update
+- Prefer `lib/library.ts`, `lib/recording-workflow.ts`, `lib/ai-tasks.ts`, and `lib/assistant-actions.ts` for reusable domain behavior instead of embedding prompts/workflows in React components
 
 ### UI (Both platforms)
 - Dark mode Notion-like palette (macOS: `UI/Theme.swift`, web: `globals.css` CSS vars)
@@ -229,10 +240,10 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Single `page.tsx` holds all app state — no route-based navigation
 - Browser Speech Recognition is the primary transcription (no local Whisper) — quality varies by browser
 - Turso is the only persistence — no IndexedDB fallback, no offline mode
-- 2-second polling for data refresh — `triggerRefresh()` forces immediate update after mutations
+- Data refresh is fetch-on-mount plus `triggerRefresh()` after mutations
 - TTS uses chunked text (~250 chars) with 2-chunk prefetch for smooth playback
 - API proxy pattern: all external calls (LLM, TTS, Whisper) go through `/api/*` routes
 
 ## Test Coverage
-- macOS: minimal — `NoteAITests/MeetingStoreTests.swift` (CRUD + export formatting)
-- Web: no tests yet
+- macOS: `NoteAITests/MeetingStoreTests.swift` and `NoteAITests/ArchitectureModuleTests.swift`
+- Web: no dedicated test runner yet; use `npm run lint`, `npx tsc --noEmit --pretty false`, and `npm run build`

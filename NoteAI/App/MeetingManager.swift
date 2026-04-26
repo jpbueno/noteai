@@ -35,6 +35,18 @@ final class MeetingManager: ObservableObject {
         LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).tasks
     }
 
+    // Todos state (lightweight, with optional due date — mirrors web TodoItem)
+    @Published var todos: [TodoItem] = []
+
+    var filteredTodos: [TodoItem] {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return todos }
+        let query = searchQuery.lowercased()
+        return todos.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.description.lowercased().contains(query)
+        }
+    }
+
     // T5T state
     @Published var t5tReports: [T5TReport] = []
     @Published var t5tConfig: T5TConfig = .empty
@@ -68,23 +80,45 @@ final class MeetingManager: ObservableObject {
 
     let meetingDetector = MeetingDetector()
 
+    // AI Coach state (real-time Solutions Architect insights during recording)
+    @Published var coachInsights: [CoachInsight] = []
+    @Published var coachAnalyzing = false
+    @Published var coachReplying = false
+    @Published var coachEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(coachEnabled, forKey: "aiCoachEnabled")
+        }
+    }
+
     private let audioCaptureManager = AudioCaptureManager()
     private let transcriptionEngine = TranscriptionEngine()
     private let summarizationEngine = SummarizationEngine()
+    private let aiCoachEngine = AICoachEngine()
     private let meetingStore = MeetingStore()
     private let notificationManager = NotificationDelivery()
 
     private var currentMeetingStart: Date?
     private var recordingTimer: Timer?
+    private var coachTimer: Timer?
+    private var coachAnalyzingInFlight = false
+    private var coachLastAnalyzedSegmentCount = 0
+    private var coachLastAnalyzedTime: Date?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
         self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
+        // Default coach to enabled; users can turn it off from the recording screen.
+        if UserDefaults.standard.object(forKey: "aiCoachEnabled") == nil {
+            self.coachEnabled = true
+        } else {
+            self.coachEnabled = UserDefaults.standard.bool(forKey: "aiCoachEnabled")
+        }
 
         loadMeetings()
         loadNotes()
         loadTasks()
         loadT5TData()
+        loadTodos()
         setupToggleListener()
         setupTranscriptionPipeline()
         setupAutoDetection()
@@ -108,6 +142,14 @@ final class MeetingManager: ObservableObject {
         currentTranscript = []
         currentMeetingStart = Date()
         recordingDuration = 0
+
+        // Reset AI Coach state for the new recording
+        coachInsights = []
+        coachAnalyzing = false
+        coachAnalyzingInFlight = false
+        coachLastAnalyzedSegmentCount = 0
+        coachLastAnalyzedTime = nil
+        startCoachLoopIfEnabled()
 
         // Start duration timer
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -137,6 +179,7 @@ final class MeetingManager: ObservableObject {
         guard state == .recording else { return }
         recordingTimer?.invalidate()
         recordingTimer = nil
+        stopCoachLoop()
         audioCaptureManager.stopCapture()
 
         let appName = meetingDetector.detectedApp ?? "Meeting"
@@ -393,17 +436,73 @@ final class MeetingManager: ObservableObject {
         }
     }
 
+    // MARK: - Todos
+
+    @discardableResult
+    func createTodo(title: String = "", description: String = "", dueDate: Date? = nil) -> TodoItem {
+        let todo = TodoItem(title: title, description: description, dueDate: dueDate)
+        do {
+            try meetingStore.saveTodo(todo)
+            todos.insert(todo, at: 0)
+        } catch {
+            print("Failed to save todo: \(error)")
+        }
+        return todo
+    }
+
+    func updateTodo(_ todo: TodoItem) {
+        var updated = todo
+        updated.modifiedDate = Date()
+        do {
+            try meetingStore.saveTodo(updated)
+            if let index = todos.firstIndex(where: { $0.id == todo.id }) {
+                todos[index] = updated
+            }
+        } catch {
+            print("Failed to update todo: \(error)")
+        }
+    }
+
+    func toggleTodoCompletion(_ todo: TodoItem) {
+        var updated = todo
+        updated.completed.toggle()
+        updated.modifiedDate = Date()
+        updateTodo(updated)
+    }
+
+    func deleteTodo(_ todo: TodoItem) {
+        do {
+            try meetingStore.deleteTodo(id: todo.id)
+            todos.removeAll { $0.id == todo.id }
+        } catch {
+            print("Failed to delete todo: \(error)")
+        }
+    }
+
+    func todosInRange(start: Date, end: Date) -> [TodoItem] {
+        todos.filter { $0.createdDate >= start && $0.createdDate <= end }
+    }
+
+    private func loadTodos() {
+        do {
+            todos = try meetingStore.fetchAllTodos()
+        } catch {
+            print("Failed to load todos: \(error)")
+        }
+    }
+
     // MARK: - T5T
 
     func meetingsInRange(start: Date, end: Date) -> [Meeting] {
         LibraryOperations.meetingsInRange(meetings, start: start, end: end)
     }
 
-    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], taskIDs: [UUID] = []) async throws -> T5TReport {
+    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], taskIDs: [UUID] = [], todoIDs: [UUID] = []) async throws -> T5TReport {
         let selectedMeetings = meetings.filter { meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { noteIDs.contains($0.id) }
         let selectedTasks = tasks.filter { taskIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
+        let selectedTodos = todos.filter { todoIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty || !selectedTodos.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -416,6 +515,7 @@ final class MeetingManager: ObservableObject {
                 meetings: selectedMeetings,
                 notes: selectedNotes,
                 tasks: selectedTasks,
+                todos: selectedTodos,
                 config: t5tConfig,
                 periodStart: periodStart,
                 periodEnd: periodEnd
@@ -435,6 +535,7 @@ final class MeetingManager: ObservableObject {
             meetingIDs: meetingIDs,
             noteIDs: noteIDs,
             taskIDs: taskIDs,
+            todoIDs: todoIDs,
             sections: sections,
             status: .draft
         )
@@ -477,7 +578,8 @@ final class MeetingManager: ObservableObject {
         let selectedMeetings = meetings.filter { report.meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { report.noteIDs.contains($0.id) }
         let selectedTasks = tasks.filter { report.taskIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
+        let selectedTodos = todos.filter { report.todoIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty || !selectedTodos.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -490,6 +592,7 @@ final class MeetingManager: ObservableObject {
                 meetings: selectedMeetings,
                 notes: selectedNotes,
                 tasks: selectedTasks,
+                todos: selectedTodos,
                 config: t5tConfig,
                 periodStart: report.periodStart,
                 periodEnd: report.periodEnd
@@ -573,6 +676,143 @@ final class MeetingManager: ObservableObject {
                     }
                 } catch {
                     print("Transcription error: \(error)")
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Coach loop
+
+    func toggleCoach() {
+        coachEnabled.toggle()
+        if state == .recording {
+            if coachEnabled {
+                startCoachLoopIfEnabled()
+            } else {
+                stopCoachLoop()
+            }
+        }
+    }
+
+    private func startCoachLoopIfEnabled() {
+        guard coachEnabled else { return }
+        coachTimer?.invalidate()
+        // Poll every 8 seconds — mirrors the web implementation in useAICoach.ts.
+        coachTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.considerCoachAnalysis()
+            }
+        }
+    }
+
+    private func stopCoachLoop() {
+        coachTimer?.invalidate()
+        coachTimer = nil
+    }
+
+    /// Send a chat message to the AI SA. Appends the user message, awaits a
+    /// reply using the current transcript + prior auto-insights, and appends
+    /// the assistant response to `coachInsights`.
+    func sendCoachMessage(_ question: String) {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard !coachReplying else { return }
+
+        let userMsg = CoachInsight(type: .keyInsight, content: trimmed, role: .user)
+        coachInsights.append(userMsg)
+        coachReplying = true
+
+        let transcript = currentTranscript.map { $0.text }.joined(separator: " ")
+        let chatHistory: [(role: CoachRole, content: String)] = coachInsights
+            .compactMap { entry in
+                guard let role = entry.role else { return nil }
+                return (role: role, content: entry.content)
+            }
+        let priorInsights = coachInsights
+            .filter { $0.role == nil }
+            .map { $0.content }
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor in self.coachReplying = false }
+            }
+            do {
+                let reply = try await self.aiCoachEngine.ask(
+                    question: trimmed,
+                    transcript: transcript,
+                    chatHistory: chatHistory,
+                    priorInsights: priorInsights
+                )
+                let cleaned = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleaned.isEmpty else { return }
+                await MainActor.run {
+                    self.coachInsights.append(
+                        CoachInsight(type: .keyInsight, content: cleaned, role: .assistant)
+                    )
+                }
+            } catch {
+                let msg = "Reply failed: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.coachInsights.append(
+                        CoachInsight(type: .keyInsight, content: msg, role: .assistant)
+                    )
+                }
+            }
+        }
+    }
+
+    private func considerCoachAnalysis() {
+        guard coachEnabled else { return }
+        guard state == .recording else { return }
+        guard !coachAnalyzingInFlight else { return }
+
+        let segments = currentTranscript
+        guard !segments.isEmpty else { return }
+
+        let fullText = segments.map { $0.text }.joined(separator: " ")
+        let words = fullText.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+        guard words.count >= 25 else { return }
+
+        // Enforce minimum interval between analyses
+        if let last = coachLastAnalyzedTime {
+            let elapsed = Date().timeIntervalSince(last)
+            if elapsed < 45 { return }
+            let newSegments = segments.count - coachLastAnalyzedSegmentCount
+            if newSegments < 2 && elapsed < 90 { return }
+        }
+
+        coachAnalyzingInFlight = true
+        coachAnalyzing = true
+        let priorContents = coachInsights.map { $0.content }
+        let currentCount = segments.count
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor in
+                    self.coachAnalyzingInFlight = false
+                    self.coachAnalyzing = false
+                }
+            }
+
+            do {
+                let new = try await self.aiCoachEngine.analyze(
+                    transcript: fullText,
+                    previousInsights: priorContents
+                )
+                await MainActor.run {
+                    guard self.state == .recording else { return }
+                    if !new.isEmpty {
+                        self.coachInsights.append(contentsOf: new)
+                    }
+                    self.coachLastAnalyzedSegmentCount = currentCount
+                    self.coachLastAnalyzedTime = Date()
+                }
+            } catch {
+                print("[AICoach] Analysis failed: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.coachLastAnalyzedTime = Date()
                 }
             }
         }

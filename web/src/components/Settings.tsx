@@ -13,9 +13,9 @@ import {
   EyeOff,
   Save,
 } from "lucide-react";
-import type { LLMProvider, MeetingTemplate, T5TConfig } from "@/lib/types";
+import type { LLMProvider, MeetingTemplate, T5TConfig, T5TManager, T5TReportTemplateSection, T5TDailyTemplateSection, T5TSectionMapping } from "@/lib/types";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
-import { LLM_PROVIDERS, MEETING_TEMPLATES } from "@/lib/types";
+import { LLM_PROVIDERS, MEETING_TEMPLATES, DEFAULT_T5T_CONFIG } from "@/lib/types";
 import { db, getSetting, isSettingConfigured, setSetting, getT5TConfig, saveT5TConfig } from "@/lib/db";
 import { triggerRefresh } from "@/lib/hooks";
 import { TTS_VOICES, type TTSVoice } from "@/lib/tts";
@@ -89,13 +89,11 @@ export default function Settings() {
     nvidia: false,
   });
   const [showKey, setShowKey] = useState(false);
-  const [t5tConfig, setT5tConfig] = useState<T5TConfig>({
-    vertical: "",
-    region: "",
-    jobFunction: "",
-    subjectLine: "",
-  });
+  const [t5tConfig, setT5tConfig] = useState<T5TConfig>(DEFAULT_T5T_CONFIG);
   const [ttsVoice, setTtsVoice] = useState<TTSVoice>("nova");
+  const [groqKey, setGroqKey] = useState("");
+  const [groqConfigured, setGroqConfigured] = useState(false);
+  const [showGroqKey, setShowGroqKey] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -125,6 +123,8 @@ export default function Settings() {
 
       const tv = (await getSetting("tts_voice")) || "nova";
       setTtsVoice(tv as TTSVoice);
+
+      setGroqConfigured(await isSettingConfigured("api_key_groq"));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -138,6 +138,11 @@ export default function Settings() {
         await setSetting(`api_key_${k}`, v);
       }
     }
+    await saveT5TConfig(t5tConfig);
+    await setSetting("tts_voice", ttsVoice);
+    if (groqKey) {
+      await setSetting("api_key_groq", groqKey);
+    }
     setConfiguredKeys((prev) => {
       const next = { ...prev };
       for (const [k, v] of Object.entries(apiKeys) as [LLMProvider, string][]) {
@@ -145,9 +150,9 @@ export default function Settings() {
       }
       return next;
     });
+    if (groqKey) setGroqConfigured(true);
     setApiKeys({ openrouter: "", anthropic: "", openai: "", nvidia: "" });
-    await saveT5TConfig(t5tConfig);
-    await setSetting("tts_voice", ttsVoice);
+    setGroqKey("");
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -211,19 +216,19 @@ export default function Settings() {
 
               <Section title={`API Key — ${LLM_PROVIDERS[provider].displayName}`}>
                 <div className="relative">
-	                  <input
-	                    type={showKey ? "text" : "password"}
-	                    value={apiKeys[provider]}
+                  <input
+                    type={showKey ? "text" : "password"}
+                    value={apiKeys[provider]}
                     onChange={(e) =>
                       setApiKeys({ ...apiKeys, [provider]: e.target.value })
                     }
-	                    placeholder={
-	                      configuredKeys[provider]
-	                        ? "Configured - enter a new key to replace"
-	                        : `Enter ${LLM_PROVIDERS[provider].displayName} API key`
-	                    }
-	                    className="w-full pr-10"
-	                  />
+                    placeholder={
+                      configuredKeys[provider]
+                        ? "Configured - enter a new key to replace"
+                        : `Enter ${LLM_PROVIDERS[provider].displayName} API key`
+                    }
+                    className="w-full pr-10"
+                  />
                   <button
                     onClick={() => setShowKey(!showKey)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
@@ -311,6 +316,41 @@ export default function Settings() {
                   your NVIDIA or OpenAI key.
                 </p>
               </Section>
+
+              <Section title="Transcription API Key — Groq">
+                <div className="relative">
+                  <input
+                    type={showGroqKey ? "text" : "password"}
+                    value={groqKey}
+                    onChange={(e) => setGroqKey(e.target.value)}
+                    placeholder={
+                      groqConfigured
+                        ? "Configured - enter a new key to replace"
+                        : "Enter Groq API key"
+                    }
+                    className="w-full pr-10"
+                  />
+                  <button
+                    onClick={() => setShowGroqKey(!showGroqKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
+                  >
+                    {showGroqKey ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-text-tertiary mt-1.5">
+                  Used for Whisper transcription during recording. Free at console.groq.com/keys.
+                  Falls back to OpenAI key if set.
+                </p>
+                {!groqKey && !groqConfigured && !apiKeys.openai && !configuredKeys.openai && (
+                  <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
+                    ⚠ Required for meeting transcription
+                  </p>
+                )}
+              </Section>
             </div>
           )}
 
@@ -370,8 +410,8 @@ export default function Settings() {
                     ) {
                       await db.meetings.clear();
                       await db.notes.clear();
-                      await db.tasks.clear();
                       await db.t5tReports.clear();
+                      await db.dailyLogs.clear();
                       await db.chatMessages.clear();
                       triggerRefresh();
                       window.location.reload();
@@ -387,75 +427,94 @@ export default function Settings() {
 
           {tab === "t5t" && (
             <div className="space-y-8">
-              <Section title="T5T Report Defaults">
+              <Section title="Identity">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-text-tertiary block mb-1">Name</label>
+                      <input type="text" value={t5tConfig.identity.name} onChange={(e) => setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, name: e.target.value } })} placeholder="e.g. JP Santana" className="w-full" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-text-tertiary block mb-1">Email</label>
+                      <input type="text" value={t5tConfig.identity.email} onChange={(e) => setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, email: e.target.value } })} placeholder="e.g. jbuenosantan@nvidia.com" className="w-full" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-text-tertiary block mb-1">Role</label>
+                      <input type="text" value={t5tConfig.identity.role} onChange={(e) => setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, role: e.target.value } })} placeholder="e.g. Solutions Architect" className="w-full" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-text-tertiary block mb-1">Team</label>
+                      <input type="text" value={t5tConfig.identity.team} onChange={(e) => setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, team: e.target.value } })} placeholder="e.g. Inference Ops | NALA | SA" className="w-full" />
+                    </div>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="Managers">
+                <div className="space-y-2">
+                  {(t5tConfig.identity.managers || []).map((mgr, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input type="text" value={mgr.name} onChange={(e) => { const managers = [...t5tConfig.identity.managers]; managers[i] = { ...managers[i], name: e.target.value }; setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, managers } }); }} placeholder="Name" className="flex-1" />
+                      <input type="text" value={mgr.email} onChange={(e) => { const managers = [...t5tConfig.identity.managers]; managers[i] = { ...managers[i], email: e.target.value }; setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, managers } }); }} placeholder="Email" className="flex-1" />
+                      <button onClick={() => { const managers = t5tConfig.identity.managers.filter((_, idx) => idx !== i); setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, managers } }); }} className="text-text-tertiary hover:text-danger text-xs">Remove</button>
+                    </div>
+                  ))}
+                  <button onClick={() => { const managers = [...(t5tConfig.identity.managers || []), { name: "", email: "" }]; setT5tConfig({ ...t5tConfig, identity: { ...t5tConfig.identity, managers } }); }} className="text-xs text-accent hover:underline">+ Add Manager</button>
+                </div>
+              </Section>
+
+              <Section title="Email Settings">
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-text-tertiary block mb-1">
-                      Vertical
-                    </label>
-                    <input
-                      type="text"
-                      value={t5tConfig.vertical}
-                      onChange={(e) =>
-                        setT5tConfig({
-                          ...t5tConfig,
-                          vertical: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Cloud & Enterprise"
-                      className="w-full"
-                    />
+                    <label className="text-xs text-text-tertiary block mb-1">Subject Format</label>
+                    <input type="text" value={t5tConfig.emailSettings.subjectFormat} onChange={(e) => setT5tConfig({ ...t5tConfig, emailSettings: { ...t5tConfig.emailSettings, subjectFormat: e.target.value } })} className="w-full font-mono text-xs" />
+                    <p className="text-[10px] text-text-tertiary mt-0.5">Use {"{{start_date}}"} and {"{{end_date}}"} as placeholders</p>
                   </div>
                   <div>
-                    <label className="text-xs text-text-tertiary block mb-1">
-                      Region
-                    </label>
-                    <input
-                      type="text"
-                      value={t5tConfig.region}
-                      onChange={(e) =>
-                        setT5tConfig({
-                          ...t5tConfig,
-                          region: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Americas"
-                      className="w-full"
-                    />
+                    <label className="text-xs text-text-tertiary block mb-1">Greeting</label>
+                    <textarea value={t5tConfig.emailSettings.greeting} onChange={(e) => setT5tConfig({ ...t5tConfig, emailSettings: { ...t5tConfig.emailSettings, greeting: e.target.value } })} className="w-full font-mono text-xs" rows={2} />
+                    <p className="text-[10px] text-text-tertiary mt-0.5">Use {"{{managers}}"} and {"{{name}}"} as placeholders</p>
                   </div>
                   <div>
-                    <label className="text-xs text-text-tertiary block mb-1">
-                      Job Function
-                    </label>
-                    <input
-                      type="text"
-                      value={t5tConfig.jobFunction}
-                      onChange={(e) =>
-                        setT5tConfig({
-                          ...t5tConfig,
-                          jobFunction: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Solutions Architect"
-                      className="w-full"
-                    />
+                    <label className="text-xs text-text-tertiary block mb-1">Closing</label>
+                    <textarea value={t5tConfig.emailSettings.closing} onChange={(e) => setT5tConfig({ ...t5tConfig, emailSettings: { ...t5tConfig.emailSettings, closing: e.target.value } })} className="w-full font-mono text-xs" rows={2} />
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="Report Template Sections">
+                <div className="space-y-2">
+                  {(t5tConfig.reportTemplate || []).map((section, i) => (
+                    <div key={section.id} className="flex items-center gap-2 text-xs">
+                      <span className="text-text-tertiary w-4">{i + 1}.</span>
+                      <input type="text" value={section.name} onChange={(e) => { const tpl = [...t5tConfig.reportTemplate]; tpl[i] = { ...tpl[i], name: e.target.value }; setT5tConfig({ ...t5tConfig, reportTemplate: tpl }); }} className="flex-1" />
+                      <select value={section.type} onChange={(e) => { const tpl = [...t5tConfig.reportTemplate]; tpl[i] = { ...tpl[i], type: e.target.value as "bullets" | "table" | "freeform" }; setT5tConfig({ ...t5tConfig, reportTemplate: tpl }); }} className="w-24">
+                        <option value="bullets">Bullets</option>
+                        <option value="table">Table</option>
+                        <option value="freeform">Freeform</option>
+                      </select>
+                      <button onClick={() => { const tpl = t5tConfig.reportTemplate.filter((_, idx) => idx !== i); setT5tConfig({ ...t5tConfig, reportTemplate: tpl }); }} className="text-text-tertiary hover:text-danger">Remove</button>
+                    </div>
+                  ))}
+                  <button onClick={() => { const tpl = [...(t5tConfig.reportTemplate || []), { id: crypto.randomUUID(), name: "", type: "bullets" as const, placeholder: "" }]; setT5tConfig({ ...t5tConfig, reportTemplate: tpl }); }} className="text-xs text-accent hover:underline">+ Add Section</button>
+                </div>
+              </Section>
+
+              <Section title="Link Configuration">
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-text-tertiary block mb-1">JIRA Base URL</label>
+                    <input type="text" value={t5tConfig.jiraBaseUrl} onChange={(e) => setT5tConfig({ ...t5tConfig, jiraBaseUrl: e.target.value })} className="w-full font-mono text-xs" placeholder="https://jirasw.nvidia.com/browse" />
                   </div>
                   <div>
-                    <label className="text-xs text-text-tertiary block mb-1">
-                      Subject Line
-                    </label>
-                    <input
-                      type="text"
-                      value={t5tConfig.subjectLine}
-                      onChange={(e) =>
-                        setT5tConfig({
-                          ...t5tConfig,
-                          subjectLine: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Weekly T5T Report"
-                      className="w-full"
-                    />
+                    <label className="text-xs text-text-tertiary block mb-1">JIRA Project Keys (comma-separated)</label>
+                    <input type="text" value={(t5tConfig.jiraProjectKeys || []).join(", ")} onChange={(e) => setT5tConfig({ ...t5tConfig, jiraProjectKeys: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} className="w-full font-mono text-xs" placeholder="EQT, SWQA" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-tertiary block mb-1">NVBug Base URL</label>
+                    <input type="text" value={t5tConfig.nvbugBaseUrl} onChange={(e) => setT5tConfig({ ...t5tConfig, nvbugBaseUrl: e.target.value })} className="w-full font-mono text-xs" placeholder="https://nvbugspro.nvidia.com/bug" />
                   </div>
                 </div>
               </Section>
@@ -471,8 +530,8 @@ export default function Settings() {
                       const data = {
                         meetings: await db.meetings.toArray(),
                         notes: await db.notes.toArray(),
-                        tasks: await db.tasks.toArray(),
                         t5tReports: await db.t5tReports.toArray(),
+                        dailyLogs: await db.dailyLogs.toArray(),
                       };
                       const blob = new Blob(
                         [JSON.stringify(data, null, 2)],
@@ -510,12 +569,13 @@ export default function Settings() {
                         if (data.meetings)
                           await db.meetings.bulkPut(data.meetings);
                         if (data.notes) await db.notes.bulkPut(data.notes);
-                        if (data.tasks) await db.tasks.bulkPut(data.tasks);
                         if (data.t5tReports)
                           await db.t5tReports.bulkPut(data.t5tReports);
+                        if (data.dailyLogs)
+                          await db.dailyLogs.bulkPut(data.dailyLogs);
                         triggerRefresh();
                         alert(
-                          `Imported: ${data.meetings?.length || 0} meetings, ${data.notes?.length || 0} notes, ${data.tasks?.length || 0} tasks, ${data.t5tReports?.length || 0} reports`
+                          `Imported: ${data.meetings?.length || 0} meetings, ${data.notes?.length || 0} notes, ${data.t5tReports?.length || 0} reports, ${data.dailyLogs?.length || 0} daily logs`
                         );
                       } catch {
                         alert("Invalid JSON file");
@@ -537,7 +597,7 @@ export default function Settings() {
                 <div className="space-y-2 text-sm text-text-secondary">
                   <p>
                     <strong className="text-text-primary">Version:</strong>{" "}
-                    2.0
+                    3.0
                   </p>
                   <p>
                     NoteAI is a meeting intelligence tool that records, transcribes,

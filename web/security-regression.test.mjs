@@ -11,7 +11,38 @@ test("web auth fails closed unless an explicit non-production bypass is enabled"
 
   assert.match(security, /NOTEAI_DISABLE_AUTH/);
   assert.doesNotMatch(middleware, /if \(!secret \|\| !clientId\) return NextResponse\.next\(\)/);
-  assert.doesNotMatch(authRoute, /authenticated:\s*true,\s*required:\s*false/);
+  assert.match(authRoute, /isExplicitAuthBypassEnabled/);
+});
+
+test("local browser auth bypass is reflected in the auth status endpoint", () => {
+  const authRoute = read("./src/app/api/auth/route.ts");
+
+  assert.match(authRoute, /isExplicitAuthBypassEnabled/);
+  assert.match(authRoute, /authenticated:\s*true,\s*required:\s*false/);
+});
+
+test("browser API client rejects failed HTTP responses before data reaches list hooks", () => {
+  const db = read("./src/lib/db.ts");
+  const hooks = read("./src/lib/hooks.ts");
+
+  assert.match(db, /if \(!res\.ok\)/);
+  assert.match(db, /throw new Error/);
+  assert.match(hooks, /Array\.isArray\(result\)/);
+});
+
+test("local dev origins include loopback hosts used by browser testing", () => {
+  const nextConfig = read("./next.config.ts");
+
+  assert.match(nextConfig, /allowedDevOrigins/);
+  assert.match(nextConfig, /127\.0\.0\.1/);
+});
+
+test("missing Turso config uses a non-production local persistence fallback only", () => {
+  const serverDb = read("./src/lib/server-db.ts");
+
+  assert.match(serverDb, /isLocalPersistenceEnabled/);
+  assert.match(serverDb, /process\.env\.NODE_ENV !== "production"/);
+  assert.match(serverDb, /localTables/);
 });
 
 test("programmatic API auth is not derived from NOTEAI_AUTH_SECRET", () => {
@@ -46,11 +77,10 @@ test("cost-bearing AI endpoints enforce local request bounds", () => {
 
 test("web app uses crypto.randomUUID instead of the uuid dependency", () => {
   const paths = [
-    "./src/lib/recording-workflow.ts",
-    "./src/lib/assistant-actions.ts",
     "./src/app/page.tsx",
     "./src/components/ChatPanel.tsx",
     "./src/components/T5TComposer.tsx",
+    "./src/lib/hooks.ts",
   ];
 
   for (const path of paths) {

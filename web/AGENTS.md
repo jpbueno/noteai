@@ -4,6 +4,27 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## Required Linear Workflow
+
+Linear is the source of truth and second brain for NoteAI work.
+
+Every Codex agent working in `web/` must keep Linear in sync for meaningful work. This includes features, bugs, functionality tests, security findings/remediation, architecture improvements, refactors, documentation, deployment/release work, product decisions, and follow-up tasks.
+
+Before or during work:
+- Use the `Jpbueno` Linear team.
+- Use the `NoteAI Product Roadmap` project by default unless a more specific NoteAI project exists.
+- Find the relevant existing issue, or create one before implementation/test work continues.
+- Move active implementation or test work to `In Progress` or `In Review`.
+
+After work:
+- Update the relevant Linear issue with what changed, affected files/modules, verification commands/results, and remaining follow-ups.
+- Create linked follow-up issues for discovered bugs, deferred risks, or new improvements.
+- If the work spans several issues, add or update a worklog issue summarizing the session.
+
+Standing Linear anchor:
+- `JPB-24` records this operating rule.
+- `JPB-26` tracks the current functionality test session if no more specific test issue exists.
+
 ## NoteAI Web Architecture
 
 - This app deploys to Cloudflare Workers via OpenNext, not Vercel.

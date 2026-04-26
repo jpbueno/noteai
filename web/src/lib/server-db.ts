@@ -7,6 +7,11 @@ function getConfig() {
   return { url, authToken };
 }
 
+function isLocalPersistenceEnabled(): boolean {
+  const { url, authToken } = getConfig();
+  return (!url || !authToken) && process.env.NODE_ENV !== "production";
+}
+
 interface TursoResult {
   columns: string[];
   rows: (string | number | null)[][];
@@ -14,6 +19,9 @@ interface TursoResult {
 
 async function query(sql: string, args: (string | number | null)[] = []): Promise<TursoResult> {
   const { url, authToken } = getConfig();
+  if (!url || !authToken) {
+    throw new Error("Turso is not configured");
+  }
 
   const response = await fetch(`${url}/v2/pipeline`, {
     method: "POST",
@@ -54,8 +62,13 @@ async function query(sql: string, args: (string | number | null)[] = []): Promis
   }
 
   const columns = (result.cols || []).map((c: { name: string }) => c.name);
-  const rows = (result.rows || []).map((r: { value: string | null }[]) =>
-    r.map((cell) => cell.value)
+  const rows = (result.rows || []).map((r: { type: string; value: string | null }[]) =>
+    r.map((cell) => {
+      if (cell.value === null) return null;
+      if (cell.type === "integer") return parseInt(cell.value, 10);
+      if (cell.type === "float") return parseFloat(cell.value);
+      return cell.value;
+    })
   );
 
   return { columns, rows };
@@ -67,8 +80,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', date TEXT NOT NULL, duration REAL NOT NULL DEFAULT 0, transcript TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '{}')`,
   `CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Untitled', content TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT)`,
   `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', rawInput TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT, sourceNoteID TEXT)`,
-  `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'draft')`,
+  `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', dailyLogIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft')`,
+  `CREATE TABLE IF NOT EXISTS dailyLogs (id TEXT PRIMARY KEY, date TEXT NOT NULL, sections TEXT NOT NULL DEFAULT '[]', linkedMeetingIDs TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS chatMessages (id TEXT PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', timestamp TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
 ];
 
@@ -77,12 +92,22 @@ const MIGRATIONS = [
   "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE t5tReports ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE todos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE todos ADD COLUMN dueDate TEXT",
+  "ALTER TABLE todos ADD COLUMN syncedToGoogleDocs INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE todos ADD COLUMN googleDocsSyncedAt TEXT",
+  "ALTER TABLE dailyLogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE t5tReports ADD COLUMN dailyLogIDs TEXT NOT NULL DEFAULT '[]'",
 ];
 
 let _initialized = false;
 
 async function ensureSchema(): Promise<void> {
   if (_initialized) return;
+  if (isLocalPersistenceEnabled()) {
+    _initialized = true;
+    return;
+  }
   for (const sql of SCHEMA) {
     await query(sql);
   }
@@ -98,7 +123,8 @@ const JSON_COLS: Record<string, string[]> = {
   meetings: ["transcript", "summary"],
   notes: ["tags"],
   tasks: ["tags"],
-  t5tReports: ["meetingIDs", "noteIDs", "taskIDs", "sections"],
+  t5tReports: ["meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections"],
+  dailyLogs: ["sections", "linkedMeetingIDs"],
 };
 
 function serializeRow(table: string, row: Record<string, unknown>): Record<string, unknown> {
@@ -132,8 +158,10 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   meetings: ["id", "title", "date", "duration", "transcript", "summary", "pinned"],
   notes: ["id", "title", "content", "tags", "createdDate", "modifiedDate", "sourceMeetingID", "pinned"],
   tasks: ["id", "title", "description", "rawInput", "tags", "status", "createdDate", "modifiedDate", "sourceMeetingID", "sourceNoteID", "pinned"],
-  t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "sections", "status", "pinned"],
+  t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections", "status", "pinned"],
+  dailyLogs: ["id", "date", "sections", "linkedMeetingIDs", "createdDate", "modifiedDate", "pinned"],
   chatMessages: ["id", "role", "content", "timestamp"],
+  todos: ["id", "title", "description", "completed", "dueDate", "createdDate", "modifiedDate", "pinned", "syncedToGoogleDocs", "googleDocsSyncedAt"],
   settings: ["key", "value"],
 };
 
@@ -151,15 +179,50 @@ function stripInvalidColumns(table: string, data: Record<string, unknown>): Reco
 
 // CRUD
 
-const VALID_TABLES = ["meetings", "notes", "tasks", "t5tReports", "chatMessages", "settings"];
+const VALID_TABLES = ["meetings", "notes", "tasks", "t5tReports", "dailyLogs", "chatMessages", "todos", "settings"];
+
+const localTables = new Map<string, Map<string, Record<string, unknown>>>();
+
+function localTable(table: string): Map<string, Record<string, unknown>> {
+  let records = localTables.get(table);
+  if (!records) {
+    records = new Map();
+    localTables.set(table, records);
+  }
+  return records;
+}
+
+function copyLocalRow(row: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+}
+
+function localOrderColumn(table: string): string {
+  if (table === "meetings" || table === "dailyLogs") return "date";
+  if (["notes", "tasks", "t5tReports", "todos"].includes(table)) return "createdDate";
+  if (table === "chatMessages") return "timestamp";
+  return "id";
+}
+
+function localSort(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const orderCol = localOrderColumn(table);
+  return rows.sort((a, b) => {
+    const pinnedDelta = Number(b.pinned || 0) - Number(a.pinned || 0);
+    if (pinnedDelta) return pinnedDelta;
+    return String(b[orderCol] || "").localeCompare(String(a[orderCol] || ""));
+  });
+}
 
 export async function getAll(table: string): Promise<Record<string, unknown>[]> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
   await ensureSchema();
+  if (isLocalPersistenceEnabled()) {
+    return localSort(table, Array.from(localTable(table).values())).map(copyLocalRow);
+  }
   let orderCol = "id";
   let pinPrefix = "";
   if (table === "meetings") { orderCol = "date"; pinPrefix = "pinned DESC, "; }
-  else if (["notes", "tasks", "t5tReports"].includes(table)) { orderCol = "createdDate"; pinPrefix = "pinned DESC, "; }
+  else if (table === "dailyLogs") { orderCol = "date"; pinPrefix = "pinned DESC, "; }
+  else if (["notes", "tasks", "t5tReports", "todos"].includes(table)) { orderCol = "createdDate"; pinPrefix = "pinned DESC, "; }
   else if (table === "chatMessages") orderCol = "timestamp";
   const result = await query(`SELECT * FROM ${table} ORDER BY ${pinPrefix}${orderCol} DESC`);
   return result.rows.map((r) => deserializeRow(table, result.columns, r));
@@ -168,6 +231,10 @@ export async function getAll(table: string): Promise<Record<string, unknown>[]> 
 export async function getById(table: string, id: string): Promise<Record<string, unknown> | undefined> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
   await ensureSchema();
+  if (isLocalPersistenceEnabled()) {
+    const row = localTable(table).get(id);
+    return row ? copyLocalRow(row) : undefined;
+  }
   const result = await query(`SELECT * FROM ${table} WHERE id = ?`, [id]);
   if (result.rows.length === 0) return undefined;
   return deserializeRow(table, result.columns, result.rows[0]);
@@ -182,6 +249,12 @@ export async function upsert(table: string, data: Record<string, unknown>): Prom
 
   const pkCol = table === "settings" ? "key" : "id";
   const pkVal = safeData[pkCol] as string | undefined;
+  if (isLocalPersistenceEnabled()) {
+    if (!pkVal) throw new Error(`Missing primary key: ${pkCol}`);
+    const records = localTable(table);
+    records.set(pkVal, { ...(records.get(pkVal) || {}), ...safeData });
+    return;
+  }
 
   if (pkVal) {
     const existing = await query(`SELECT * FROM ${table} WHERE ${pkCol} = ?`, [pkVal]);
@@ -206,12 +279,20 @@ export async function upsert(table: string, data: Record<string, unknown>): Prom
 export async function remove(table: string, id: string): Promise<void> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
   await ensureSchema();
+  if (isLocalPersistenceEnabled()) {
+    localTable(table).delete(id);
+    return;
+  }
   await query(`DELETE FROM ${table} WHERE id = ?`, [id]);
 }
 
 export async function clearTable(table: string): Promise<void> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
   await ensureSchema();
+  if (isLocalPersistenceEnabled()) {
+    localTable(table).clear();
+    return;
+  }
   await query(`DELETE FROM ${table}`);
 }
 
@@ -293,6 +374,11 @@ export async function getSettingValue(key: string): Promise<string | undefined> 
   if (ENCRYPTED_KEYS.includes(key) && !_keysMigrated) {
     await ensureMigration();
   }
+  if (isLocalPersistenceEnabled()) {
+    const raw = localTable("settings").get(key)?.value as string | undefined;
+    if (!raw) return undefined;
+    return ENCRYPTED_KEYS.includes(key) ? decrypt(raw) : raw;
+  }
   const result = await query("SELECT value FROM settings WHERE key = ?", [key]);
   if (result.rows.length === 0) return undefined;
   const raw = result.rows[0][0] as string;
@@ -309,6 +395,10 @@ export async function setSettingValue(key: string, value: string): Promise<void>
   if (ENCRYPTED_KEYS.includes(key) && value) {
     stored = await encrypt(value);
   }
+  if (isLocalPersistenceEnabled()) {
+    localTable("settings").set(key, { key, value: stored });
+    return;
+  }
   await query(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     [key, stored]
@@ -318,6 +408,16 @@ export async function setSettingValue(key: string, value: string): Promise<void>
 // One-time migration: encrypt any plaintext API keys already in the DB
 export async function migrateEncryptSettings(): Promise<void> {
   await ensureSchema();
+  if (isLocalPersistenceEnabled()) {
+    for (const key of ENCRYPTED_KEYS) {
+      const row = localTable("settings").get(key);
+      const raw = row?.value;
+      if (typeof raw === "string" && raw && !raw.startsWith(ENC_PREFIX)) {
+        localTable("settings").set(key, { key, value: await encrypt(raw) });
+      }
+    }
+    return;
+  }
   for (const key of ENCRYPTED_KEYS) {
     const result = await query("SELECT value FROM settings WHERE key = ?", [key]);
     if (result.rows.length === 0) continue;

@@ -131,7 +131,7 @@ final class SummarizationEngine {
     // MARK: - T5T Generation
 
     /// Generates a T5T (Top 5 Things) report from multiple meetings in a reporting period.
-    func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
+    func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], todos: [TodoItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
         let client = try buildClient()
         let model = selectedModelID()
 
@@ -179,6 +179,24 @@ final class SummarizationEngine {
         }
         let tasksText = taskBlocks.isEmpty ? "" : "\n\nTASKS COMPLETED:\n" + taskBlocks.joined(separator: "\n")
 
+        // Build todo blocks — these are the primary source for T5T per the web app
+        var todoBlocks: [String] = []
+        for todo in todos {
+            var block = "- "
+            block += todo.completed ? "[DONE] " : "[OPEN] "
+            block += todo.title
+            if let due = todo.dueDate {
+                let dueFmt = DateFormatter()
+                dueFmt.dateStyle = .medium
+                block += " (due \(dueFmt.string(from: due)))"
+            }
+            if !todo.description.isEmpty {
+                block += "\n  " + String(todo.description.prefix(400))
+            }
+            todoBlocks.append(block)
+        }
+        let todosText = todoBlocks.isEmpty ? "" : "\n\nTODOS:\n" + todoBlocks.joined(separator: "\n")
+
         let prompt = """
         You are an NVIDIA engineer's executive communication assistant. Generate a "Top 5 Things" (T5T) status report from the meeting notes below.
 
@@ -213,6 +231,7 @@ final class SummarizationEngine {
         \(meetingsText)
         \(notesText)
         \(tasksText)
+        \(todosText)
 
         OUTPUT: Valid JSON only, with this exact structure:
         {

@@ -1,3 +1,14 @@
+export type CoachInsightType = "key_insight" | "talking_point" | "technical_answer" | "action_item" | "follow_up";
+
+export interface CoachInsight {
+  id: string;
+  timestamp: string;
+  type: CoachInsightType;
+  content: string;
+  /** When set, this entry is a chat message rather than an auto-generated insight. */
+  role?: "user" | "assistant";
+}
+
 export interface TranscriptSegment {
   id: number;
   text: string;
@@ -58,16 +69,43 @@ export interface TaskItem {
   pinned?: number;
 }
 
-export interface T5TEntry {
+export interface TodoItem {
   id: string;
-  headline: string;
-  explanation: string;
+  title: string;
+  description: string;
+  completed: number; // 0 or 1
+  dueDate: string | null;
+  createdDate: string;
+  modifiedDate: string;
+  pinned?: number;
+  // Google Docs sync tracking (manager's running log). 0/1 flag + ISO timestamp.
+  syncedToGoogleDocs?: number;
+  googleDocsSyncedAt?: string | null;
 }
 
-export interface T5TSections {
-  insights: T5TEntry[];
-  accountUpdates: T5TEntry[];
-  futurePlans: T5TEntry[];
+// ===== Daily Logs =====
+
+export interface DailyLogSection {
+  name: string;
+  content: string;
+}
+
+export interface DailyLog {
+  id: string;
+  date: string; // YYYY-MM-DD
+  sections: DailyLogSection[];
+  linkedMeetingIDs: string[];
+  createdDate: string;
+  modifiedDate: string;
+  pinned?: number;
+}
+
+// ===== T5T Report =====
+
+export interface T5TReportSection {
+  id: string;
+  name: string;
+  content: string; // markdown
 }
 
 export interface T5TReport {
@@ -79,9 +117,63 @@ export interface T5TReport {
   meetingIDs: string[];
   noteIDs: string[];
   taskIDs: string[];
-  sections: T5TSections;
+  todoIDs: string[];
+  dailyLogIDs: string[];
+  sections: T5TReportSection[];
   status: "draft" | "finalized";
   pinned?: number;
+}
+
+// ===== T5T Configuration =====
+
+export interface T5TManager {
+  name: string;
+  email: string;
+}
+
+export interface T5TIdentity {
+  name: string;
+  email: string;
+  role: string;
+  team: string;
+  managers: T5TManager[];
+  // New fields for the Top 5 Things email format
+  focus?: string;      // e.g. "Inference Ops"
+  region?: string;     // e.g. "NALA"
+  roleShort?: string;  // e.g. "SA" (used in subject line)
+  mobile?: string;     // e.g. "+1 407 725-1322"
+}
+
+export interface T5TEmailSettings {
+  subjectFormat: string;
+  greeting: string;
+  closing: string;
+}
+
+export interface T5TReportTemplateSection {
+  id: string;
+  name: string;
+  type: "bullets" | "table" | "freeform";
+  placeholder: string;
+}
+
+export interface T5TSectionMapping {
+  dailySection: string;
+  reportSection: string;
+}
+
+export interface T5TDailyTemplateSection {
+  name: string;
+  classification: "report-worthy" | "personal";
+  hint: string;
+}
+
+export interface T5TWritingPrinciples {
+  audience: string;
+  tone: string;
+  person: string;
+  detailDepth: string;
+  dataStyle: string;
 }
 
 export interface BacklinkItem {
@@ -100,11 +192,79 @@ export interface BacklinkResult {
 }
 
 export interface T5TConfig {
-  vertical: string;
-  region: string;
-  jobFunction: string;
-  subjectLine: string;
+  identity: T5TIdentity;
+  emailSettings: T5TEmailSettings;
+  reportTemplate: T5TReportTemplateSection[];
+  dailyTemplate: T5TDailyTemplateSection[];
+  sectionMapping: T5TSectionMapping[];
+  writingPrinciples: T5TWritingPrinciples;
+  jiraBaseUrl: string;
+  jiraProjectKeys: string[];
+  nvbugBaseUrl: string;
 }
+
+export const DEFAULT_T5T_CONFIG: T5TConfig = {
+  identity: {
+    name: "JP Santana",
+    email: "jbuenosantan@nvidia.com",
+    role: "Senior Solutions Architect",
+    team: "",
+    managers: [],
+    focus: "Inference Ops",
+    region: "NALA",
+    roleShort: "SA",
+    mobile: "+1 407 725-1322",
+  },
+  emailSettings: {
+    subjectFormat: "Top 5 Things - {{focus}} | {{region}} | {{roleShort}}",
+    greeting: "",
+    closing: "Thank you,\n \n{{name}} | {{role}}\nEmail: {{email}}\nMobile: {{mobile}}",
+  },
+  reportTemplate: [
+    {
+      id: "account-updates",
+      name: "Industry Business Development / Account Updates",
+      type: "freeform",
+      placeholder: "4-5 outcome-focused updates, each with a bold headline + substantive paragraph.",
+    },
+    {
+      id: "future-plans",
+      name: "Future Plans",
+      type: "bullets",
+      placeholder: "3-5 short, concrete upcoming priorities.",
+    },
+  ],
+  dailyTemplate: [
+    { name: "Morning Plan", classification: "personal", hint: "Top priorities for the day" },
+    { name: "Project Work", classification: "report-worthy", hint: "Main project tasks, deliverables, progress" },
+    { name: "Automation / Tooling", classification: "report-worthy", hint: "Scripts, tools, CI/CD, automation work" },
+    { name: "Meetings & Collaboration", classification: "report-worthy", hint: "Meeting notes, discussion outcomes" },
+    { name: "Other", classification: "report-worthy", hint: "Knowledge sharing, process improvements" },
+    { name: "In-Progress & Carry-Over", classification: "report-worthy", hint: "Items needing follow-up" },
+    { name: "Blockers", classification: "report-worthy", hint: "Anything blocking progress" },
+    { name: "Personal Notes", classification: "personal", hint: "Learning notes, brainstorms, ideas" },
+    { name: "Issues/Bugs", classification: "report-worthy", hint: "Bug IDs, impact, status" },
+  ],
+  sectionMapping: [
+    { dailySection: "Project Work", reportSection: "Projects" },
+    { dailySection: "Automation / Tooling", reportSection: "Automation / Tooling" },
+    { dailySection: "Meetings & Collaboration", reportSection: "Other Activities" },
+    { dailySection: "Other", reportSection: "Other Activities" },
+    { dailySection: "Issues/Bugs", reportSection: "Key Issues" },
+    { dailySection: "In-Progress & Carry-Over", reportSection: "Next Week" },
+    { dailySection: "Blockers", reportSection: "Key Issues" },
+  ],
+  writingPrinciples: {
+    audience: "Busy managers (2-3 minute read)",
+    tone: "Professional, first-person, concise",
+    person: "first",
+    detailDepth: "High-level outcomes with sub-bullet details",
+    dataStyle: "Data-driven — lead with metrics where possible",
+  },
+  jiraBaseUrl: "https://jirasw.nvidia.com/browse",
+  jiraProjectKeys: ["EQT", "SWQA"],
+  nvbugBaseUrl: "https://nvbugspro.nvidia.com/bug",
+};
 
 export interface ChatMessage {
   id: string;
@@ -190,8 +350,12 @@ export const LLM_PROVIDERS: Record<
 export type SidebarSelection =
   | { type: "meeting"; id: string }
   | { type: "note"; id: string }
-  | { type: "task"; id: string }
   | { type: "t5t"; id: string }
+  | { type: "todo"; id: string }
+  | { type: "dailyLog"; id: string }
+  | { type: "meetingList" }
+  | { type: "noteList" }
+  | { type: "t5tList" }
   | { type: "settings" }
   | { type: "liveTranscript" }
   | null;

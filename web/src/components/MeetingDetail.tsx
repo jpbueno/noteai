@@ -13,7 +13,7 @@ import {
   Sparkles,
   AlignLeft,
 } from "lucide-react";
-import type { Meeting, ActionItem } from "@/lib/types";
+import type { Meeting, ActionItem, SidebarSelection } from "@/lib/types";
 import { formatDuration, formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { db } from "@/lib/db";
 import { useTTS } from "@/lib/tts";
@@ -23,9 +23,10 @@ type Tab = "summary" | "transcript" | "raw";
 
 interface MeetingDetailProps {
   meeting: Meeting;
+  onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function MeetingDetail({ meeting }: MeetingDetailProps) {
+export default function MeetingDetail({ meeting, onNavigate }: MeetingDetailProps) {
   const { summary } = meeting;
   const hasSummary = summary.wasSummarized && !summaryEmpty(summary);
   const [activeTab, setActiveTab] = useState<Tab>(hasSummary ? "summary" : "transcript");

@@ -5,16 +5,16 @@ import { db } from "./db";
 import type {
   Meeting,
   Note,
-  TaskItem,
+  TodoItem,
   T5TReport,
+  DailyLog,
   ChatMessage,
   SidebarSelection,
+  MeetingSummary,
   TranscriptSegment,
 } from "./types";
 import { AudioRecorder, type RecordingState } from "./audio";
 import { summarizeTranscript, transcribeAudio } from "./ai";
-import { completeRecording } from "./recording-workflow";
-import { filterLibrary } from "./library";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -35,7 +35,9 @@ function useRefreshable<T>(fetcher: () => Promise<T[]>): T[] {
   const refresh = useCallback(async () => {
     try {
       const result = await fetcherRef.current();
-      setData(result);
+      if (Array.isArray(result)) {
+        setData(result);
+      }
     } catch { /* keep stale */ }
   }, []);
 
@@ -58,12 +60,16 @@ export function useNotes() {
   return useRefreshable<Note>(() => db.notes.toArray() as Promise<Note[]>);
 }
 
-export function useTasks() {
-  return useRefreshable<TaskItem>(() => db.tasks.toArray() as Promise<TaskItem[]>);
+export function useTodos() {
+  return useRefreshable<TodoItem>(() => db.todos.toArray() as Promise<TodoItem[]>);
 }
 
 export function useT5TReports() {
   return useRefreshable<T5TReport>(() => db.t5tReports.toArray() as Promise<T5TReport[]>);
+}
+
+export function useDailyLogs() {
+  return useRefreshable<DailyLog>(() => db.dailyLogs.toArray() as Promise<DailyLog[]>);
 }
 
 export function useChatMessages() {
@@ -78,24 +84,37 @@ export function useSelection() {
 export function useSearch(
   meetings: Meeting[],
   notes: Note[],
-  tasks: TaskItem[]
+  todos: TodoItem[]
 ) {
   const [query, setQuery] = useState("");
   const q = query.toLowerCase().trim();
 
   const filteredMeetings = q
-    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).meetings
+    ? meetings.filter(
+        (m) =>
+          m.title.toLowerCase().includes(q) ||
+          m.transcript.some((s) => s.text.toLowerCase().includes(q))
+      )
     : meetings;
 
   const filteredNotes = q
-    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).notes
+    ? notes.filter(
+        (n) =>
+          n.title.toLowerCase().includes(q) ||
+          n.content.toLowerCase().includes(q) ||
+          n.tags.some((t) => t.toLowerCase().includes(q))
+      )
     : notes;
 
-  const filteredTasks = q
-    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).tasks
-    : tasks;
+  const filteredTodos = q
+    ? todos.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q)
+      )
+    : todos;
 
-  return { query, setQuery, filteredMeetings, filteredNotes, filteredTasks };
+  return { query, setQuery, filteredMeetings, filteredNotes, filteredTodos };
 }
 
 export function useRecording() {
@@ -108,6 +127,7 @@ export function useRecording() {
   const [liveTranscript, setLiveTranscript] = useState<TranscriptSegment[]>([]);
   const [interimText, setInterimText] = useState("");
   const [capturingTabAudio, setCapturingTabAudio] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
 
   const startRecording = useCallback(async (micDeviceId?: string, captureTab = false) => {
     try {
@@ -135,7 +155,9 @@ export function useRecording() {
           setInterimText(text);
           interimRef.current = text;
         }
-      }, micDeviceId, captureTab);
+      }, micDeviceId, captureTab, (level) => {
+        setMicLevel(level);
+      });
 
       recorderRef.current = recorder;
       setState("recording");
@@ -149,7 +171,8 @@ export function useRecording() {
       }, 1000);
     } catch (err) {
       console.error("Failed to start recording:", err);
-      alert("Could not access microphone. Please grant permission and try again.");
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Recording failed:\n\n${msg}`);
     }
   }, []);
 
@@ -166,20 +189,81 @@ export function useRecording() {
       const hadTabAudio = recorderRef.current.capturingTabAudio;
       const audioBlob = recorderRef.current.stop();
       recorderRef.current = null;
-      const meeting = await completeRecording(
-        {
-          title,
-          duration,
-          liveSegments: [...liveTranscript],
-          hadTabAudio,
-          audioBlob,
-        },
-        {
-          transcribeAudio,
-          summarizeTranscript,
-          saveMeeting: (meeting) => db.meetings.add(meeting),
+      const recordedDuration = duration;
+      const liveSegments = [...liveTranscript];
+
+      // If we captured tab audio, send the full blob to Whisper for a complete
+      // transcript that includes both speakers. Fall back to live segments if
+      // Whisper is unavailable or fails.
+      let finalText = "";
+      let finalSegments: TranscriptSegment[] = liveSegments;
+
+      // Whisper API caps request size at 25 MB. A full-blob retranscribe on a
+      // large recording silently truncates on some upstream providers, leaving
+      // us with a single short segment that overwrites the live polling output.
+      // Skip it for oversize blobs and trust the live segments accumulated
+      // during recording.
+      const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
+      if (hadTabAudio && audioBlob.size > 0 && audioBlob.size <= WHISPER_MAX_BYTES) {
+        try {
+          const whisperText = await transcribeAudio(audioBlob);
+          const liveTextLen = liveSegments.reduce((acc, s) => acc + s.text.length, 0);
+          // Only accept Whisper's result if it's at least as complete as what we
+          // already have from live polling — guards against silent truncation.
+          if (whisperText && whisperText.length >= liveTextLen) {
+            finalText = whisperText;
+            finalSegments = [{
+              id: 0,
+              text: whisperText,
+              startTime: 0,
+              endTime: recordedDuration,
+              speaker: null,
+              confidence: 0.95,
+            }];
+          }
+        } catch (err) {
+          console.warn("[NoteAI] Whisper full-blob transcription failed, using live segments:", err);
+          // Fall through to live segments
         }
-      );
+      }
+
+      if (!finalText) {
+        finalText = liveSegments.map((s) => s.text).join(" ");
+      }
+
+      if (!finalText) {
+        const meeting: Meeting = {
+          id: crypto.randomUUID(),
+          title: title || `Meeting ${new Date().toLocaleDateString()}`,
+          date: new Date().toISOString(),
+          duration: recordedDuration,
+          transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: null, confidence: 0 }],
+          summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
+        };
+        await db.meetings.add(meeting);
+        triggerRefresh();
+        setState("idle");
+        setDuration(0);
+        return meeting;
+      }
+
+      let summary: MeetingSummary;
+      try {
+        summary = await summarizeTranscript(finalText);
+      } catch {
+        summary = { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false };
+      }
+
+      const meeting: Meeting = {
+        id: crypto.randomUUID(),
+        title: title || `Meeting ${new Date().toLocaleDateString()}`,
+        date: new Date().toISOString(),
+        duration: recordedDuration,
+        transcript: finalSegments,
+        summary,
+      };
+
+      await db.meetings.add(meeting);
       triggerRefresh();
       setState("idle");
       setDuration(0);
@@ -194,7 +278,7 @@ export function useRecording() {
     };
   }, []);
 
-  return { state, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording };
+  return { state, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording };
 }
 
 export function formatDuration(seconds: number): string {
@@ -216,4 +300,12 @@ export function formatDate(iso: string): string {
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function parseDueDate(dueDate: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dueDate);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  return new Date(dueDate);
 }

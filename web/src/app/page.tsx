@@ -2,33 +2,31 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FileText } from "lucide-react";
+import HomeDashboard from "@/components/HomeDashboard";
+import { NoteListView, MeetingListView, T5TListView } from "@/components/SectionListView";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import Sidebar from "@/components/Sidebar";
 import MeetingDetail from "@/components/MeetingDetail";
 import NoteEditor from "@/components/NoteEditor";
-import TaskDetail from "@/components/TaskDetail";
+import TodoDetail from "@/components/TodoDetail";
 import T5TComposer from "@/components/T5TComposer";
 import ChatPanel from "@/components/ChatPanel";
 import Settings from "@/components/Settings";
 import LiveTranscript from "@/components/LiveTranscript";
-import { db } from "@/lib/db";
-import type { SidebarSelection } from "@/lib/types";
-import {
-  clearSelectionAfterDelete,
-  createNoteDraft,
-  createT5TReportDraft,
-  createTaskDraft,
-} from "@/lib/library";
+import { db, getT5TConfig } from "@/lib/db";
+import type { SidebarSelection, T5TConfig, TaskItem } from "@/lib/types";
+import { DEFAULT_T5T_CONFIG } from "@/lib/types";
 import {
   useMeetings,
   useNotes,
-  useTasks,
+  useTodos,
   useT5TReports,
   useChatMessages,
   useSearch,
   useRecording,
   triggerRefresh,
 } from "@/lib/hooks";
+import { useAICoach } from "@/lib/useAICoach";
 
 declare global {
   interface Window {
@@ -90,7 +88,7 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
           <BrainHeadIcon className="w-8 h-8 text-text-secondary" />
           <div className="flex flex-col leading-tight">
             <span className="text-2xl font-semibold text-text-primary">NoteAI</span>
-            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
           </div>
         </div>
         <p className="text-sm text-text-tertiary">Sign in to access your meetings and notes</p>
@@ -108,7 +106,7 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
 }
 
 export default function Home() {
-  const [authState, setAuthState] = useState<"loading" | "authenticated" | "login" | "auth-error">("loading");
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
   const [googleClientId, setGoogleClientId] = useState("");
 
   useEffect(() => {
@@ -117,8 +115,6 @@ export default function Home() {
         const data = await res.json();
         if (!data.required || data.authenticated) {
           setAuthState("authenticated");
-        } else if (data.configured === false) {
-          setAuthState("auth-error");
         } else {
           setGoogleClientId(data.clientId || "");
           setAuthState("login");
@@ -129,41 +125,104 @@ export default function Home() {
 
   const meetings = useMeetings();
   const notes = useNotes();
-  const tasks = useTasks();
+  const todos = useTodos();
   const t5tReports = useT5TReports();
   const chatMessages = useChatMessages();
-  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
+  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording } = useRecording();
+  const { insights: coachInsights, isAnalyzing: coachAnalyzing, isReplying: coachReplying, enabled: coachEnabled, setEnabled: setCoachEnabled, sendMessage: sendCoachMessage } = useAICoach(liveTranscript, recordingState === "recording");
 
   const [selection, setSelection] = useState<SidebarSelection>(null);
   const [showChat, setShowChat] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(220);
-  const isDragging = useRef(false);
-  const [dragging, setDragging] = useState(false);
+  const [isSidebarDragging, setIsSidebarDragging] = useState(false);
 
-  const { query, setQuery, filteredMeetings, filteredNotes, filteredTasks } =
-    useSearch(meetings, notes, tasks);
+  const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
+    useSearch(meetings, notes, todos);
+
+  // One-time migration: clean up any remaining old TaskItems
+  const migrationDone = useRef(false);
+  useEffect(() => {
+    if (migrationDone.current) return;
+    migrationDone.current = true;
+    (async () => {
+      const tasks: TaskItem[] = await db.tasks.toArray() as TaskItem[];
+      if (tasks.length === 0) return;
+      for (const task of tasks) {
+        await db.tasks.delete(task.id);
+      }
+      triggerRefresh();
+    })();
+  }, []);
 
   const handleNewNote = useCallback(async () => {
-    const note = createNoteDraft(new Date(), crypto.randomUUID());
+    const note = {
+      id: crypto.randomUUID(),
+      title: "Untitled",
+      content: "",
+      tags: [],
+      createdDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+      sourceMeetingID: null,
+    };
     await db.notes.add(note);
     triggerRefresh();
     setSelection({ type: "note", id: note.id });
   }, []);
 
-  const handleNewTask = useCallback(async () => {
-    const task = createTaskDraft(new Date(), crypto.randomUUID());
-    await db.tasks.add(task);
+  const handleNewTodo = useCallback(async () => {
+    const todo = {
+      id: crypto.randomUUID(),
+      title: "",
+      description: "",
+      completed: 0,
+      dueDate: null,
+      createdDate: new Date().toISOString(),
+      modifiedDate: new Date().toISOString(),
+    };
+    await db.todos.add(todo);
     triggerRefresh();
-    setSelection({ type: "task", id: task.id });
+    setSelection({ type: "todo", id: todo.id });
   }, []);
 
   const handleNewT5T = useCallback(async () => {
-    const report = createT5TReportDraft(meetings, new Date(), crypto.randomUUID());
+    // Default to last 7 days (Mon-Fri work week)
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 7);
+
+    // Load config for title
+    let config: T5TConfig;
+    try {
+      config = await getT5TConfig();
+    } catch {
+      config = DEFAULT_T5T_CONFIG;
+    }
+
+    // Title matches the Top 5 Things email subject line
+    const focus = config.identity.focus || "Inference Ops";
+    const region = config.identity.region || "NALA";
+    const roleShort = config.identity.roleShort || "SA";
+    const title = `Top 5 Things - ${focus} | ${region} | ${roleShort}`;
+
+    const report = {
+      id: crypto.randomUUID(),
+      title,
+      createdDate: new Date().toISOString(),
+      periodStart: start.toISOString(),
+      periodEnd: end.toISOString(),
+      dailyLogIDs: [],
+      meetingIDs: [],
+      noteIDs: [],
+      taskIDs: [],
+      todoIDs: todos.map((t) => t.id),
+      sections: [],
+      status: "draft" as const,
+    };
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
-  }, [meetings]);
+  }, [todos]);
 
   const handleStopRecording = useCallback(async () => {
     const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
@@ -177,49 +236,36 @@ export default function Home() {
     async (id: string) => {
       await db.meetings.delete(id);
       triggerRefresh();
-      setSelection((current) => clearSelectionAfterDelete(current, { type: "meeting", id }));
+      if (selection?.type === "meeting" && selection.id === id) setSelection(null);
     },
-    []
+    [selection]
   );
 
   const handleDeleteNote = useCallback(
     async (id: string) => {
       await db.notes.delete(id);
       triggerRefresh();
-      setSelection((current) => clearSelectionAfterDelete(current, { type: "note", id }));
+      if (selection?.type === "note" && selection.id === id) setSelection(null);
     },
-    []
+    [selection]
   );
 
-  const handleDeleteTask = useCallback(
+  const handleDeleteTodo = useCallback(
     async (id: string) => {
-      await db.tasks.delete(id);
+      await db.todos.delete(id);
       triggerRefresh();
-      setSelection((current) => clearSelectionAfterDelete(current, { type: "task", id }));
+      if (selection?.type === "todo" && selection.id === id) setSelection(null);
     },
-    []
+    [selection]
   );
 
   const handleDeleteT5T = useCallback(
     async (id: string) => {
       await db.t5tReports.delete(id);
       triggerRefresh();
-      setSelection((current) => clearSelectionAfterDelete(current, { type: "t5t", id }));
+      if (selection?.type === "t5t" && selection.id === id) setSelection(null);
     },
-    []
-  );
-
-  const handleTogglePin = useCallback(
-    async (type: "meeting" | "note" | "task" | "t5t", id: string) => {
-      const table = { meeting: meetings, note: notes, task: tasks, t5t: t5tReports }[type];
-      const item = table.find((i) => i.id === id);
-      if (!item) return;
-      const newPinned = item.pinned ? 0 : 1;
-      const dbTable = { meeting: db.meetings, note: db.notes, task: db.tasks, t5t: db.t5tReports }[type];
-      await dbTable.update(id, { pinned: newPinned });
-      triggerRefresh();
-    },
-    [meetings, notes, tasks, t5tReports]
+    [selection]
   );
 
   // Keyboard shortcuts
@@ -247,32 +293,16 @@ export default function Home() {
   }, [recordingState, startRecording, handleStopRecording]);
 
   if (authState === "loading") return null;
-  if (authState === "auth-error") {
-    return (
-      <div className="h-screen bg-content flex items-center justify-center">
-        <div className="w-96 text-center space-y-3">
-          <h1 className="text-lg font-medium text-text-primary">Authentication is not configured</h1>
-          <p className="text-sm text-text-secondary">
-            Set NOTEAI_AUTH_SECRET and GOOGLE_CLIENT_ID, or enable NOTEAI_DISABLE_AUTH=true outside production.
-          </p>
-        </div>
-      </div>
-    );
-  }
   if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
 
   const renderDetail = () => {
     if (!selection) {
       return (
-        <div className="flex flex-col items-center justify-center h-full gap-3">
-          <FileText className="w-9 h-9 text-text-tertiary" />
-          <p className="text-base font-medium text-text-secondary">
-            Select a meeting, note, or report
-          </p>
-          <p className="text-xs text-text-tertiary">
-            Or start a recording to capture a new meeting
-          </p>
-        </div>
+        <HomeDashboard
+          todos={todos}
+          onSelect={setSelection}
+          onNewTodo={handleNewTodo}
+        />
       );
     }
 
@@ -284,6 +314,13 @@ export default function Home() {
           interimText={interimText}
           onStop={handleStopRecording}
           capturingTabAudio={capturingTabAudio}
+          micLevel={micLevel}
+          coachInsights={coachInsights}
+          coachAnalyzing={coachAnalyzing}
+          coachReplying={coachReplying}
+          coachEnabled={coachEnabled}
+          onToggleCoach={() => setCoachEnabled(!coachEnabled)}
+          onCoachSendMessage={sendCoachMessage}
         />
       );
     }
@@ -292,19 +329,31 @@ export default function Home() {
       return <Settings />;
     }
 
+    if (selection.type === "noteList") {
+      return <NoteListView notes={notes} onSelect={setSelection} onNew={handleNewNote} />;
+    }
+
+    if (selection.type === "meetingList") {
+      return <MeetingListView meetings={meetings} onSelect={setSelection} />;
+    }
+
+    if (selection.type === "t5tList") {
+      return <T5TListView reports={t5tReports} onSelect={setSelection} onNew={handleNewT5T} />;
+    }
+
     if (selection.type === "meeting") {
       const meeting = meetings.find((m) => m.id === selection.id);
-      if (meeting) return <MeetingDetail meeting={meeting} />;
+      if (meeting) return <MeetingDetail meeting={meeting} onNavigate={setSelection} />;
     }
 
     if (selection.type === "note") {
       const note = notes.find((n) => n.id === selection.id);
-      if (note) return <NoteEditor note={note} />;
+      if (note) return <NoteEditor note={note} onNavigate={setSelection} />;
     }
 
-    if (selection.type === "task") {
-      const task = tasks.find((t) => t.id === selection.id);
-      if (task) return <TaskDetail task={task} onNavigate={setSelection} />;
+    if (selection.type === "todo") {
+      const todo = todos.find((t) => t.id === selection.id);
+      if (todo) return <TodoDetail todo={todo} />;
     }
 
     if (selection.type === "t5t") {
@@ -315,7 +364,7 @@ export default function Home() {
             report={report}
             meetings={meetings}
             notes={notes}
-            tasks={tasks}
+            todos={todos}
             onNavigate={setSelection}
           />
         );
@@ -335,14 +384,14 @@ export default function Home() {
         <BrainHeadIcon className="w-[22px] h-[22px] text-text-secondary" />
         <div className="flex flex-col leading-tight">
           <span className="text-lg font-semibold text-text-primary">NoteAI</span>
-          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v2.0</span>
+          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
         </div>
       </div>
 
       <div className="flex h-screen">
         {/* Sidebar — slides via negative margin, always in DOM */}
         <div
-          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${dragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
+          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${isSidebarDragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
           style={{ width: sidebarWidth, marginLeft: sidebarCollapsed ? -sidebarWidth : 0 }}
         >
           {/* Resize handle */}
@@ -350,8 +399,7 @@ export default function Home() {
             className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-20 hover:bg-accent/40 active:bg-accent/60 transition-colors"
             onMouseDown={(e) => {
               e.preventDefault();
-              isDragging.current = true;
-              setDragging(true);
+              setIsSidebarDragging(true);
               const startX = e.clientX;
               const startWidth = sidebarWidth;
               const onMove = (ev: MouseEvent) => {
@@ -359,8 +407,7 @@ export default function Home() {
                 setSidebarWidth(newWidth);
               };
               const onUp = () => {
-                isDragging.current = false;
-                setDragging(false);
+                setIsSidebarDragging(false);
                 document.removeEventListener("mousemove", onMove);
                 document.removeEventListener("mouseup", onUp);
                 document.body.style.cursor = "";
@@ -375,7 +422,7 @@ export default function Home() {
           <Sidebar
             meetings={filteredMeetings}
             notes={filteredNotes}
-            tasks={filteredTasks}
+            todos={filteredTodos}
             t5tReports={t5tReports}
             selection={selection}
             onSelect={setSelection}
@@ -389,13 +436,12 @@ export default function Home() {
             }}
             onStopRecording={handleStopRecording}
             onNewNote={handleNewNote}
-            onNewTask={handleNewTask}
+            onNewTodo={handleNewTodo}
             onNewT5T={handleNewT5T}
             onDeleteMeeting={handleDeleteMeeting}
             onDeleteNote={handleDeleteNote}
-            onDeleteTask={handleDeleteTask}
+            onDeleteTodo={handleDeleteTodo}
             onDeleteT5T={handleDeleteT5T}
-            onTogglePin={handleTogglePin}
           />
         </div>
 
@@ -422,7 +468,6 @@ export default function Home() {
               <ChatPanel
                 messages={chatMessages}
                 onClose={() => setShowChat(false)}
-                library={{ meetings, notes, tasks, t5tReports }}
               />
             </div>
           </>

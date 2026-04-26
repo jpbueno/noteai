@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, constantTimeEqual, hmacSign, isBrowserAuthConfigured } from "@/lib/security";
+import {
+  AUTH_COOKIE,
+  constantTimeEqual,
+  hmacSign,
+  isBrowserAuthConfigured,
+  isExplicitAuthBypassEnabled,
+} from "@/lib/security";
 
 function getSessionSecret(): string {
   return process.env.NOTEAI_AUTH_SECRET || "";
@@ -78,6 +84,10 @@ export async function parseSession(cookie: string): Promise<{ email: string; nam
 // Check auth status
 export async function GET(request: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
+
+  if (isExplicitAuthBypassEnabled()) {
+    return NextResponse.json({ authenticated: true, required: false });
+  }
 
   if (!isBrowserAuthConfigured()) {
     return NextResponse.json(

@@ -36,6 +36,17 @@ export async function POST(request: NextRequest) {
     }
     const safePrompt = prompt?.slice(0, MAX_PROMPT_CHARS);
 
+    // Read the file bytes once — re-appending the original File object to a new
+    // FormData in Node.js can silently send an empty/corrupt body to upstream APIs.
+    const fileBytes = await file.arrayBuffer();
+    if (fileBytes.byteLength === 0) {
+      return NextResponse.json(
+        { error: "Audio file is empty" },
+        { status: 400 }
+      );
+    }
+    const fileBlob = new Blob([fileBytes], { type: file.type || "audio/webm" });
+
     const errors: string[] = [];
 
     for (const config of WHISPER_CONFIGS) {
@@ -43,7 +54,7 @@ export async function POST(request: NextRequest) {
       if (!apiKey) continue;
 
       const upstreamForm = new FormData();
-      upstreamForm.append("file", file, "recording.webm");
+      upstreamForm.append("file", fileBlob, "recording.webm");
       upstreamForm.append("model", config.model);
       upstreamForm.append("response_format", "json");
       upstreamForm.append("language", "en");

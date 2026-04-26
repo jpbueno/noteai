@@ -1,11 +1,13 @@
 import SwiftUI
 
 enum SidebarSelection: Hashable {
+    case home
     case meeting(UUID)
     case t5tReport(UUID)
     case newT5T
     case note(UUID)
     case task(UUID)
+    case todo(UUID)
 }
 
 struct MeetingLibraryView: View {
@@ -279,6 +281,28 @@ struct MeetingLibraryView: View {
             // Scrollable lists
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    // Home row
+                    homeSidebarRow
+
+                    // Todos section
+                    HStack {
+                        sidebarSection("Todos", icon: "checkmark.circle")
+                        Spacer()
+                        sidebarAddButton("New") { createNewTodo() }
+                    }
+
+                    ForEach(visibleTodos) { todo in
+                        todoSidebarRow(todo: todo)
+                    }
+
+                    if visibleTodos.isEmpty && meetingManager.searchQuery.isEmpty {
+                        Text("No todos yet")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 4)
+                    }
+
                     // T5T Reports section
                     HStack {
                         sidebarSection("T5T Reports", icon: "list.bullet.rectangle")
@@ -565,6 +589,114 @@ struct MeetingLibraryView: View {
         }
     }
 
+    // MARK: - Home + Todos sidebar
+
+    private var homeSidebarRow: some View {
+        Button {
+            selection = .home
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "house")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                Text("Home")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                let pending = meetingManager.todos.filter { !$0.completed }.count
+                if pending > 0 {
+                    Text("\(pending)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Theme.hoverBG, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selection == .home ? Theme.selectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 4)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
+    private var visibleTodos: [TodoItem] {
+        // Sort: pending first (overdue → today → upcoming → no due date), completed last
+        let todos = meetingManager.filteredTodos
+        let pending = todos.filter { !$0.completed }
+        let completed = todos.filter { $0.completed }
+        let sortedPending = pending.sorted { a, b in
+            // Items with a due date sort first, ascending; no-due-date items last
+            switch (a.dueDate, b.dueDate) {
+            case (let x?, let y?): return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return a.createdDate > b.createdDate
+            }
+        }
+        let sortedCompleted = completed.sorted { $0.modifiedDate > $1.modifiedDate }
+        // Keep the sidebar short: cap completed tail at 5
+        return sortedPending + sortedCompleted.prefix(5)
+    }
+
+    private func todoSidebarRow(todo: TodoItem) -> some View {
+        Button {
+            selection = .todo(todo.id)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(todo.completed ? Color.green : Theme.textTertiary)
+                Text(todo.title.isEmpty ? "Untitled task" : todo.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
+                    .strikethrough(todo.completed)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+                if let label = todo.dueDateLabel, !todo.completed {
+                    Text(label)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(dueLabelColor(for: todo))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selection == .todo(todo.id) ? Theme.selectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 4)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .contextMenu {
+            Button(todo.completed ? "Mark pending" : "Mark complete") {
+                meetingManager.toggleTodoCompletion(todo)
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                if selection == .todo(todo.id) { selection = nil }
+                meetingManager.deleteTodo(todo)
+            }
+        }
+    }
+
+    private func dueLabelColor(for todo: TodoItem) -> Color {
+        switch todo.dueGroup {
+        case .overdue: return Color(hex: "E03E3E")
+        case .today: return Color(hex: "E8974F")
+        case .upcoming: return Color(hex: "4A90E2")
+        case .noDueDate, .completed: return Theme.textTertiary
+        }
+    }
+
     private func sidebarAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
@@ -588,6 +720,17 @@ struct MeetingLibraryView: View {
     private var detail: some View {
         if meetingManager.state == .processing {
             processingView
+        } else if case .home = selection {
+            HomeDashboardView(meetingManager: meetingManager) { id in
+                selection = .todo(id)
+            }
+        } else if case .todo(let id) = selection,
+                  let index = meetingManager.todos.firstIndex(where: { $0.id == id }) {
+            TodoDetailView(
+                todo: $meetingManager.todos[index],
+                meetingManager: meetingManager
+            )
+            .id(id)
         } else if case .t5tReport(let id) = selection,
                   let index = meetingManager.t5tReports.firstIndex(where: { $0.id == id }) {
             T5TComposerView(
@@ -620,7 +763,7 @@ struct MeetingLibraryView: View {
                 .id(meeting.id)
         } else if meetingManager.state == .recording {
             // No specific item selected while recording — show live transcript
-            LiveTranscriptView(segments: meetingManager.currentTranscript)
+            LiveTranscriptView(meetingManager: meetingManager)
                 .background(Theme.contentBG)
         } else {
             VStack(spacing: 12) {
@@ -704,6 +847,11 @@ struct MeetingLibraryView: View {
     private func createNewTask() {
         let task = meetingManager.createTask()
         selection = .task(task.id)
+    }
+
+    private func createNewTodo() {
+        let todo = meetingManager.createTodo()
+        selection = .todo(todo.id)
     }
 
     private func createNewNote() {

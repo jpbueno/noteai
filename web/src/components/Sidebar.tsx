@@ -14,7 +14,6 @@ import {
   AudioWaveform,
   Plus,
   X,
-  ChevronDown,
   Pin,
 } from "lucide-react";
 
@@ -73,14 +72,11 @@ export default function Sidebar({
   onDeleteT5T,
   onTogglePin,
 }: SidebarProps) {
-  const [mics, setMics] = useState<{ deviceId: string; label: string }[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>("");
-  const [captureTab, setCaptureTab] = useState(true);
 
   useEffect(() => {
     getAudioInputDevices().then((devices) => {
-      setMics(devices);
-      if (devices.length > 0 && !selectedMic) {
+      if (devices.length > 0) {
         setSelectedMic(devices[0].deviceId);
       }
     });
@@ -125,7 +121,7 @@ export default function Sidebar({
         ) : (
           <div className="space-y-1.5">
             <button
-              onClick={() => onStartRecording(undefined, true)}
+              onClick={() => onStartRecording(selectedMic || undefined, true)}
               disabled={recordingState === "processing"}
               className="flex items-center gap-2 w-full px-3.5 py-2 rounded-md bg-hover hover:bg-selected transition-colors disabled:opacity-50"
             >

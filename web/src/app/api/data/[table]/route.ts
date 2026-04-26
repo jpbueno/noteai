@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
     const rows = await getAll(table);
     return NextResponse.json(rows);
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Operation failed" }, { status: 500 });
   }
 }
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       await upsert(table, body);
     }
     return NextResponse.json({ ok: true });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Operation failed" }, { status: 500 });
   }
 }
@@ -62,7 +62,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       await clearTable(table);
     }
     return NextResponse.json({ ok: true });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Operation failed" }, { status: 500 });
   }
 }

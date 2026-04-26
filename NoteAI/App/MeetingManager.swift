@@ -24,13 +24,7 @@ final class MeetingManager: ObservableObject {
     @Published var notes: [Note] = []
 
     var filteredNotes: [Note] {
-        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return notes }
-        let query = searchQuery.lowercased()
-        return notes.filter {
-            $0.title.lowercased().contains(query) ||
-            $0.content.lowercased().contains(query) ||
-            $0.tags.contains(where: { $0.lowercased().contains(query) })
-        }
+        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).notes
     }
 
     // Tasks state
@@ -38,13 +32,7 @@ final class MeetingManager: ObservableObject {
     @Published var taskSummarizing = false
 
     var filteredTasks: [TaskItem] {
-        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return tasks }
-        let query = searchQuery.lowercased()
-        return tasks.filter {
-            $0.title.lowercased().contains(query) ||
-            $0.rawInput.lowercased().contains(query) ||
-            $0.tags.contains(where: { $0.lowercased().contains(query) })
-        }
+        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).tasks
     }
 
     // T5T state
@@ -65,17 +53,7 @@ final class MeetingManager: ObservableObject {
     }
 
     var filteredMeetings: [Meeting] {
-        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return meetings
-        }
-        let query = searchQuery.lowercased()
-        return meetings.filter { meeting in
-            meeting.title.lowercased().contains(query) ||
-            meeting.summary.topics.contains(where: { $0.lowercased().contains(query) }) ||
-            meeting.summary.decisions.contains(where: { $0.lowercased().contains(query) }) ||
-            meeting.summary.actionItems.contains(where: { $0.task.lowercased().contains(query) }) ||
-            meeting.transcript.contains(where: { $0.text.lowercased().contains(query) })
-        }
+        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).meetings
     }
     @Published var autoDetectEnabled: Bool {
         didSet {
@@ -178,9 +156,7 @@ final class MeetingManager: ObservableObject {
             await transcriptionEngine.reset()
 
             let transcript = currentTranscript
-            let transcriptText = transcript
-                .map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }
-                .joined(separator: "\n")
+            let transcriptText = MeetingCaptureWorkflow.transcriptText(from: transcript)
 
             let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
             summarizationStatus = .summarizing(model: modelName)
@@ -193,19 +169,12 @@ final class MeetingManager: ObservableObject {
                 print("[MeetingManager] Summarization failed: \(error)")
                 lastError = "Summarization failed: \(error.localizedDescription)"
                 summarizationStatus = .failed(error: error.localizedDescription)
-                summary = MeetingSummary(
-                    decisions: [],
-                    actionItems: [],
-                    topics: ["Summarization failed: \(error.localizedDescription)"],
-                    openQuestions: ["Check Settings > AI to verify your API key and model are configured correctly."]
-                )
+                summary = MeetingCaptureWorkflow.failedSummary(errorDescription: error.localizedDescription)
             }
 
-            let meeting = Meeting(
-                id: UUID(),
+            let meeting = MeetingCaptureWorkflow.makeMeeting(
                 title: title,
-                date: currentMeetingStart ?? Date(),
-                duration: Date().timeIntervalSince(currentMeetingStart ?? Date()),
+                startedAt: currentMeetingStart,
                 transcript: transcript,
                 summary: summary
             )
@@ -244,9 +213,7 @@ final class MeetingManager: ObservableObject {
     func resummarize(meeting: Meeting) async throws -> Meeting {
         debugLog("resummarize called for meeting \(meeting.id), transcript count=\(meeting.transcript.count)")
 
-        let transcriptText = meeting.transcript
-            .map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }
-            .joined(separator: "\n")
+        let transcriptText = MeetingCaptureWorkflow.transcriptText(from: meeting.transcript)
 
         debugLog("transcript text length=\(transcriptText.count)")
 
@@ -353,7 +320,7 @@ final class MeetingManager: ObservableObject {
     }
 
     func notesInRange(start: Date, end: Date) -> [Note] {
-        notes.filter { $0.modifiedDate >= start && $0.modifiedDate <= end }
+        LibraryOperations.notesInRange(notes, start: start, end: end)
     }
 
     private func loadNotes() {
@@ -415,7 +382,7 @@ final class MeetingManager: ObservableObject {
     }
 
     func tasksInRange(start: Date, end: Date) -> [TaskItem] {
-        tasks.filter { $0.createdDate >= start && $0.createdDate <= end }
+        LibraryOperations.tasksInRange(tasks, start: start, end: end)
     }
 
     private func loadTasks() {
@@ -429,7 +396,7 @@ final class MeetingManager: ObservableObject {
     // MARK: - T5T
 
     func meetingsInRange(start: Date, end: Date) -> [Meeting] {
-        meetings.filter { $0.date >= start && $0.date <= end }
+        LibraryOperations.meetingsInRange(meetings, start: start, end: end)
     }
 
     func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], taskIDs: [UUID] = []) async throws -> T5TReport {
@@ -564,13 +531,7 @@ final class MeetingManager: ObservableObject {
     }
 
     var t5tDefaultTitle: String {
-        if t5tConfig.isComplete && !t5tConfig.subjectLine.trimmingCharacters(in: .whitespaces).isEmpty {
-            return t5tConfig.subjectLine.trimmingCharacters(in: .whitespaces)
-        }
-        let v = t5tConfig.vertical.trimmingCharacters(in: .whitespaces)
-        let r = t5tConfig.region.trimmingCharacters(in: .whitespaces)
-        let j = t5tConfig.jobFunction.trimmingCharacters(in: .whitespaces)
-        return "Top 5 Things – \(v.isEmpty ? "Inference Ops" : v) | \(r.isEmpty ? "NALA" : r) | \(j.isEmpty ? "SA" : j)"
+        LibraryOperations.t5tDefaultTitle(config: t5tConfig)
     }
 
     func deleteMeeting(_ meeting: Meeting) {

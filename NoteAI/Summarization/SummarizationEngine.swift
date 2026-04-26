@@ -10,7 +10,7 @@ final class SummarizationEngine {
         let template = selectedTemplate()
         let prompt = buildPrompt(transcript: transcript, template: template)
         let responseText = try await client.complete(prompt: prompt, model: model)
-        return try parseSummary(from: responseText)
+        return try AITasks.parseMeetingSummary(responseText)
     }
 
     /// Generates a follow-up email draft based on a meeting's transcript and summary.
@@ -18,7 +18,7 @@ final class SummarizationEngine {
         let client = try buildClient()
         let model = selectedModelID()
 
-        let summaryText = formatSummaryForPrompt(meeting.summary)
+        let summaryText = AITasks.formatSummaryForPrompt(meeting.summary)
         let prompt = """
         You are a professional assistant. Based on the meeting summary and transcript below, draft a concise follow-up email.
 
@@ -144,7 +144,7 @@ final class SummarizationEngine {
             var block = "MEETING: \(meeting.title)\n"
             block += "DATE: \(meeting.date.formatted(date: .abbreviated, time: .shortened))\n"
             block += "DURATION: \(meeting.formattedDuration)\n"
-            block += formatSummaryForPrompt(meeting.summary)
+            block += AITasks.formatSummaryForPrompt(meeting.summary)
             meetingBlocks.append(block)
         }
         let meetingsText = meetingBlocks.joined(separator: "\n\n---\n\n")
@@ -225,109 +225,24 @@ final class SummarizationEngine {
         """
 
         let responseText = try await client.complete(prompt: prompt, model: model)
-        return try parseT5TSections(from: responseText)
-    }
-
-    private func parseT5TSections(from text: String) throws -> T5TSections {
-        let jsonString = extractJSON(from: text)
-        guard let jsonData = jsonString.data(using: .utf8) else {
-            throw SummarizationError.parseError
-        }
-
-        let raw = try JSONDecoder().decode(RawT5TSections.self, from: jsonData)
-        return T5TSections(
-            insights: (raw.insights ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) },
-            accountUpdates: (raw.accountUpdates ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) },
-            futurePlans: (raw.futurePlans ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) }
-        )
+        return try AITasks.parseT5TSections(responseText)
     }
 
     // MARK: - Helpers
 
     private func formatSummaryForPrompt(_ summary: MeetingSummary) -> String {
-        var parts: [String] = []
-        if !summary.decisions.isEmpty {
-            parts.append("Decisions: " + summary.decisions.joined(separator: "; "))
-        }
-        if !summary.actionItems.isEmpty {
-            let items = summary.actionItems.map { item in
-                var s = item.task
-                if let owner = item.owner { s += " (\(owner))" }
-                if let deadline = item.deadline { s += " by \(deadline)" }
-                return s
-            }
-            parts.append("Action Items: " + items.joined(separator: "; "))
-        }
-        if !summary.topics.isEmpty {
-            parts.append("Topics: " + summary.topics.joined(separator: "; "))
-        }
-        if !summary.openQuestions.isEmpty {
-            parts.append("Open Questions: " + summary.openQuestions.joined(separator: "; "))
-        }
-        return parts.joined(separator: "\n")
+        AITasks.formatSummaryForPrompt(summary)
     }
 
     // MARK: - Response parsing
 
     private func parseSummary(from text: String) throws -> MeetingSummary {
-        let jsonString = extractJSON(from: text)
-        guard let jsonData = jsonString.data(using: .utf8) else {
-            throw SummarizationError.parseError
-        }
-
-        let raw = try JSONDecoder().decode(RawSummary.self, from: jsonData)
-        return MeetingSummary(
-            decisions: raw.decisions,
-            actionItems: raw.actionItems.map {
-                ActionItem(task: $0.task, owner: $0.owner, deadline: $0.deadline)
-            },
-            topics: raw.topics,
-            openQuestions: raw.openQuestions,
-            wasSummarized: true
-        )
+        try AITasks.parseMeetingSummary(text)
     }
 
     private func extractJSON(from text: String) -> String {
-        if let start = text.range(of: "```json"),
-           let end = text.range(of: "```", range: start.upperBound..<text.endIndex) {
-            return String(text[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let start = text.range(of: "```"),
-           let end = text.range(of: "```", range: start.upperBound..<text.endIndex) {
-            return String(text[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let start = text.firstIndex(of: "{"),
-           let end = text.lastIndex(of: "}") {
-            return String(text[start...end])
-        }
-        return text
+        AITasks.extractJSON(from: text)
     }
-}
-
-// MARK: - Raw JSON models for parsing
-
-private struct RawSummary: Decodable {
-    let decisions: [String]
-    let actionItems: [RawActionItem]
-    let topics: [String]
-    let openQuestions: [String]
-}
-
-private struct RawActionItem: Decodable {
-    let task: String
-    let owner: String?
-    let deadline: String?
-}
-
-private struct RawT5TSections: Decodable {
-    let insights: [RawT5TEntry]?
-    let accountUpdates: [RawT5TEntry]?
-    let futurePlans: [RawT5TEntry]?
-}
-
-private struct RawT5TEntry: Decodable {
-    let headline: String
-    let explanation: String
 }
 
 enum SummarizationError: LocalizedError {

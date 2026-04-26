@@ -5,7 +5,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Tag, X, Loader2, Code2 } from "lucide-react";
-import type { Note, SidebarSelection } from "@/lib/types";
+import type { Note } from "@/lib/types";
 import { db } from "@/lib/db";
 import { formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { useTTS } from "@/lib/tts";
@@ -16,10 +16,9 @@ import EditorToolbar from "@/components/EditorToolbar";
 
 interface NoteEditorProps {
   note: Note;
-  onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function NoteEditor({ note, onNavigate }: NoteEditorProps) {
+export default function NoteEditor({ note }: NoteEditorProps) {
   const tts = useTTS();
   const [title, setTitle] = useState(note.title);
   const [tags, setTags] = useState(note.tags);

@@ -144,6 +144,7 @@ function ResizableImageView(props: {
           className={`relative inline-block ${resizing ? "" : "group"}`}
           style={{ maxWidth: "100%" }}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             ref={imgRef}
             src={node.attrs.src}

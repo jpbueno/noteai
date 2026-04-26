@@ -18,7 +18,7 @@ function isAlreadyHtml(content: string): boolean {
 export function mdToHtml(content: string | null | undefined): string {
   if (!content?.trim()) return "";
   // Strip Mac-app custom-scheme images the web app can't resolve
-  let c = content.replace(
+  const c = content.replace(
     /<img[^>]*src="noteai-image:\/\/[^"]*"[^>]*\/?>/gi,
     "",
   );

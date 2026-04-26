@@ -9,12 +9,12 @@ import type {
   T5TReport,
   ChatMessage,
   SidebarSelection,
-  MeetingSummary,
   TranscriptSegment,
 } from "./types";
 import { AudioRecorder, type RecordingState } from "./audio";
 import { summarizeTranscript, transcribeAudio } from "./ai";
-import { v4 as uuid } from "uuid";
+import { completeRecording } from "./recording-workflow";
+import { filterLibrary } from "./library";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -27,7 +27,10 @@ export function triggerRefresh() {
 function useRefreshable<T>(fetcher: () => Promise<T[]>): T[] {
   const [data, setData] = useState<T[]>([]);
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  }, [fetcher]);
 
   const refresh = useCallback(async () => {
     try {
@@ -81,28 +84,15 @@ export function useSearch(
   const q = query.toLowerCase().trim();
 
   const filteredMeetings = q
-    ? meetings.filter(
-        (m) =>
-          m.title.toLowerCase().includes(q) ||
-          m.transcript.some((s) => s.text.toLowerCase().includes(q))
-      )
+    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).meetings
     : meetings;
 
   const filteredNotes = q
-    ? notes.filter(
-        (n) =>
-          n.title.toLowerCase().includes(q) ||
-          n.content.toLowerCase().includes(q) ||
-          n.tags.some((t) => t.toLowerCase().includes(q))
-      )
+    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).notes
     : notes;
 
   const filteredTasks = q
-    ? tasks.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q)
-      )
+    ? filterLibrary({ meetings, notes, tasks, t5tReports: [] }, q).tasks
     : tasks;
 
   return { query, setQuery, filteredMeetings, filteredNotes, filteredTasks };
@@ -176,72 +166,20 @@ export function useRecording() {
       const hadTabAudio = recorderRef.current.capturingTabAudio;
       const audioBlob = recorderRef.current.stop();
       recorderRef.current = null;
-      const recordedDuration = duration;
-      const liveSegments = [...liveTranscript];
-
-      // If we captured tab audio, send the full blob to Whisper for a complete
-      // transcript that includes both speakers. Fall back to live segments if
-      // Whisper is unavailable or fails.
-      let finalText = "";
-      let finalSegments: TranscriptSegment[] = liveSegments;
-
-      if (hadTabAudio && audioBlob.size > 0) {
-        try {
-          const whisperText = await transcribeAudio(audioBlob);
-          if (whisperText) {
-            finalText = whisperText;
-            finalSegments = [{
-              id: 0,
-              text: whisperText,
-              startTime: 0,
-              endTime: recordedDuration,
-              speaker: null,
-              confidence: 0.95,
-            }];
-          }
-        } catch (err) {
-          console.warn("[NoteAI] Whisper full-blob transcription failed, using live segments:", err);
-          // Fall through to live segments
+      const meeting = await completeRecording(
+        {
+          title,
+          duration,
+          liveSegments: [...liveTranscript],
+          hadTabAudio,
+          audioBlob,
+        },
+        {
+          transcribeAudio,
+          summarizeTranscript,
+          saveMeeting: (meeting) => db.meetings.add(meeting),
         }
-      }
-
-      if (!finalText) {
-        finalText = liveSegments.map((s) => s.text).join(" ");
-      }
-
-      if (!finalText) {
-        const meeting: Meeting = {
-          id: uuid(),
-          title: title || `Meeting ${new Date().toLocaleDateString()}`,
-          date: new Date().toISOString(),
-          duration: recordedDuration,
-          transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: null, confidence: 0 }],
-          summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
-        };
-        await db.meetings.add(meeting);
-        triggerRefresh();
-        setState("idle");
-        setDuration(0);
-        return meeting;
-      }
-
-      let summary: MeetingSummary;
-      try {
-        summary = await summarizeTranscript(finalText);
-      } catch {
-        summary = { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false };
-      }
-
-      const meeting: Meeting = {
-        id: uuid(),
-        title: title || `Meeting ${new Date().toLocaleDateString()}`,
-        date: new Date().toISOString(),
-        duration: recordedDuration,
-        transcript: finalSegments,
-        summary,
-      };
-
-      await db.meetings.add(meeting);
+      );
       triggerRefresh();
       setState("idle");
       setDuration(0);

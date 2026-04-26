@@ -14,6 +14,12 @@ import LiveTranscript from "@/components/LiveTranscript";
 import { db } from "@/lib/db";
 import type { SidebarSelection } from "@/lib/types";
 import {
+  clearSelectionAfterDelete,
+  createNoteDraft,
+  createT5TReportDraft,
+  createTaskDraft,
+} from "@/lib/library";
+import {
   useMeetings,
   useNotes,
   useTasks,
@@ -103,11 +109,8 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
 }
 
 export default function Home() {
-  const [mounted, setMounted] = useState(false);
   const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
   const [googleClientId, setGoogleClientId] = useState("");
-
-  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     fetch("/api/auth")
@@ -135,65 +138,27 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(220);
   const isDragging = useRef(false);
+  const [dragging, setDragging] = useState(false);
 
   const { query, setQuery, filteredMeetings, filteredNotes, filteredTasks } =
     useSearch(meetings, notes, tasks);
 
   const handleNewNote = useCallback(async () => {
-    const note = {
-      id: uuid(),
-      title: "Untitled",
-      content: "",
-      tags: [],
-      createdDate: new Date().toISOString(),
-      modifiedDate: new Date().toISOString(),
-      sourceMeetingID: null,
-    };
+    const note = createNoteDraft(new Date(), uuid());
     await db.notes.add(note);
     triggerRefresh();
     setSelection({ type: "note", id: note.id });
   }, []);
 
   const handleNewTask = useCallback(async () => {
-    const task = {
-      id: uuid(),
-      title: "",
-      description: "",
-      rawInput: "",
-      tags: [],
-      status: "pending" as const,
-      createdDate: new Date().toISOString(),
-      modifiedDate: new Date().toISOString(),
-      sourceMeetingID: null,
-      sourceNoteID: null,
-    };
+    const task = createTaskDraft(new Date(), uuid());
     await db.tasks.add(task);
     triggerRefresh();
     setSelection({ type: "task", id: task.id });
   }, []);
 
   const handleNewT5T = useCallback(async () => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - 14);
-
-    const meetingsInRange = meetings.filter((m) => {
-      const d = new Date(m.date);
-      return d >= start && d <= end;
-    });
-
-    const report = {
-      id: uuid(),
-      title: "Top 5 Things – Inference Ops | NALA | SA",
-      createdDate: new Date().toISOString(),
-      periodStart: start.toISOString(),
-      periodEnd: end.toISOString(),
-      meetingIDs: meetingsInRange.map((m) => m.id),
-      noteIDs: [],
-      taskIDs: [],
-      sections: { insights: [], accountUpdates: [], futurePlans: [] },
-      status: "draft" as const,
-    };
+    const report = createT5TReportDraft(meetings, new Date(), uuid());
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
@@ -211,36 +176,36 @@ export default function Home() {
     async (id: string) => {
       await db.meetings.delete(id);
       triggerRefresh();
-      if (selection?.type === "meeting" && selection.id === id) setSelection(null);
+      setSelection((current) => clearSelectionAfterDelete(current, { type: "meeting", id }));
     },
-    [selection]
+    []
   );
 
   const handleDeleteNote = useCallback(
     async (id: string) => {
       await db.notes.delete(id);
       triggerRefresh();
-      if (selection?.type === "note" && selection.id === id) setSelection(null);
+      setSelection((current) => clearSelectionAfterDelete(current, { type: "note", id }));
     },
-    [selection]
+    []
   );
 
   const handleDeleteTask = useCallback(
     async (id: string) => {
       await db.tasks.delete(id);
       triggerRefresh();
-      if (selection?.type === "task" && selection.id === id) setSelection(null);
+      setSelection((current) => clearSelectionAfterDelete(current, { type: "task", id }));
     },
-    [selection]
+    []
   );
 
   const handleDeleteT5T = useCallback(
     async (id: string) => {
       await db.t5tReports.delete(id);
       triggerRefresh();
-      if (selection?.type === "t5t" && selection.id === id) setSelection(null);
+      setSelection((current) => clearSelectionAfterDelete(current, { type: "t5t", id }));
     },
-    [selection]
+    []
   );
 
   const handleTogglePin = useCallback(
@@ -280,7 +245,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handler);
   }, [recordingState, startRecording, handleStopRecording]);
 
-  if (!mounted || authState === "loading") return null;
+  if (authState === "loading") return null;
   if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
 
   const renderDetail = () => {
@@ -316,12 +281,12 @@ export default function Home() {
 
     if (selection.type === "meeting") {
       const meeting = meetings.find((m) => m.id === selection.id);
-      if (meeting) return <MeetingDetail meeting={meeting} onNavigate={setSelection} />;
+      if (meeting) return <MeetingDetail meeting={meeting} />;
     }
 
     if (selection.type === "note") {
       const note = notes.find((n) => n.id === selection.id);
-      if (note) return <NoteEditor note={note} onNavigate={setSelection} />;
+      if (note) return <NoteEditor note={note} />;
     }
 
     if (selection.type === "task") {
@@ -364,7 +329,7 @@ export default function Home() {
       <div className="flex h-screen">
         {/* Sidebar — slides via negative margin, always in DOM */}
         <div
-          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${isDragging.current ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
+          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${dragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
           style={{ width: sidebarWidth, marginLeft: sidebarCollapsed ? -sidebarWidth : 0 }}
         >
           {/* Resize handle */}
@@ -373,6 +338,7 @@ export default function Home() {
             onMouseDown={(e) => {
               e.preventDefault();
               isDragging.current = true;
+              setDragging(true);
               const startX = e.clientX;
               const startWidth = sidebarWidth;
               const onMove = (ev: MouseEvent) => {
@@ -381,6 +347,7 @@ export default function Home() {
               };
               const onUp = () => {
                 isDragging.current = false;
+                setDragging(false);
                 document.removeEventListener("mousemove", onMove);
                 document.removeEventListener("mouseup", onUp);
                 document.body.style.cursor = "";
@@ -442,6 +409,7 @@ export default function Home() {
               <ChatPanel
                 messages={chatMessages}
                 onClose={() => setShowChat(false)}
+                library={{ meetings, notes, tasks, t5tReports }}
               />
             </div>
           </>

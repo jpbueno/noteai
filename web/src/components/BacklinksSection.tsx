@@ -41,11 +41,24 @@ export default function BacklinksSection({ type, id, onNavigate }: BacklinksSect
   const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    getBacklinks(type, id)
-      .then((data) => setResult(data))
-      .catch(() => setResult(null))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => {
+        if (!cancelled) setLoading(true);
+        return getBacklinks(type, id);
+      })
+      .then((data) => {
+        if (!cancelled) setResult(data);
+      })
+      .catch(() => {
+        if (!cancelled) setResult(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [type, id]);
 
   const groups = result

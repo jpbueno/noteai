@@ -9,14 +9,26 @@ import type { ChatMessage } from "@/lib/types";
 import { db } from "@/lib/db";
 import { chatWithAI } from "@/lib/ai";
 import { triggerRefresh } from "@/lib/hooks";
+import {
+  assistantSystemPrompt,
+  executeAssistantAction,
+  parseAssistantAction,
+  stripAssistantActionBlocks,
+} from "@/lib/assistant-actions";
 import { v4 as uuid } from "uuid";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   onClose: () => void;
+  library: {
+    meetings: import("@/lib/types").Meeting[];
+    notes: import("@/lib/types").Note[];
+    tasks: import("@/lib/types").TaskItem[];
+    t5tReports: import("@/lib/types").T5TReport[];
+  };
 }
 
-export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
+export default function ChatPanel({ messages, onClose, library }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -48,15 +60,19 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      const reply = await chatWithAI(history);
+      const reply = await chatWithAI(history, assistantSystemPrompt);
+      const actionResult = await executeAssistantAction(parseAssistantAction(reply), library);
 
       const assistantMsg: ChatMessage = {
         id: uuid(),
         role: "assistant",
-        content: reply,
+        content: stripAssistantActionBlocks(reply) || reply,
         timestamp: new Date().toISOString(),
       };
       await db.chatMessages.add(assistantMsg);
+      if (actionResult) {
+        await db.chatMessages.add(actionResult);
+      }
       triggerRefresh();
     } catch (err) {
       const errorMsg: ChatMessage = {

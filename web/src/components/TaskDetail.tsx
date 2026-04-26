@@ -20,57 +20,20 @@ import EditorToolbar from "@/components/EditorToolbar";
 import { db } from "@/lib/db";
 import { formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { chatWithAI } from "@/lib/ai";
+import {
+  buildTaskAccomplishmentMessages,
+  parseTaskAccomplishment,
+} from "@/lib/ai-tasks";
 import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
 import { mdToHtml, htmlToMd, htmlToPlainText } from "@/lib/content-utils";
-
-function parseTaskJSON(raw: string): { title: string; description: string } {
-  const cleaned = raw
-    .replace(/```json\s*/g, "")
-    .replace(/```\s*/g, "")
-    .trim();
-
-  const blocks: string[] = [];
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (cleaned[i] === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        blocks.push(cleaned.substring(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-
-  for (const block of blocks) {
-    try {
-      const parsed = JSON.parse(block);
-      if (parsed.title && parsed.description) {
-        return { title: String(parsed.title), description: String(parsed.description) };
-      }
-    } catch {
-      // try next block
-    }
-  }
-
-  const titleMatch = raw.match(/"title"\s*:\s*"([^"]+)"/);
-  const descMatch = raw.match(/"description"\s*:\s*"([^"]+)"/);
-  return {
-    title: titleMatch?.[1] || raw.split("\n")[0].slice(0, 60),
-    description: descMatch?.[1] || raw,
-  };
-}
 
 interface TaskDetailProps {
   task: TaskItem;
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function TaskDetail({ task, onNavigate }: TaskDetailProps) {
+export default function TaskDetail({ task }: TaskDetailProps) {
   const tts = useTTS();
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -178,21 +141,8 @@ export default function TaskDetail({ task, onNavigate }: TaskDetailProps) {
     if (!rawInput.trim()) return;
     setIsGenerating(true);
     try {
-      const truncated = rawInput.slice(0, 4000);
-      const prompt = `Extract the key accomplishment from this email/message. Write everything in FIRST PERSON ("I configured...", "I resolved...", "I enabled...").
-
-Return ONLY a single JSON object. No markdown fences, no extra text, no commentary. Just the JSON.
-
-{"title": "...", "description": "..."}
-
-TITLE: Very short label (3-6 words max). Just enough to identify the task at a glance. Like a filename or tag.
-DESCRIPTION: A 2-3 sentence first-person explanation with full detail — what I accomplished, why it matters, the outcome, names, projects, tools. This is the main content.
-
-INPUT:
-${truncated}`;
-
-      const result = await chatWithAI([{ role: "user", content: prompt }]);
-      const { title: newTitle, description: newDescription } = parseTaskJSON(result);
+      const result = await chatWithAI(buildTaskAccomplishmentMessages(rawInput));
+      const { title: newTitle, description: newDescription } = parseTaskAccomplishment(result);
 
       setTitle(newTitle);
       setDescription(newDescription);

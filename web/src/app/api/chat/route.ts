@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      await response.text();
       return NextResponse.json(
         { error: `LLM request failed (${response.status})` },
         { status: response.status }
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ content });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

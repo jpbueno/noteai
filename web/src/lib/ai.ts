@@ -1,5 +1,10 @@
 import type { LLMProvider, MeetingTemplate, MeetingSummary } from "./types";
-import { getSetting } from "./db";
+import {
+  buildMeetingSummaryMessages,
+  emptyMeetingSummary,
+  parseMeetingSummary,
+  selectedLLMSettings,
+} from "./ai-tasks";
 
 async function proxyChat(params: {
   provider: string;
@@ -37,60 +42,18 @@ export async function summarizeTranscript(
   transcript: string,
   template: MeetingTemplate = "auto"
 ): Promise<MeetingSummary> {
-  const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
-  const model = (await getSetting("llm_model")) || "anthropic/claude-sonnet-4";
-
-  const templateInfo = {
-    auto: "Detect the meeting type and adapt your output format accordingly.",
-    general: "Format as a standard meeting summary with decisions, action items, topics discussed, and open questions.",
-    standup: "Format as a stand-up summary: what each person completed, what they're working on next, and any blockers.",
-    sales: "Format as a sales call summary: customer pain points, objections raised, commitments made, and deal signals.",
-    oneOnOne: "Format as a 1:1 summary: feedback shared, career development topics, and personal action items.",
-    brainstorm: "Format as a brainstorm summary: all ideas proposed, directions chosen, and research tasks assigned.",
-  };
-
-  const systemPrompt = `You are an expert meeting summarizer. ${templateInfo[template]}
-
-Return your response as valid JSON with this exact structure:
-{"decisions": ["..."], "actionItems": [{"task": "...", "owner": "...", "deadline": "..."}], "topics": ["..."], "openQuestions": ["..."]}
-
-Only return the JSON object, no markdown fences or additional text.`;
+  const { provider, model } = await selectedLLMSettings();
 
   const content = await chatCompletion({
     provider,
     model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: `Here is the meeting transcript:\n\n${transcript}` },
-    ],
+    messages: buildMeetingSummaryMessages(transcript, template),
   });
 
   try {
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned);
-    return {
-      decisions: parsed.decisions || [],
-      actionItems: (parsed.actionItems || []).map(
-        (ai: { task: string; owner?: string; deadline?: string }) => ({
-          id: crypto.randomUUID(),
-          task: ai.task,
-          owner: ai.owner || null,
-          deadline: ai.deadline || null,
-          isCompleted: false,
-        })
-      ),
-      topics: parsed.topics || [],
-      openQuestions: parsed.openQuestions || [],
-      wasSummarized: true,
-    };
+    return parseMeetingSummary(content);
   } catch {
-    return {
-      decisions: [],
-      actionItems: [],
-      topics: [],
-      openQuestions: [],
-      wasSummarized: false,
-    };
+    return emptyMeetingSummary(false);
   }
 }
 
@@ -98,8 +61,7 @@ export async function chatWithAI(
   messages: { role: string; content: string }[],
   systemContext?: string
 ): Promise<string> {
-  const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
-  const model = (await getSetting("llm_model")) || "anthropic/claude-sonnet-4";
+  const { provider, model } = await selectedLLMSettings();
 
   const allMessages = [
     {
@@ -115,7 +77,7 @@ export async function chatWithAI(
 }
 
 export async function transcribeAudio(audioBlob: Blob): Promise<string> {
-  const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
+  const { provider } = await selectedLLMSettings();
 
   const formData = new FormData();
   formData.append("file", audioBlob, "recording.webm");

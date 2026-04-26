@@ -15,6 +15,12 @@ import type { T5TReport, T5TEntry, Meeting, Note, TaskItem, SidebarSelection } f
 import { db } from "@/lib/db";
 import { formatDate, triggerRefresh } from "@/lib/hooks";
 import { chatWithAI } from "@/lib/ai";
+import {
+  buildT5TContext,
+  buildT5TMessages,
+  parseT5TSections,
+} from "@/lib/ai-tasks";
+import { selectedSources } from "@/lib/library";
 import { v4 as uuid } from "uuid";
 
 interface T5TComposerProps {
@@ -30,7 +36,6 @@ export default function T5TComposer({
   meetings,
   notes,
   tasks,
-  onNavigate,
 }: T5TComposerProps) {
   const [sections, setSections] = useState(report.sections);
   const [selectedMeetingIDs, setSelectedMeetingIDs] = useState<Set<string>>(new Set(report.meetingIDs));
@@ -148,55 +153,22 @@ export default function T5TComposer({
     save(newSections);
   };
 
-  const linkedMeetings = meetings.filter((m) => selectedMeetingIDs.has(m.id));
-  const linkedNotes = notes.filter((n) => selectedNoteIDs.has(n.id));
-  const linkedTasks = tasks.filter((t) => selectedTaskIDs.has(t.id));
+  const {
+    meetings: linkedMeetings,
+    notes: linkedNotes,
+    tasks: linkedTasks,
+  } = selectedSources(
+    { meetings, notes, tasks },
+    { meetingIDs: selectedMeetingIDs, noteIDs: selectedNoteIDs, taskIDs: selectedTaskIDs }
+  );
 
   const generateWithAI = async () => {
     setIsGenerating(true);
     try {
-      const context = buildContext(linkedMeetings, linkedNotes, linkedTasks);
-      const result = await chatWithAI(
-        [
-          {
-            role: "user",
-            content: `Based on the following meetings, notes, and tasks from ${formatDate(report.periodStart)} to ${formatDate(report.periodEnd)}, generate a T5T report with three sections: Insights (management escalations, market & competition), Account Updates (industry business development), and Future Plans.
-
-Return valid JSON: {"insights": [{"headline": "...", "explanation": "..."}], "accountUpdates": [{"headline": "...", "explanation": "..."}], "futurePlans": [{"headline": "...", "explanation": "..."}]}
-
-Context:
-${context}`,
-          },
-        ],
-        "You are a technical account manager writing a T5T (Top 5 in Top 5) report. Be concise and executive-focused."
-      );
-
-      const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-
-      const newSections = {
-        insights: (parsed.insights || []).map(
-          (e: { headline: string; explanation: string }) => ({
-            id: uuid(),
-            headline: e.headline,
-            explanation: e.explanation,
-          })
-        ),
-        accountUpdates: (parsed.accountUpdates || []).map(
-          (e: { headline: string; explanation: string }) => ({
-            id: uuid(),
-            headline: e.headline,
-            explanation: e.explanation,
-          })
-        ),
-        futurePlans: (parsed.futurePlans || []).map(
-          (e: { headline: string; explanation: string }) => ({
-            id: uuid(),
-            headline: e.headline,
-            explanation: e.explanation,
-          })
-        ),
-      };
+      const context = buildT5TContext(linkedMeetings, linkedNotes, linkedTasks);
+      const request = buildT5TMessages(report.periodStart, report.periodEnd, context);
+      const result = await chatWithAI(request.messages, request.systemContext);
+      const newSections = parseT5TSections(result);
 
       setSections(newSections);
       save(newSections);
@@ -276,7 +248,6 @@ ${context}`,
         {/* Sections */}
         <T5TSection
           title="Insights, Management Escalations & Help Needed"
-          sectionKey="insights"
           entries={sections.insights}
           expanded={expandedSections.insights}
           onToggle={() => toggleSection("insights")}
@@ -287,7 +258,6 @@ ${context}`,
 
         <T5TSection
           title="Industry Business Development / Account Updates"
-          sectionKey="accountUpdates"
           entries={sections.accountUpdates}
           expanded={expandedSections.accountUpdates}
           onToggle={() => toggleSection("accountUpdates")}
@@ -300,7 +270,6 @@ ${context}`,
 
         <T5TSection
           title="Future Plans"
-          sectionKey="futurePlans"
           entries={sections.futurePlans}
           expanded={expandedSections.futurePlans}
           onToggle={() => toggleSection("futurePlans")}
@@ -404,7 +373,6 @@ ${context}`,
 
 function T5TSection({
   title,
-  sectionKey,
   entries,
   expanded,
   onToggle,
@@ -413,7 +381,6 @@ function T5TSection({
   onRemove,
 }: {
   title: string;
-  sectionKey: string;
   entries: T5TEntry[];
   expanded: boolean;
   onToggle: () => void;
@@ -484,44 +451,6 @@ function T5TSection({
       )}
     </div>
   );
-}
-
-function buildContext(
-  meetings: Meeting[],
-  notes: Note[],
-  tasks: TaskItem[]
-): string {
-  const parts: string[] = [];
-
-  meetings.forEach((m) => {
-    parts.push(`## Meeting: ${m.title} (${formatDate(m.date)})`);
-    if (m.summary.wasSummarized) {
-      if (m.summary.decisions.length > 0)
-        parts.push("Decisions: " + m.summary.decisions.join("; "));
-      if (m.summary.topics.length > 0)
-        parts.push("Topics: " + m.summary.topics.join("; "));
-      if (m.summary.actionItems.length > 0)
-        parts.push(
-          "Actions: " + m.summary.actionItems.map((a) => a.task).join("; ")
-        );
-    } else {
-      const transcriptText = m.transcript.map((s) => s.text).join(" ");
-      parts.push(transcriptText.slice(0, 1000));
-    }
-    parts.push("");
-  });
-
-  notes.forEach((n) => {
-    parts.push(`## Note: ${n.title}`);
-    parts.push(n.content.slice(0, 500));
-    parts.push("");
-  });
-
-  tasks.forEach((t) => {
-    parts.push(`- Task: ${t.title} [${t.status}]`);
-  });
-
-  return parts.join("\n");
 }
 
 function buildEmailBody(sections: T5TReport["sections"]): string {

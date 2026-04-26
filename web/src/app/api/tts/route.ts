@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
         "Content-Length": String(audioBuffer.byteLength),
       },
     });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

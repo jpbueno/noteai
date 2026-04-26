@@ -15,7 +15,6 @@ import {
   parseAssistantAction,
   stripAssistantActionBlocks,
 } from "@/lib/assistant-actions";
-import { v4 as uuid } from "uuid";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -44,7 +43,7 @@ export default function ChatPanel({ messages, onClose, library }: ChatPanelProps
     if (!text || isLoading) return;
 
     const userMsg: ChatMessage = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       role: "user",
       content: text,
       timestamp: new Date().toISOString(),
@@ -64,7 +63,7 @@ export default function ChatPanel({ messages, onClose, library }: ChatPanelProps
       const actionResult = await executeAssistantAction(parseAssistantAction(reply), library);
 
       const assistantMsg: ChatMessage = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: "assistant",
         content: stripAssistantActionBlocks(reply) || reply,
         timestamp: new Date().toISOString(),
@@ -76,7 +75,7 @@ export default function ChatPanel({ messages, onClose, library }: ChatPanelProps
       triggerRefresh();
     } catch (err) {
       const errorMsg: ChatMessage = {
-        id: uuid(),
+        id: crypto.randomUUID(),
         role: "assistant",
         content: `Error: ${err instanceof Error ? err.message : "Something went wrong"}`,
         timestamp: new Date().toISOString(),

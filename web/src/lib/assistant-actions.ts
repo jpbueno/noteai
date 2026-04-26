@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import { repositories } from "./repositories";
 import { createNoteDraft, createTaskDraft, createT5TReportDraft, type LibrarySnapshot } from "./library";
 import type { ChatMessage } from "./types";
@@ -55,7 +54,7 @@ export async function executeAssistantAction(
   const timestamp = new Date().toISOString();
 
   const systemMessage = (content: string): ChatMessage => ({
-    id: uuid(),
+    id: crypto.randomUUID(),
     role: "system",
     content,
     timestamp,
@@ -63,7 +62,7 @@ export async function executeAssistantAction(
 
   switch (action.action) {
     case "create_note": {
-      const note = createNoteDraft(new Date(), uuid());
+      const note = createNoteDraft(new Date(), crypto.randomUUID());
       note.title = action.title || note.title;
       note.content = action.content || "";
       note.tags = action.tags || [];
@@ -71,7 +70,7 @@ export async function executeAssistantAction(
       return systemMessage(`Created note: ${note.title}`);
     }
     case "create_task": {
-      const task = createTaskDraft(new Date(), uuid());
+      const task = createTaskDraft(new Date(), crypto.randomUUID());
       task.title = action.title || "";
       task.description = action.description || "";
       task.rawInput = action.description || "";
@@ -80,7 +79,7 @@ export async function executeAssistantAction(
       return systemMessage(`Created task: ${task.title || "Untitled task"}`);
     }
     case "create_t5t": {
-      const report = createT5TReportDraft(snapshot.meetings, new Date(), uuid());
+      const report = createT5TReportDraft(snapshot.meetings, new Date(), crypto.randomUUID());
       await repositories.t5tReports.save(report);
       return systemMessage(`Created T5T report: ${report.title}`);
     }
@@ -103,4 +102,3 @@ export async function executeAssistantAction(
       return null;
   }
 }
-

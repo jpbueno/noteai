@@ -15,11 +15,15 @@ const WHISPER_CONFIGS = [
   },
 ];
 
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_PROMPT_CHARS = 1_000;
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as Blob | null;
-    const prompt = formData.get("prompt") as string | null;
+    const promptValue = formData.get("prompt");
+    const prompt = typeof promptValue === "string" ? promptValue : null;
 
     if (!file) {
       return NextResponse.json(
@@ -27,6 +31,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (file.size > MAX_AUDIO_BYTES) {
+      return NextResponse.json({ error: "Audio file is too large" }, { status: 413 });
+    }
+    const safePrompt = prompt?.slice(0, MAX_PROMPT_CHARS);
 
     const errors: string[] = [];
 
@@ -39,7 +47,7 @@ export async function POST(request: NextRequest) {
       upstreamForm.append("model", config.model);
       upstreamForm.append("response_format", "json");
       upstreamForm.append("language", "en");
-      if (prompt) upstreamForm.append("prompt", prompt);
+      if (safePrompt) upstreamForm.append("prompt", safePrompt);
 
       try {
         const response = await fetch(config.endpoint, {

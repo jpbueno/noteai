@@ -50,6 +50,7 @@ TURSO_AUTH_TOKEN=your-turso-token
 NOTEAI_AUTH_SECRET=any-random-string
 GOOGLE_CLIENT_ID=your-google-oauth-client-id
 GOOGLE_ALLOWED_EMAILS=you@example.com
+NOTEAI_API_KEY_HASHES=base64-sha256-of-programmatic-api-key
 ```
 
 API keys for LLM/TTS providers are stored in the app settings table and read server-side only.
@@ -70,3 +71,5 @@ npm run deploy:cf
 ```
 
 The worker name is configured in `wrangler.jsonc` as `noteai-web`.
+
+For programmatic REST access, send `Authorization: Bearer <raw-key>` and store only the raw key's base64 SHA-256 digest in `NOTEAI_API_KEY_HASHES`.

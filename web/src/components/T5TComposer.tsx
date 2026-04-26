@@ -21,7 +21,6 @@ import {
   parseT5TSections,
 } from "@/lib/ai-tasks";
 import { selectedSources } from "@/lib/library";
-import { v4 as uuid } from "uuid";
 
 interface T5TComposerProps {
   report: T5TReport;
@@ -116,7 +115,7 @@ export default function T5TComposer({
 
   const addEntry = (section: keyof typeof sections) => {
     const entry: T5TEntry = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       headline: "",
       explanation: "",
     };

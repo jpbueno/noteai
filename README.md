@@ -105,6 +105,7 @@ TURSO_AUTH_TOKEN=your-turso-token
 NOTEAI_AUTH_SECRET=any-random-string
 GOOGLE_CLIENT_ID=your-google-oauth-client-id
 GOOGLE_ALLOWED_EMAILS=you@example.com
+NOTEAI_API_KEY_HASHES=base64-sha256-of-programmatic-api-key
 ```
 
 ### Deploy to Cloudflare Workers
@@ -124,13 +125,18 @@ echo "value" | npx wrangler secret put TURSO_AUTH_TOKEN
 echo "value" | npx wrangler secret put NOTEAI_AUTH_SECRET
 echo "value" | npx wrangler secret put GOOGLE_CLIENT_ID
 echo "value" | npx wrangler secret put GOOGLE_ALLOWED_EMAILS
+echo "value" | npx wrangler secret put NOTEAI_API_KEY_HASHES
 ```
 
 ### API Access
 
-The web app exposes a REST API for programmatic access (agents, scripts, etc.). Authenticate with a Bearer token derived from `NOTEAI_AUTH_SECRET`.
+The web app exposes a REST API for programmatic access (agents, scripts, etc.). Authenticate with a Bearer token whose SHA-256 digest is listed in `NOTEAI_API_KEY_HASHES`.
 
-Get your API key by visiting `/api/auth/apikey` while logged in.
+Generate a key locally, store only its base64 SHA-256 digest in `NOTEAI_API_KEY_HASHES`, and keep the raw key in your agent or script secret store:
+
+```bash
+printf '%s' 'your-long-random-api-key' | openssl dgst -sha256 -binary | openssl base64
+```
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -151,7 +157,7 @@ All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id
 - **macOS**: LLM API keys stored in macOS Keychain, never UserDefaults
 - **Web**: API keys stored server-side as Cloudflare Worker secrets, never exposed to the browser
 - **Web**: Google OAuth with HMAC-signed session cookies
-- **Web**: Bearer token auth for programmatic API access
+- **Web**: Bearer token auth for programmatic API access using server-side SHA-256 hashes
 - Do not commit `.env*` files or build artifacts
 
 ## Validation

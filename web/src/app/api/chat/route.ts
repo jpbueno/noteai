@@ -8,17 +8,28 @@ const ENDPOINTS: Record<string, string> = {
   nvidia: "https://inference-api.nvidia.com/v1/chat/completions",
 };
 
+const MAX_CHAT_MESSAGES = 40;
+const MAX_MESSAGE_CHARS = 12_000;
+const MAX_CHAT_TOKENS = 4096;
+
 export async function POST(request: NextRequest) {
   try {
     const { provider, model, messages, temperature = 0.3, maxTokens = 4096 } =
       await request.json();
 
-    if (!provider || !messages) {
+    if (!provider || !Array.isArray(messages)) {
       return NextResponse.json(
         { error: "Missing required fields: provider, messages" },
         { status: 400 }
       );
     }
+    if (messages.length > MAX_CHAT_MESSAGES) {
+      return NextResponse.json({ error: "Too many messages" }, { status: 413 });
+    }
+    if (messages.some((m) => typeof m?.content !== "string" || m.content.length > MAX_MESSAGE_CHARS)) {
+      return NextResponse.json({ error: "Message content is too large" }, { status: 413 });
+    }
+    const safeMaxTokens = Math.min(Math.max(Number(maxTokens) || 1024, 1), MAX_CHAT_TOKENS);
 
     const endpoint = ENDPOINTS[provider];
     if (!endpoint) {
@@ -63,7 +74,7 @@ export async function POST(request: NextRequest) {
       );
       body = JSON.stringify({
         model,
-        max_tokens: maxTokens,
+        max_tokens: safeMaxTokens,
         temperature,
         system: systemMsg?.content || "",
         messages: otherMsgs,
@@ -73,7 +84,7 @@ export async function POST(request: NextRequest) {
         model,
         messages,
         temperature,
-        max_tokens: maxTokens,
+        max_tokens: safeMaxTokens,
       });
     }
 

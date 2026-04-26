@@ -1,25 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const AUTH_COOKIE = "noteai-session";
-
-// --- Session signing with HMAC-SHA256 ---
-
-async function sign(payload: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-
-async function verify(payload: string, signature: string, secret: string): Promise<boolean> {
-  const expected = await sign(payload, secret);
-  return expected === signature;
-}
+import { AUTH_COOKIE, constantTimeEqual, hmacSign, isBrowserAuthConfigured } from "@/lib/security";
 
 function getSessionSecret(): string {
   return process.env.NOTEAI_AUTH_SECRET || "";
@@ -66,7 +46,7 @@ async function verifyGoogleToken(credential: string): Promise<{ email: string; n
 async function createSessionCookie(email: string, name: string, picture: string): Promise<string> {
   const payload = JSON.stringify({ email, name, picture, exp: Date.now() + 30 * 24 * 60 * 60 * 1000 });
   const encoded = btoa(payload);
-  const sig = await sign(encoded, getSessionSecret());
+  const sig = await hmacSign(encoded, getSessionSecret());
   return `${encoded}.${sig}`;
 }
 
@@ -77,8 +57,8 @@ export async function parseSession(cookie: string): Promise<{ email: string; nam
   const [encoded, sig] = cookie.split(".");
   if (!encoded || !sig) return null;
 
-  const valid = await verify(encoded, sig, secret);
-  if (!valid) return null;
+  const expected = await hmacSign(encoded, secret);
+  if (!constantTimeEqual(expected, sig)) return null;
 
   try {
     const payload = JSON.parse(atob(encoded));
@@ -98,10 +78,12 @@ export async function parseSession(cookie: string): Promise<{ email: string; nam
 // Check auth status
 export async function GET(request: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  const secret = getSessionSecret();
 
-  if (!clientId || !secret) {
-    return NextResponse.json({ authenticated: true, required: false });
+  if (!isBrowserAuthConfigured()) {
+    return NextResponse.json(
+      { authenticated: false, required: true, configured: false, error: "Auth not configured" },
+      { status: 503 },
+    );
   }
 
   const cookie = request.cookies.get(AUTH_COOKIE)?.value;

@@ -233,6 +233,10 @@ const VALID_SETTING_KEYS = [
 const ENCRYPTED_KEYS = ["api_key_openrouter", "api_key_anthropic", "api_key_openai", "api_key_nvidia", "api_key_groq"];
 const ENC_PREFIX = "enc:";
 
+export function isEncryptedSettingKey(key: string): boolean {
+  return ENCRYPTED_KEYS.includes(key);
+}
+
 export function isValidSettingKey(key: string): boolean {
   return VALID_SETTING_KEYS.includes(key);
 }

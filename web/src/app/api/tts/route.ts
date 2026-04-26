@@ -12,6 +12,8 @@ const TTS_ENDPOINTS: Record<string, { url: string; model: string }> = {
   },
 };
 
+const MAX_TTS_CHARS = 4096;
+
 export async function POST(request: NextRequest) {
   try {
     const { text, voice = "nova" } = await request.json();
@@ -21,6 +23,9 @@ export async function POST(request: NextRequest) {
         { error: "Missing required field: text" },
         { status: 400 },
       );
+    }
+    if (typeof text !== "string" || text.length > MAX_TTS_CHARS) {
+      return NextResponse.json({ error: "Text is too large" }, { status: 413 });
     }
 
     // Determine TTS provider and read API key server-side
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         model: config.model,
-        input: text.slice(0, 4096),
+        input: text,
         voice,
         response_format: "mp3",
       }),

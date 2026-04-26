@@ -67,6 +67,11 @@ export async function getSetting(key: string): Promise<string | undefined> {
   return data.value ?? undefined;
 }
 
+export async function isSettingConfigured(key: string): Promise<boolean> {
+  const data = await api(`/api/settings?key=${encodeURIComponent(key)}`);
+  return Boolean(data.configured);
+}
+
 export async function setSetting(key: string, value: string): Promise<void> {
   await api("/api/settings", {
     method: "POST",

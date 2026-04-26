@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import type { Meeting, MeetingSummary, TranscriptSegment } from "./types";
 import { emptyMeetingSummary } from "./ai-tasks";
 
@@ -23,7 +22,7 @@ export async function completeRecording(
   deps: RecordingCompletionDeps
 ): Promise<Meeting> {
   const now = deps.now?.() || new Date();
-  const newId = deps.newId || uuid;
+  const newId = deps.newId || crypto.randomUUID;
   let finalText = "";
   let finalSegments = [...input.liveSegments];
 
@@ -85,4 +84,3 @@ export async function completeRecording(
   await deps.saveMeeting(meeting);
   return meeting;
 }
-

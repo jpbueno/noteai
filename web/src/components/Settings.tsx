@@ -16,7 +16,7 @@ import {
 import type { LLMProvider, MeetingTemplate, T5TConfig } from "@/lib/types";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import { LLM_PROVIDERS, MEETING_TEMPLATES } from "@/lib/types";
-import { db, getSetting, setSetting, getT5TConfig, saveT5TConfig } from "@/lib/db";
+import { db, getSetting, isSettingConfigured, setSetting, getT5TConfig, saveT5TConfig } from "@/lib/db";
 import { triggerRefresh } from "@/lib/hooks";
 import { TTS_VOICES, type TTSVoice } from "@/lib/tts";
 
@@ -82,6 +82,12 @@ export default function Settings() {
     openai: "",
     nvidia: "",
   });
+  const [configuredKeys, setConfiguredKeys] = useState<Record<LLMProvider, boolean>>({
+    openrouter: false,
+    anthropic: false,
+    openai: false,
+    nvidia: false,
+  });
   const [showKey, setShowKey] = useState(false);
   const [t5tConfig, setT5tConfig] = useState<T5TConfig>({
     vertical: "",
@@ -108,11 +114,11 @@ export default function Settings() {
         setModel(validModels[0]?.id || m);
       }
 
-      const keys = { ...apiKeys };
-      for (const k of Object.keys(keys) as LLMProvider[]) {
-        keys[k] = (await getSetting(`api_key_${k}`)) || "";
+      const configured = { ...configuredKeys };
+      for (const k of Object.keys(configured) as LLMProvider[]) {
+        configured[k] = await isSettingConfigured(`api_key_${k}`);
       }
-      setApiKeys(keys);
+      setConfiguredKeys(configured);
 
       const tc = await getT5TConfig();
       setT5tConfig(tc);
@@ -128,8 +134,18 @@ export default function Settings() {
     await setSetting("llm_model", customModel || model);
     await setSetting("meeting_template", template);
     for (const [k, v] of Object.entries(apiKeys)) {
-      await setSetting(`api_key_${k}`, v);
+      if (v) {
+        await setSetting(`api_key_${k}`, v);
+      }
     }
+    setConfiguredKeys((prev) => {
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(apiKeys) as [LLMProvider, string][]) {
+        if (v) next[k] = true;
+      }
+      return next;
+    });
+    setApiKeys({ openrouter: "", anthropic: "", openai: "", nvidia: "" });
     await saveT5TConfig(t5tConfig);
     await setSetting("tts_voice", ttsVoice);
     setSaved(true);
@@ -195,15 +211,19 @@ export default function Settings() {
 
               <Section title={`API Key — ${LLM_PROVIDERS[provider].displayName}`}>
                 <div className="relative">
-                  <input
-                    type={showKey ? "text" : "password"}
-                    value={apiKeys[provider]}
+	                  <input
+	                    type={showKey ? "text" : "password"}
+	                    value={apiKeys[provider]}
                     onChange={(e) =>
                       setApiKeys({ ...apiKeys, [provider]: e.target.value })
                     }
-                    placeholder={`Enter ${LLM_PROVIDERS[provider].displayName} API key`}
-                    className="w-full pr-10"
-                  />
+	                    placeholder={
+	                      configuredKeys[provider]
+	                        ? "Configured - enter a new key to replace"
+	                        : `Enter ${LLM_PROVIDERS[provider].displayName} API key`
+	                    }
+	                    className="w-full pr-10"
+	                  />
                   <button
                     onClick={() => setShowKey(!showKey)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
@@ -218,7 +238,7 @@ export default function Settings() {
                 <p className="text-xs text-text-tertiary mt-1.5">
                   {LLM_PROVIDERS[provider].keyHint}
                 </p>
-                {!apiKeys[provider] && (
+                {!apiKeys[provider] && !configuredKeys[provider] && (
                   <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
                     ⚠ Required for AI features
                   </p>
@@ -571,4 +591,3 @@ function Section({
     </div>
   );
 }
-

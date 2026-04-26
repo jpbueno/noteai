@@ -19,6 +19,7 @@ final class GoogleAuthManager: NSObject, ObservableObject {
 
     private var localServer: LocalOAuthServer?
     private var codeVerifier = ""
+    private var oauthState = ""
 
     override init() {
         super.init()
@@ -33,13 +34,15 @@ final class GoogleAuthManager: NSObject, ObservableObject {
 
         // PKCE
         codeVerifier = generateCodeVerifier()
+        oauthState = generateCodeVerifier()
         let codeChallenge = generateCodeChallenge(from: codeVerifier)
 
         // Start local server to receive callback
         let server = LocalOAuthServer()
         localServer = server
 
-        server.start { [weak self] result in
+        let expectedState = oauthState
+        server.start(expectedState: expectedState) { [weak self] result in
             Task { @MainActor in
                 guard let self else { return }
                 self.localServer?.stop()
@@ -65,6 +68,7 @@ final class GoogleAuthManager: NSObject, ObservableObject {
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "code_challenge", value: codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: expectedState),
         ]
 
         if let url = components.url {
@@ -203,7 +207,7 @@ final class LocalOAuthServer {
         self.port = UInt16.random(in: 49152...65535)
     }
 
-    func start(completion: @escaping (Result<String, Error>) -> Void) {
+    func start(expectedState: String, completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             do {
                 serverSocket = socket(AF_INET, SOCK_STREAM, 0)
@@ -236,18 +240,10 @@ final class LocalOAuthServer {
                 let bytesRead = read(clientSocket, &buffer, buffer.count)
                 let requestString = String(bytes: buffer[0..<max(bytesRead, 0)], encoding: .utf8) ?? ""
 
-                // Extract the code from GET /?code=XXX&scope=...
-                var authCode: String?
-                if let firstLine = requestString.split(separator: "\r\n").first {
-                    let parts = firstLine.split(separator: " ")
-                    if parts.count >= 2 {
-                        let path = String(parts[1])
-                        if let components = URLComponents(string: path),
-                           let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
-                            authCode = code
-                        }
-                    }
-                }
+                let authCode = OAuthCallbackParser.authorizationCode(
+                    from: requestString,
+                    expectedState: expectedState
+                )
 
                 // Send response
                 let html: String
@@ -293,6 +289,22 @@ final class LocalOAuthServer {
             case .noCode: return "No authorization code in callback"
             }
         }
+    }
+}
+
+enum OAuthCallbackParser {
+    static func authorizationCode(from requestString: String, expectedState: String) -> String? {
+        guard let firstLine = requestString.split(separator: "\r\n").first else { return nil }
+        let parts = firstLine.split(separator: " ")
+        guard parts.count >= 2 else { return nil }
+        let path = String(parts[1])
+        guard let components = URLComponents(string: path),
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+              let state = components.queryItems?.first(where: { $0.name == "state" })?.value,
+              state == expectedState else {
+            return nil
+        }
+        return code
     }
 }
 

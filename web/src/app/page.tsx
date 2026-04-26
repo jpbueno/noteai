@@ -29,7 +29,6 @@ import {
   useRecording,
   triggerRefresh,
 } from "@/lib/hooks";
-import { v4 as uuid } from "uuid";
 
 declare global {
   interface Window {
@@ -109,7 +108,7 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
 }
 
 export default function Home() {
-  const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "login" | "auth-error">("loading");
   const [googleClientId, setGoogleClientId] = useState("");
 
   useEffect(() => {
@@ -118,6 +117,8 @@ export default function Home() {
         const data = await res.json();
         if (!data.required || data.authenticated) {
           setAuthState("authenticated");
+        } else if (data.configured === false) {
+          setAuthState("auth-error");
         } else {
           setGoogleClientId(data.clientId || "");
           setAuthState("login");
@@ -144,21 +145,21 @@ export default function Home() {
     useSearch(meetings, notes, tasks);
 
   const handleNewNote = useCallback(async () => {
-    const note = createNoteDraft(new Date(), uuid());
+    const note = createNoteDraft(new Date(), crypto.randomUUID());
     await db.notes.add(note);
     triggerRefresh();
     setSelection({ type: "note", id: note.id });
   }, []);
 
   const handleNewTask = useCallback(async () => {
-    const task = createTaskDraft(new Date(), uuid());
+    const task = createTaskDraft(new Date(), crypto.randomUUID());
     await db.tasks.add(task);
     triggerRefresh();
     setSelection({ type: "task", id: task.id });
   }, []);
 
   const handleNewT5T = useCallback(async () => {
-    const report = createT5TReportDraft(meetings, new Date(), uuid());
+    const report = createT5TReportDraft(meetings, new Date(), crypto.randomUUID());
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
@@ -246,6 +247,18 @@ export default function Home() {
   }, [recordingState, startRecording, handleStopRecording]);
 
   if (authState === "loading") return null;
+  if (authState === "auth-error") {
+    return (
+      <div className="h-screen bg-content flex items-center justify-center">
+        <div className="w-96 text-center space-y-3">
+          <h1 className="text-lg font-medium text-text-primary">Authentication is not configured</h1>
+          <p className="text-sm text-text-secondary">
+            Set NOTEAI_AUTH_SECRET and GOOGLE_CLIENT_ID, or enable NOTEAI_DISABLE_AUTH=true outside production.
+          </p>
+        </div>
+      </div>
+    );
+  }
   if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
 
   const renderDetail = () => {

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSettingValue, setSettingValue, isValidSettingKey } from "@/lib/server-db";
+import { getSettingValue, setSettingValue, isValidSettingKey, isEncryptedSettingKey } from "@/lib/server-db";
 
 export async function GET(request: NextRequest) {
   const key = request.nextUrl.searchParams.get("key");
   if (!key) return NextResponse.json({ error: "key required" }, { status: 400 });
   if (!isValidSettingKey(key)) return NextResponse.json({ error: "Invalid setting key" }, { status: 400 });
   const value = await getSettingValue(key);
+  if (isEncryptedSettingKey(key)) {
+    return NextResponse.json({ value: null, configured: Boolean(value) });
+  }
   return NextResponse.json({ value: value ?? null });
 }
 

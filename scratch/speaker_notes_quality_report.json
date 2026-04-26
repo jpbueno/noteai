@@ -1,0 +1,28 @@
+{
+  "workspace": "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI",
+  "pptx": "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI/output/Inference reference architecture jp - speaker notes.pptx",
+  "checks": {
+    "pptx_package": {
+      "slide_count": 40,
+      "media_count": 84,
+      "chart_count": 0,
+      "zero_byte_media": [],
+      "invalid_png_media": [],
+      "placeholder_text": [],
+      "debug_line_colors": [],
+      "slide_numbers": [],
+      "warnings": [],
+      "failures": []
+    },
+    "output_hygiene": {
+      "output_dir": "/Users/jbuenosantan/Library/CloudStorage/OneDrive-NVIDIACorporation/NVIDIA/content/NoteAI/output",
+      "unexpected_files": [
+        "previews_test"
+      ]
+    }
+  },
+  "failures": [
+    "output/ contains non-deliverable files: previews_test"
+  ],
+  "warnings": []
+}

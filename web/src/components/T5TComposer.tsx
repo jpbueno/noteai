@@ -13,11 +13,7 @@ import {
   Check,
   AlertCircle,
   Mail,
-  FileText,
   Eye,
-  ArrowLeft,
-  ArrowRight,
-  Calendar,
   CheckCircle,
 } from "lucide-react";
 import type {
@@ -56,16 +52,15 @@ const STEPS: { id: WizardStep; label: string; icon: React.ComponentType<{ classN
 
 interface T5TComposerProps {
   report: T5TReport;
-  meetings: Meeting[];
-  notes: Note[];
   todos: TodoItem[];
+  // Kept for backwards compat with page.tsx props; not used in new format.
+  meetings?: Meeting[];
+  notes?: Note[];
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
 export default function T5TComposer({
   report,
-  meetings,
-  notes,
   todos,
   onNavigate,
 }: T5TComposerProps) {
@@ -74,12 +69,6 @@ export default function T5TComposer({
   const [sections, setSections] = useState<T5TReportSection[]>(report.sections);
   const [selectedTodoIDs, setSelectedTodoIDs] = useState<Set<string>>(
     new Set(report.todoIDs || report.taskIDs || []),
-  );
-  const [selectedMeetingIDs, setSelectedMeetingIDs] = useState<Set<string>>(
-    new Set(report.meetingIDs),
-  );
-  const [selectedNoteIDs, setSelectedNoteIDs] = useState<Set<string>>(
-    new Set(report.noteIDs),
   );
   const [isGenerating, setIsGenerating] = useState(false);
   const [qualityChecks, setQualityChecks] = useState<QualityCheck[]>([]);
@@ -102,8 +91,6 @@ export default function T5TComposer({
     if (prevIdRef.current !== report.id) {
       setSections(report.sections);
       setSelectedTodoIDs(new Set(report.todoIDs || report.taskIDs || []));
-      setSelectedMeetingIDs(new Set(report.meetingIDs));
-      setSelectedNoteIDs(new Set(report.noteIDs));
       setStep("sources");
       setQualityChecks([]);
       setHtmlPreview("");
@@ -137,15 +124,9 @@ export default function T5TComposer({
   );
 
   const saveSources = useCallback(
-    async (
-      tIDs: Set<string>,
-      mIDs: Set<string>,
-      nIDs: Set<string>,
-    ) => {
+    async (tIDs: Set<string>) => {
       await db.t5tReports.update(report.id, {
         todoIDs: Array.from(tIDs),
-        meetingIDs: Array.from(mIDs),
-        noteIDs: Array.from(nIDs),
       });
       triggerRefresh();
     },
@@ -154,23 +135,14 @@ export default function T5TComposer({
 
   // ===== Source Toggles =====
 
-  const toggleSource = (
-    type: "todo" | "meeting" | "note",
-    id: string,
-  ) => {
-    const setters = {
-      todo: setSelectedTodoIDs,
-      meeting: setSelectedMeetingIDs,
-      note: setSelectedNoteIDs,
-    };
-    setters[type]((prev) => {
+  // Only todos are selectable in the new format. The type param is kept for
+  // the SourceItem onToggle signature.
+  const toggleSource = (_type: "todo" | "meeting" | "note", id: string) => {
+    setSelectedTodoIDs((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      const t = type === "todo" ? next : selectedTodoIDs;
-      const m = type === "meeting" ? next : selectedMeetingIDs;
-      const n = type === "note" ? next : selectedNoteIDs;
-      saveSources(t, m, n);
+      saveSources(next);
       return next;
     });
   };
@@ -196,16 +168,12 @@ export default function T5TComposer({
       const linkedTodos = todos.filter((t) =>
         selectedTodoIDs.has(t.id),
       );
-      const linkedMeetings = meetings.filter((m) =>
-        selectedMeetingIDs.has(m.id),
-      );
-      const linkedNotes = notes.filter((n) => selectedNoteIDs.has(n.id));
 
       const generated = await generateT5TReport(
         config,
         linkedTodos,
-        linkedMeetings,
-        linkedNotes,
+        [],
+        [],
         report.periodStart,
         report.periodEnd,
       );
@@ -231,16 +199,12 @@ export default function T5TComposer({
       const linkedTodos = todos.filter((t) =>
         selectedTodoIDs.has(t.id),
       );
-      const linkedMeetings = meetings.filter((m) =>
-        selectedMeetingIDs.has(m.id),
-      );
-      const linkedNotes = notes.filter((n) => selectedNoteIDs.has(n.id));
 
       const generated = await generateT5TReport(
         config,
         linkedTodos,
-        linkedMeetings,
-        linkedNotes,
+        [],
+        [],
         report.periodStart,
         report.periodEnd,
       );
@@ -277,14 +241,26 @@ export default function T5TComposer({
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const handleCopyHtml = () => {
+  const handleCopyHtml = async () => {
     const html = getOutlookHtml();
-    // Copy as both HTML and plain text for Outlook compatibility
-    const blob = new Blob([html], { type: "text/html" });
-    const clipItem = new ClipboardItem({ "text/html": blob });
-    navigator.clipboard.write([clipItem]);
+    const plain = getFullMarkdown();
+    try {
+      // Provide BOTH HTML and plain text; Outlook picks the richest one it can.
+      const htmlBlob = new Blob([html], { type: "text/html" });
+      const textBlob = new Blob([plain], { type: "text/plain" });
+      const clipItem = new ClipboardItem({
+        "text/html": htmlBlob,
+        "text/plain": textBlob,
+      });
+      await navigator.clipboard.write([clipItem]);
+    } catch {
+      // Fallback: some browsers block ClipboardItem — use writeText as last resort
+      try {
+        await navigator.clipboard.writeText(plain);
+      } catch { /* ignore */ }
+    }
     setCopied("html");
-    setTimeout(() => setCopied(null), 2000);
+    setTimeout(() => setCopied(null), 2500);
   };
 
   const handleDownloadMarkdown = () => {
@@ -330,16 +306,7 @@ export default function T5TComposer({
 
   // ===== Derived Data =====
 
-  const periodMeetings = meetings.filter((m) => {
-    const date = new Date(m.date);
-    return date >= new Date(report.periodStart) && date <= new Date(report.periodEnd);
-  });
-
-  const totalSources =
-    selectedTodoIDs.size +
-    selectedMeetingIDs.size +
-    selectedNoteIDs.size;
-
+  const totalSources = selectedTodoIDs.size;
   const passedChecks = qualityChecks.filter((c) => c.passed).length;
 
   // ===== Render =====
@@ -418,12 +385,7 @@ export default function T5TComposer({
           {step === "sources" && (
             <SourcesStep
               todos={todos}
-              meetings={periodMeetings}
-              allMeetings={meetings}
-              notes={notes}
               selectedTodoIDs={selectedTodoIDs}
-              selectedMeetingIDs={selectedMeetingIDs}
-              selectedNoteIDs={selectedNoteIDs}
               onToggle={toggleSource}
               isGenerating={isGenerating}
               onGenerate={handleGenerate}
@@ -472,24 +434,14 @@ export default function T5TComposer({
 
 function SourcesStep({
   todos,
-  meetings,
-  allMeetings,
-  notes,
   selectedTodoIDs,
-  selectedMeetingIDs,
-  selectedNoteIDs,
   onToggle,
   isGenerating,
   onGenerate,
   onNavigate,
 }: {
   todos: TodoItem[];
-  meetings: Meeting[];
-  allMeetings: Meeting[];
-  notes: Note[];
   selectedTodoIDs: Set<string>;
-  selectedMeetingIDs: Set<string>;
-  selectedNoteIDs: Set<string>;
   onToggle: (type: "todo" | "meeting" | "note", id: string) => void;
   isGenerating: boolean;
   onGenerate: () => void;
@@ -501,11 +453,11 @@ function SourcesStep({
   return (
     <div className="space-y-6">
       <p className="text-sm text-text-secondary">
-        Select the sources to include in this report. Todos are the primary
-        input — meetings and notes provide supplementary context.
+        Pick the todos to include in this Top 5 Things email.
+        Completed todos become <span className="text-text-primary font-medium">Account Updates</span> (outcome headlines + paragraphs).
+        Pending todos become <span className="text-text-primary font-medium">Future Plans</span>.
       </p>
 
-      {/* Todos — primary source */}
       <SourceSection
         title="Todos"
         icon={CheckCircle}
@@ -536,10 +488,12 @@ function SourcesStep({
                 Clear
               </button>
             </div>
-            {pendingTodos.length > 0 && (
+            {completedTodos.length > 0 && (
               <>
-                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-1">Pending</p>
-                {pendingTodos.map((t) => (
+                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-1">
+                  Completed → Account Updates
+                </p>
+                {completedTodos.map((t) => (
                   <SourceItem
                     key={t.id}
                     checked={selectedTodoIDs.has(t.id)}
@@ -550,10 +504,12 @@ function SourcesStep({
                 ))}
               </>
             )}
-            {completedTodos.length > 0 && (
+            {pendingTodos.length > 0 && (
               <>
-                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-2">Completed</p>
-                {completedTodos.map((t) => (
+                <p className="text-[11px] text-text-tertiary font-semibold uppercase tracking-wide pt-3">
+                  Pending → Future Plans
+                </p>
+                {pendingTodos.map((t) => (
                   <SourceItem
                     key={t.id}
                     checked={selectedTodoIDs.has(t.id)}
@@ -572,77 +528,11 @@ function SourcesStep({
         )}
       </SourceSection>
 
-      {/* Meetings */}
-      <SourceSection
-        title="Meetings"
-        icon={Calendar}
-        badge={`${selectedMeetingIDs.size}/${meetings.length} in period`}
-      >
-        {meetings.length > 0 ? (
-          <div className="space-y-1">
-            {meetings.map((m) => (
-              <SourceItem
-                key={m.id}
-                checked={selectedMeetingIDs.has(m.id)}
-                onChange={() => onToggle("meeting", m.id)}
-                label={`${formatDate(m.date)} ${m.title}`}
-                onClick={() => onNavigate?.({ type: "meeting", id: m.id })}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-text-tertiary">No meetings in period</p>
-        )}
-        {allMeetings.filter((m) => !meetings.includes(m)).length > 0 && (
-          <details className="mt-2">
-            <summary className="text-xs text-text-tertiary cursor-pointer hover:text-text-secondary">
-              {allMeetings.length - meetings.length} meeting(s) outside period
-            </summary>
-            <div className="space-y-1 mt-1">
-              {allMeetings
-                .filter((m) => !meetings.includes(m))
-                .map((m) => (
-                  <SourceItem
-                    key={m.id}
-                    checked={selectedMeetingIDs.has(m.id)}
-                    onChange={() => onToggle("meeting", m.id)}
-                    label={`${formatDate(m.date)} ${m.title}`}
-                    dimmed
-                  />
-                ))}
-            </div>
-          </details>
-        )}
-      </SourceSection>
-
-      {/* Notes */}
-      <SourceSection
-        title="Notes"
-        icon={FileText}
-        badge={`${selectedNoteIDs.size} selected`}
-      >
-        {notes.length > 0 ? (
-          <div className="space-y-1">
-            {notes.map((n) => (
-              <SourceItem
-                key={n.id}
-                checked={selectedNoteIDs.has(n.id)}
-                onChange={() => onToggle("note", n.id)}
-                label={`${formatDate(n.createdDate)} ${n.title}`}
-                onClick={() => onNavigate?.({ type: "note", id: n.id })}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-text-tertiary">No notes available</p>
-        )}
-      </SourceSection>
-
       {/* Generate button */}
       <div className="pt-4 border-t border-border">
         <button
           onClick={onGenerate}
-          disabled={isGenerating}
+          disabled={isGenerating || selectedTodoIDs.size === 0}
           className="flex items-center gap-2 px-5 py-2.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/80 transition-colors disabled:opacity-50"
         >
           {isGenerating ? (
@@ -650,15 +540,13 @@ function SourcesStep({
           ) : (
             <Sparkles className="w-4 h-4" />
           )}
-          {isGenerating ? "Generating T5T Report..." : "Generate with AI"}
+          {isGenerating ? "Generating Top 5 Things..." : "Generate with AI"}
         </button>
-        {selectedTodoIDs.size === 0 &&
-          selectedMeetingIDs.size === 0 &&
-          selectedNoteIDs.size === 0 && (
-            <p className="text-xs text-orange-400 mt-2">
-              No sources selected — the AI will generate a minimal report
-            </p>
-          )}
+        {selectedTodoIDs.size === 0 && (
+          <p className="text-xs text-orange-400 mt-2">
+            Select at least one todo to generate the email.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -841,25 +729,63 @@ function ExportStep({
 }) {
   return (
     <div className="space-y-8">
-      {/* Export actions */}
+      {/* Primary CTA: Copy for Outlook */}
       <div>
-        <h3 className="text-sm font-medium text-text-primary mb-4">
-          Export Options
+        <h3 className="text-sm font-medium text-text-primary mb-3">
+          Paste into Outlook
+        </h3>
+        <button
+          onClick={onCopyHtml}
+          className={`flex items-center gap-3 w-full px-5 py-4 rounded-lg transition-colors text-left border-2 ${
+            copied === "html"
+              ? "bg-green-500/15 border-green-500/50 text-green-400"
+              : "bg-accent/15 border-accent/40 hover:bg-accent/25 text-accent"
+          }`}
+        >
+          {copied === "html" ? (
+            <Check className="w-5 h-5 flex-shrink-0" />
+          ) : (
+            <Copy className="w-5 h-5 flex-shrink-0" />
+          )}
+          <div className="flex-1">
+            <div className="text-sm font-semibold">
+              {copied === "html" ? "Copied — paste into Outlook now" : "Copy formatted email for Outlook"}
+            </div>
+            <div className="text-xs opacity-80 mt-0.5">
+              Aptos font, bold section headers, bulleted paragraphs. Paste directly into a new Outlook message.
+            </div>
+          </div>
+        </button>
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={onPreviewHtml}
+            className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary px-2 py-1 rounded"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Preview
+          </button>
+          <button
+            onClick={onMailto}
+            className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary px-2 py-1 rounded"
+          >
+            <Mail className="w-3.5 h-3.5" />
+            Open draft
+          </button>
+        </div>
+      </div>
+
+      {/* Other export options */}
+      <div>
+        <h3 className="text-sm font-medium text-text-primary mb-3">
+          Other formats
         </h3>
         <div className="grid grid-cols-2 gap-3">
           <ExportButton
             icon={Copy}
             label="Copy Markdown"
-            description="Copy the full report as markdown text"
+            description="Copy as plain markdown text"
             onClick={onCopyMarkdown}
             active={copied === "markdown"}
-          />
-          <ExportButton
-            icon={Copy}
-            label="Copy Outlook HTML"
-            description="Copy formatted HTML for pasting into Outlook"
-            onClick={onCopyHtml}
-            active={copied === "html"}
           />
           <ExportButton
             icon={Download}
@@ -870,20 +796,8 @@ function ExportStep({
           <ExportButton
             icon={Download}
             label="Download .html"
-            description="Save as Outlook-compatible HTML"
+            description="Save as a standalone HTML file"
             onClick={onDownloadHtml}
-          />
-          <ExportButton
-            icon={Eye}
-            label="Preview HTML"
-            description="See how it looks in Outlook"
-            onClick={onPreviewHtml}
-          />
-          <ExportButton
-            icon={Mail}
-            label="Open in Email"
-            description="Create a new email with the report"
-            onClick={onMailto}
           />
         </div>
       </div>

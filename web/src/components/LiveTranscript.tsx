@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mic, Square, BrainCircuit } from "lucide-react";
 import type { TranscriptSegment, CoachInsight } from "@/lib/types";
 import { formatDuration } from "@/lib/hooks";
 import CoachPanel from "@/components/CoachPanel";
+
+const COACH_WIDTH_KEY = "noteai_coach_width";
 
 interface LiveTranscriptProps {
   duration: number;
@@ -12,10 +14,13 @@ interface LiveTranscriptProps {
   interimText: string;
   onStop: () => void;
   capturingTabAudio?: boolean;
+  micLevel?: number;
   coachInsights: CoachInsight[];
   coachAnalyzing: boolean;
+  coachReplying?: boolean;
   coachEnabled: boolean;
   onToggleCoach: () => void;
+  onCoachSendMessage?: (question: string) => void;
 }
 
 export default function LiveTranscript({
@@ -24,18 +29,58 @@ export default function LiveTranscript({
   interimText,
   onStop,
   capturingTabAudio,
+  micLevel = 0,
   coachInsights,
   coachAnalyzing,
+  coachReplying,
   coachEnabled,
   onToggleCoach,
+  onCoachSendMessage,
 }: LiveTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [coachWidth, setCoachWidth] = useState(300);
+  const isDraggingRef = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [segments]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(COACH_WIDTH_KEY);
+    if (saved) {
+      const w = parseInt(saved, 10);
+      if (!isNaN(w) && w >= 220 && w <= 700) setCoachWidth(w);
+    }
+  }, []);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = coachWidth;
+    const onMove = (ev: MouseEvent) => {
+      // Drag LEFT (negative dx) expands the panel
+      const newWidth = Math.max(220, Math.min(700, startWidth - (ev.clientX - startX)));
+      setCoachWidth(newWidth);
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem(COACH_WIDTH_KEY, String(coachWidthRef.current));
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const coachWidthRef = useRef(coachWidth);
+  coachWidthRef.current = coachWidth;
 
   return (
     <div className="h-full flex flex-col">
@@ -51,6 +96,26 @@ export default function LiveTranscript({
           <span className="text-2xl font-mono text-danger font-semibold">
             {formatDuration(duration)}
           </span>
+          {/* Mic level meter */}
+          <div className="flex items-center gap-1.5" title="Mic level — bars should move when you speak">
+            <Mic className={`w-4 h-4 ${micLevel > 0.02 ? "text-green-400" : "text-text-tertiary"}`} />
+            <div className="flex items-end gap-[2px] h-5 w-[70px]">
+              {[0.08, 0.18, 0.3, 0.45, 0.6, 0.75].map((threshold, i) => (
+                <div
+                  key={i}
+                  className={`w-[8px] rounded-sm transition-colors ${
+                    micLevel >= threshold
+                      ? i < 3 ? "bg-green-400" : i < 5 ? "bg-yellow-400" : "bg-red-400"
+                      : "bg-border"
+                  }`}
+                  style={{ height: `${(i + 1) * 15}%` }}
+                />
+              ))}
+            </div>
+            {micLevel < 0.02 && (
+              <span className="text-[11px] text-orange-400 font-medium">Silent</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -60,10 +125,10 @@ export default function LiveTranscript({
                 ? "bg-accent/15 text-accent border border-accent/30"
                 : "bg-hover text-text-tertiary border border-border hover:text-text-secondary"
             }`}
-            title={coachEnabled ? "Disable AI Coach" : "Enable AI Coach"}
+            title={coachEnabled ? "Disable AI Solutions Architect" : "Enable AI Solutions Architect"}
           >
             <BrainCircuit className="w-3.5 h-3.5" />
-            AI Coach
+            AI Solutions Architect
             {coachInsights.length > 0 && (
               <span className="text-[10px] bg-accent/20 px-1 rounded ml-0.5">
                 {coachInsights.length}
@@ -135,9 +200,21 @@ export default function LiveTranscript({
         {/* Coach panel — right side */}
         {coachEnabled && (
           <>
-            <div className="w-px bg-border flex-shrink-0" />
-            <div className="w-[300px] flex-shrink-0 bg-sidebar">
-              <CoachPanel insights={coachInsights} isAnalyzing={coachAnalyzing} />
+            {/* Resize handle */}
+            <div
+              onMouseDown={startResize}
+              className="w-1 cursor-col-resize bg-border hover:bg-accent/40 active:bg-accent/60 flex-shrink-0 transition-colors relative group"
+              title="Drag to resize"
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
+            <div className="flex-shrink-0 bg-sidebar" style={{ width: coachWidth }}>
+              <CoachPanel
+                insights={coachInsights}
+                isAnalyzing={coachAnalyzing}
+                isReplying={coachReplying}
+                onSendMessage={onCoachSendMessage}
+              />
             </div>
           </>
         )}

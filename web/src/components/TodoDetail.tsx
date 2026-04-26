@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { CheckSquare, Square, Save, Loader2, Calendar, X } from "lucide-react";
 import type { TodoItem } from "@/lib/types";
 import { db } from "@/lib/db";
-import { formatDateTime, triggerRefresh } from "@/lib/hooks";
+import { formatDateTime, parseDueDate, triggerRefresh } from "@/lib/hooks";
 
 interface TodoDetailProps {
   todo: TodoItem;
@@ -12,7 +12,8 @@ interface TodoDetailProps {
 
 function isDueOverdue(dueDate: string | null): boolean {
   if (!dueDate) return false;
-  const due = new Date(dueDate);
+  const due = parseDueDate(dueDate);
+  due.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return due < today;
@@ -20,7 +21,8 @@ function isDueOverdue(dueDate: string | null): boolean {
 
 function isDueSoon(dueDate: string | null): boolean {
   if (!dueDate) return false;
-  const due = new Date(dueDate);
+  const due = parseDueDate(dueDate);
+  due.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const twoDays = new Date(today);
@@ -29,7 +31,7 @@ function isDueSoon(dueDate: string | null): boolean {
 }
 
 function formatDueLabel(dueDate: string): string {
-  const due = new Date(dueDate);
+  const due = parseDueDate(dueDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
@@ -73,7 +75,28 @@ export default function TodoDetail({ todo }: TodoDetailProps) {
     triggerRefresh();
     setDirty(false);
     setSaving(false);
-  }, [todo.id, title, description, dueDate]);
+
+    // Fire-and-forget Google Docs sync. The endpoint dedupes on the
+    // syncedToGoogleDocs flag and skips empty titles, so it's safe to call on
+    // every save. Errors (not configured, network, etc.) surface only in the
+    // browser console — UI save success shouldn't depend on Google.
+    if (title.trim() && !todo.syncedToGoogleDocs) {
+      fetch("/api/integrations/google-docs/sync-todo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ todoId: todo.id }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.warn("[google-docs] sync-todo failed", res.status, body);
+          } else {
+            triggerRefresh();
+          }
+        })
+        .catch((err) => console.warn("[google-docs] sync-todo error", err));
+    }
+  }, [todo.id, todo.syncedToGoogleDocs, title, description, dueDate]);
 
   const toggleCompleted = useCallback(async () => {
     const newVal = !completed;
@@ -132,6 +155,14 @@ export default function TodoDetail({ todo }: TodoDetailProps) {
               {formatDueLabel(dueDate)}
             </span>
           )}
+          {todo.syncedToGoogleDocs ? (
+            <span
+              className="px-2 py-0.5 rounded text-xs font-medium bg-blue-500/10 text-blue-300"
+              title={todo.googleDocsSyncedAt ? `Synced to manager doc on ${new Date(todo.googleDocsSyncedAt).toLocaleString()}` : "Synced to manager doc"}
+            >
+              Synced to Docs
+            </span>
+          ) : null}
         </div>
 
         <div className="border-t border-border mb-6" />

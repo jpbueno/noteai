@@ -295,6 +295,52 @@ final class MeetingStore {
         }
     }
 
+    // MARK: - Todos
+
+    func saveTodo(_ todo: TodoItem) throws {
+        let jsonData = try JSONEncoder().encode(todo)
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT OR REPLACE INTO todos (id, title, created_date, modified_date, completed, due_date, json_data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    todo.id.uuidString,
+                    todo.title,
+                    todo.createdDate.timeIntervalSince1970,
+                    todo.modifiedDate.timeIntervalSince1970,
+                    todo.completed ? 1 : 0,
+                    todo.dueDate?.timeIntervalSince1970,
+                    String(data: jsonData, encoding: .utf8)
+                ]
+            )
+        }
+    }
+
+    func fetchAllTodos() throws -> [TodoItem] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT json_data FROM todos ORDER BY created_date DESC"
+            )
+            return rows.compactMap { row -> TodoItem? in
+                guard let jsonString: String = row["json_data"],
+                      let data = jsonString.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode(TodoItem.self, from: data)
+            }
+        }
+    }
+
+    func deleteTodo(id: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM todos WHERE id = ?",
+                arguments: [id.uuidString]
+            )
+        }
+    }
+
     // MARK: - Private
 
     private func createTablesIfNeeded() throws {
@@ -340,6 +386,17 @@ final class MeetingStore {
                     created_date REAL NOT NULL,
                     modified_date REAL NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
+                    json_data TEXT NOT NULL
+                )
+                """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS todos (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    created_date REAL NOT NULL,
+                    modified_date REAL NOT NULL,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    due_date REAL,
                     json_data TEXT NOT NULL
                 )
                 """)

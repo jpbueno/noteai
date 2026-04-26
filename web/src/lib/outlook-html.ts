@@ -7,10 +7,12 @@
 
 import type { T5TConfig } from "./types";
 
+const FONT_STACK = "Aptos, Calibri, 'Segoe UI', Arial, sans-serif";
+
 const LINK_STYLE = "color: #2b579a; text-decoration: underline;";
 
 const TABLE_STYLE =
-  "border-collapse: collapse; width: 100%; font-family: Calibri, Arial, sans-serif; " +
+  `border-collapse: collapse; width: 100%; font-family: ${FONT_STACK}; ` +
   "font-size: 11pt; margin-top: 8px; margin-bottom: 12px;";
 
 const HEADER_CELL_STYLE =
@@ -152,7 +154,7 @@ export function markdownToOutlookHtml(
       tableRows = [];
     }
 
-    // Section headers [Projects], [Automation], etc.
+    // Section headers [Projects], [Automation], etc. (legacy bracket format)
     if (/^\[(.+?)\]$/.test(lineEscaped.trim())) {
       if (inList) {
         htmlLines.push("</ul>");
@@ -160,9 +162,44 @@ export function markdownToOutlookHtml(
       }
       const sectionText = convertMarkdownFormatting(lineEscaped, config);
       htmlLines.push(
-        `<p style="color: #2b579a; font-family: Calibri, Arial, sans-serif; ` +
+        `<p style="color: #2b579a; font-family: ${FONT_STACK}; ` +
           `font-size: 12pt; font-weight: bold; margin-top: 14px; margin-bottom: 8px; ` +
           `margin-left: 0;">${sectionText}</p>`,
+      );
+      skipNextBlank = true;
+      continue;
+    }
+
+    // H2 section headers (## ...) — used by the new Top 5 Things format
+    const h2Match = lineEscaped.trim().match(/^##\s+(.+)$/);
+    if (h2Match) {
+      if (inList) {
+        htmlLines.push("</ul>");
+        inList = false;
+      }
+      const sectionText = convertMarkdownFormatting(h2Match[1], config);
+      htmlLines.push(
+        `<p style="font-family: ${FONT_STACK}; ` +
+          `font-size: 13pt; font-weight: bold; margin-top: 18px; margin-bottom: 10px; ` +
+          `margin-left: 0; color: #000000;">${sectionText}</p>`,
+      );
+      skipNextBlank = true;
+      continue;
+    }
+
+    // Standalone bold line (only **text**, nothing else) — treat as item
+    // headline in the Top 5 Things format. Distinct from the H2 section title.
+    const boldOnlyMatch = lineEscaped.trim().match(/^\*\*(.+)\*\*$/);
+    if (boldOnlyMatch) {
+      if (inList) {
+        htmlLines.push("</ul>");
+        inList = false;
+      }
+      const headlineText = convertMarkdownFormatting(boldOnlyMatch[1], config);
+      htmlLines.push(
+        `<p style="font-family: ${FONT_STACK}; ` +
+          `font-size: 11pt; font-weight: bold; margin-top: 12px; margin-bottom: 4px; ` +
+          `margin-left: 0; color: #000000;">${headlineText}</p>`,
       );
       skipNextBlank = true;
       continue;
@@ -174,9 +211,9 @@ export function markdownToOutlookHtml(
         htmlLines.push("</ul>");
         inList = false;
       }
-      let bugText = convertMarkdownFormatting(lineEscaped.trim(), config);
+      const bugText = convertMarkdownFormatting(lineEscaped.trim(), config);
       htmlLines.push(
-        `<p style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; ` +
+        `<p style="font-family: ${FONT_STACK}; font-size: 11pt; ` +
           `font-weight: bold; margin-top: 12px; margin-bottom: 4px; margin-left: 0; ` +
           `color: #c7254e;">${bugText}</p>`,
       );
@@ -197,14 +234,14 @@ export function markdownToOutlookHtml(
 
       if (!inList) {
         htmlLines.push(
-          `<ul style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; ` +
+          `<ul style="font-family: ${FONT_STACK}; font-size: 11pt; ` +
             `line-height: 1.5; margin-top: 4px; margin-bottom: 8px; padding-left: 20px;">`,
         );
         inList = true;
         listIndent = indent;
       } else if (indent > listIndent) {
         htmlLines.push(
-          `<ul style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; ` +
+          `<ul style="font-family: ${FONT_STACK}; font-size: 11pt; ` +
             `line-height: 1.5; margin-top: 4px; margin-bottom: 4px; padding-left: 20px;">`,
         );
         listIndent = indent;
@@ -242,7 +279,7 @@ export function markdownToOutlookHtml(
     } else if (lineEscaped.trim()) {
       const text = convertMarkdownFormatting(lineEscaped, config);
       htmlLines.push(
-        `<p style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; ` +
+        `<p style="font-family: ${FONT_STACK}; font-size: 11pt; ` +
           `margin-top: 4px; margin-bottom: 4px; margin-left: 0; ` +
           `color: #000000;">${text}</p>`,
       );
@@ -277,7 +314,7 @@ export function createOutlookHtmlDocument(
     </noscript>
     <![endif]-->
 </head>
-<body style="font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #000000; background-color: #ffffff; margin: 0; padding: 20px;">
+<body style="font-family: ${FONT_STACK}; font-size: 11pt; color: #000000; background-color: #ffffff; margin: 0; padding: 20px;">
     <div style="max-width: 800px;">
         ${htmlContent}
     </div>

@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { TranscriptSegment, CoachInsight } from "./types";
-import { analyzeTranscriptLive } from "./ai";
+import { analyzeTranscriptLive, askAISA } from "./ai";
 
-const MIN_WORDS = 30;
-const MIN_NEW_SEGMENTS = 3;
-const MIN_INTERVAL_MS = 25_000;
+const MIN_WORDS = 25;
+const MIN_NEW_SEGMENTS = 2;
+const MIN_INTERVAL_MS = 45_000;
 const CHECK_INTERVAL_MS = 8_000;
 
 export function useAICoach(
@@ -15,6 +15,7 @@ export function useAICoach(
 ) {
   const [insights, setInsights] = useState<CoachInsight[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isReplying, setIsReplying] = useState(false);
   const [enabled, setEnabled] = useState(true);
 
   const lastAnalyzedCount = useRef(0);
@@ -38,10 +39,10 @@ export function useAICoach(
     const newSegsSinceLast = segs.length - lastAnalyzedCount.current;
     const timeSinceLast = Date.now() - lastAnalyzedTime.current;
 
-    // Need enough new content or enough time elapsed
+    // Need enough new content AND enough time elapsed — be strict
     if (lastAnalyzedTime.current > 0) {
       if (timeSinceLast < MIN_INTERVAL_MS) return;
-      if (newSegsSinceLast < MIN_NEW_SEGMENTS && timeSinceLast < 60_000) return;
+      if (newSegsSinceLast < MIN_NEW_SEGMENTS && timeSinceLast < 90_000) return;
     }
 
     analyzingRef.current = true;
@@ -49,7 +50,9 @@ export function useAICoach(
 
     try {
       const previousContents = insightsRef.current.map((i) => i.content);
+      console.log(`[AI Coach] Analyzing — ${wordCount} words, ${previousContents.length} prior insights`);
       const newInsights = await analyzeTranscriptLive(fullText, previousContents);
+      console.log(`[AI Coach] Got ${newInsights.length} new insight(s)`);
 
       if (mountedRef.current && newInsights.length > 0) {
         setInsights((prev) => [...prev, ...newInsights]);
@@ -91,5 +94,60 @@ export function useAICoach(
     return () => { mountedRef.current = false; };
   }, []);
 
-  return { insights, isAnalyzing, enabled, setEnabled };
+  // Send an interactive message to the AI SA
+  const sendMessage = useCallback(async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed || isReplying) return;
+
+    const userMsg: CoachInsight = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "key_insight",
+      content: trimmed,
+      role: "user",
+    };
+    setInsights((prev) => [...prev, userMsg]);
+    setIsReplying(true);
+
+    try {
+      const segs = segmentsRef.current;
+      const transcript = segs.map((s) => s.text).join(" ");
+      const all = insightsRef.current;
+      const chatHistory = all
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+      const priorInsights = all
+        .filter((m) => !m.role)
+        .map((m) => m.content);
+
+      const reply = await askAISA(trimmed, transcript, chatHistory, priorInsights);
+
+      if (mountedRef.current && reply.trim()) {
+        const assistantMsg: CoachInsight = {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          type: "key_insight",
+          content: reply.trim(),
+          role: "assistant",
+        };
+        setInsights((prev) => [...prev, assistantMsg]);
+      }
+    } catch (err) {
+      console.warn("[AI SA] Reply failed:", err);
+      if (mountedRef.current) {
+        const errorMsg: CoachInsight = {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          type: "key_insight",
+          content: `Reply failed: ${err instanceof Error ? err.message : "unknown error"}`,
+          role: "assistant",
+        };
+        setInsights((prev) => [...prev, errorMsg]);
+      }
+    } finally {
+      if (mountedRef.current) setIsReplying(false);
+    }
+  }, [isReplying]);
+
+  return { insights, isAnalyzing, isReplying, enabled, setEnabled, sendMessage };
 }

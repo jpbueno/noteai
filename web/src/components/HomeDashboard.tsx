@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { CheckSquare, Square, Calendar, Circle, Plus } from "lucide-react";
 import type { TodoItem, SidebarSelection } from "@/lib/types";
 import { db } from "@/lib/db";
-import { triggerRefresh } from "@/lib/hooks";
+import { parseDueDate, triggerRefresh } from "@/lib/hooks";
 
 interface HomeDashboardProps {
   todos: TodoItem[];
@@ -14,7 +14,7 @@ interface HomeDashboardProps {
 
 function getDueDateInfo(dueDate: string | null, completed: boolean) {
   if (!dueDate) return { label: null, color: "" };
-  const due = new Date(dueDate);
+  const due = parseDueDate(dueDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
@@ -57,7 +57,7 @@ export default function HomeDashboard({ todos, onSelect, onNewTodo }: HomeDashbo
         noDue.push(t);
         continue;
       }
-      const due = new Date(t.dueDate);
+      const due = parseDueDate(t.dueDate);
       due.setHours(0, 0, 0, 0);
       if (due < now) overdue.push(t);
       else if (due.getTime() === now.getTime()) today.push(t);
@@ -65,7 +65,7 @@ export default function HomeDashboard({ todos, onSelect, onNewTodo }: HomeDashbo
     }
 
     // Sort upcoming by due date ascending
-    upcoming.sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
+    upcoming.sort((a, b) => parseDueDate(a.dueDate!).getTime() - parseDueDate(b.dueDate!).getTime());
     // Sort completed by modification date descending (most recent first)
     completed.sort((a, b) => new Date(b.modifiedDate).getTime() - new Date(a.modifiedDate).getTime());
 

@@ -24,7 +24,7 @@ import type {
   SidebarSelection,
 } from "@/lib/types";
 import { type RecordingState, getAudioInputDevices } from "@/lib/audio";
-import { formatDuration, formatDate } from "@/lib/hooks";
+import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
 
 interface SidebarProps {
   meetings: Meeting[];
@@ -192,7 +192,9 @@ export default function Sidebar({
         {/* Todos */}
         <SidebarSection title="Todos" icon={CheckSquare} action={{ label: "New", onClick: onNewTodo }} onTitleClick={() => onSelect(null)}>
           {todos.map((t) => {
-            const overdue = !t.completed && t.dueDate && new Date(t.dueDate) < new Date(new Date().toDateString());
+            const todayMidnight = new Date();
+            todayMidnight.setHours(0, 0, 0, 0);
+            const overdue = !t.completed && t.dueDate && parseDueDate(t.dueDate) < todayMidnight;
             return (
               <SidebarItem
                 key={t.id}

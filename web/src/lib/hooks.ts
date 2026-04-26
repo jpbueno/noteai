@@ -123,6 +123,7 @@ export function useRecording() {
   const [liveTranscript, setLiveTranscript] = useState<TranscriptSegment[]>([]);
   const [interimText, setInterimText] = useState("");
   const [capturingTabAudio, setCapturingTabAudio] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
 
   const startRecording = useCallback(async (micDeviceId?: string, captureTab = false) => {
     try {
@@ -150,7 +151,9 @@ export function useRecording() {
           setInterimText(text);
           interimRef.current = text;
         }
-      }, micDeviceId, captureTab);
+      }, micDeviceId, captureTab, (level) => {
+        setMicLevel(level);
+      });
 
       recorderRef.current = recorder;
       setState("recording");
@@ -165,13 +168,7 @@ export function useRecording() {
     } catch (err) {
       console.error("Failed to start recording:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Permission denied") || msg.includes("NotAllowed")) {
-        alert("Microphone permission denied. Please allow microphone access and try again.");
-      } else if (msg.includes("NotFound") || msg.includes("Requested device not found")) {
-        alert("No microphone found. Please connect a microphone and try again.");
-      } else {
-        alert(`Recording failed: ${msg}`);
-      }
+      alert(`Recording failed:\n\n${msg}`);
     }
   }, []);
 
@@ -197,10 +194,19 @@ export function useRecording() {
       let finalText = "";
       let finalSegments: TranscriptSegment[] = liveSegments;
 
-      if (hadTabAudio && audioBlob.size > 0) {
+      // Whisper API caps request size at 25 MB. A full-blob retranscribe on a
+      // large recording silently truncates on some upstream providers, leaving
+      // us with a single short segment that overwrites the live polling output.
+      // Skip it for oversize blobs and trust the live segments accumulated
+      // during recording.
+      const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
+      if (hadTabAudio && audioBlob.size > 0 && audioBlob.size <= WHISPER_MAX_BYTES) {
         try {
           const whisperText = await transcribeAudio(audioBlob);
-          if (whisperText) {
+          const liveTextLen = liveSegments.reduce((acc, s) => acc + s.text.length, 0);
+          // Only accept Whisper's result if it's at least as complete as what we
+          // already have from live polling — guards against silent truncation.
+          if (whisperText && whisperText.length >= liveTextLen) {
             finalText = whisperText;
             finalSegments = [{
               id: 0,
@@ -268,7 +274,7 @@ export function useRecording() {
     };
   }, []);
 
-  return { state, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording };
+  return { state, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording };
 }
 
 export function formatDuration(seconds: number): string {
@@ -290,4 +296,12 @@ export function formatDate(iso: string): string {
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function parseDueDate(dueDate: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dueDate);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  return new Date(dueDate);
 }

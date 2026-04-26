@@ -132,8 +132,8 @@ export default function Home() {
   const todos = useTodos();
   const t5tReports = useT5TReports();
   const chatMessages = useChatMessages();
-  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, startRecording, stopRecording } = useRecording();
-  const { insights: coachInsights, isAnalyzing: coachAnalyzing, enabled: coachEnabled, setEnabled: setCoachEnabled } = useAICoach(liveTranscript, recordingState === "recording");
+  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording } = useRecording();
+  const { insights: coachInsights, isAnalyzing: coachAnalyzing, isReplying: coachReplying, enabled: coachEnabled, setEnabled: setCoachEnabled, sendMessage: sendCoachMessage } = useAICoach(liveTranscript, recordingState === "recording");
 
   const [selection, setSelection] = useState<SidebarSelection>(null);
   const [showChat, setShowChat] = useState(false);
@@ -203,15 +203,11 @@ export default function Home() {
       config = DEFAULT_T5T_CONFIG;
     }
 
-    const title = config.identity.team
-      ? `Weekly Report – ${config.identity.team}`
-      : "Weekly Report";
-
-    // Auto-select all todos and meetings in range
-    const meetingsInRange = meetings.filter((m) => {
-      const d = new Date(m.date);
-      return d >= start && d <= end;
-    });
+    // Title matches the Top 5 Things email subject line
+    const focus = config.identity.focus || "Inference Ops";
+    const region = config.identity.region || "NALA";
+    const roleShort = config.identity.roleShort || "SA";
+    const title = `Top 5 Things - ${focus} | ${region} | ${roleShort}`;
 
     const report = {
       id: uuid(),
@@ -220,7 +216,7 @@ export default function Home() {
       periodStart: start.toISOString(),
       periodEnd: end.toISOString(),
       dailyLogIDs: [],
-      meetingIDs: meetingsInRange.map((m) => m.id),
+      meetingIDs: [],
       noteIDs: [],
       taskIDs: [],
       todoIDs: todos.map((t) => t.id),
@@ -230,7 +226,7 @@ export default function Home() {
     await db.t5tReports.add(report);
     triggerRefresh();
     setSelection({ type: "t5t", id: report.id });
-  }, [meetings, todos]);
+  }, [todos]);
 
   const handleStopRecording = useCallback(async () => {
     const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
@@ -322,10 +318,13 @@ export default function Home() {
           interimText={interimText}
           onStop={handleStopRecording}
           capturingTabAudio={capturingTabAudio}
+          micLevel={micLevel}
           coachInsights={coachInsights}
           coachAnalyzing={coachAnalyzing}
+          coachReplying={coachReplying}
           coachEnabled={coachEnabled}
           onToggleCoach={() => setCoachEnabled(!coachEnabled)}
+          onCoachSendMessage={sendCoachMessage}
         />
       );
     }

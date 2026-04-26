@@ -1,16 +1,17 @@
 export type RecordingState = "idle" | "recording" | "processing";
 
 type TranscriptCallback = (text: string, isFinal: boolean) => void;
+type LevelCallback = (level: number) => void;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SpeechRecognitionInstance = any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-async function whisperTranscribe(blob: Blob, prompt?: string): Promise<string> {
+async function whisperTranscribe(blob: Blob, prompt?: string, signal?: AbortSignal): Promise<string> {
   const formData = new FormData();
   formData.append("file", blob, "chunk.webm");
   if (prompt) formData.append("prompt", prompt);
-  const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+  const res = await fetch("/api/transcribe", { method: "POST", body: formData, signal });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data.text || "";
@@ -111,18 +112,28 @@ export class AudioRecorder {
   private whisperBusy = false;
   private lastWhisperChunkCount = 0;
   private lastWhisperText = "";
+  private whisperOversizeNotified = false;
+  private whisperDisabled = false;
+  private whisperFailureCount = 0;
   private lastResultTime = 0;
   private micDeviceId: string | undefined;
   private systemStream: MediaStream | null = null;
   private micSourceNode: MediaStreamAudioSourceNode | null = null;
   private deviceChangeHandler: (() => void) | null = null;
+  private levelAnalyser: AnalyserNode | null = null;
+  private levelCtx: AudioContext | null = null;
+  private levelRafId: number = 0;
+  private onLevel: LevelCallback | null = null;
+  private activeMicLabel: string = "";
 
   /**
    * @param onTranscript - callback for live transcript segments
    * @param micDeviceId - specific mic device ID (or undefined for default)
    * @param captureTab - if true, prompt user to share a tab for system audio capture
+   * @param onLevel - optional callback for mic level (0-1) — useful for UI meters
    */
-  async start(onTranscript?: TranscriptCallback, micDeviceId?: string, captureTab = false): Promise<void> {
+  async start(onTranscript?: TranscriptCallback, micDeviceId?: string, captureTab = false, onLevel?: LevelCallback): Promise<void> {
+    this.onLevel = onLevel || null;
     this.chunks = [];
     this.stopped = false;
     this.hasTabAudio = false;
@@ -138,18 +149,115 @@ export class AudioRecorder {
     // 1. Get mic permission first so enumerateDevices() returns labels.
     //    If the requested device is gone (stale ID), fall back to default mic.
     let micStream: MediaStream;
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-      });
-    } catch (err) {
-      if (micDeviceId && err instanceof DOMException && err.name === "NotFoundError") {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } else {
-        throw err;
+    const tryGetMic = async (constraints: MediaStreamConstraints): Promise<MediaStream> => {
+      return navigator.mediaDevices.getUserMedia(constraints);
+    };
+
+    // Try multiple approaches to get mic access
+    const attempts: { constraints: MediaStreamConstraints; label: string }[] = [
+      ...(micDeviceId
+        ? [{ constraints: { audio: { deviceId: { exact: micDeviceId } } } as MediaStreamConstraints, label: "requested device" }]
+        : []),
+      { constraints: { audio: true }, label: "default audio" },
+      { constraints: { audio: { echoCancellation: true, noiseSuppression: true } }, label: "with processing" },
+      { constraints: { audio: { sampleRate: 44100 } }, label: "explicit sample rate" },
+    ];
+
+    let lastErr: unknown = null;
+    for (const attempt of attempts) {
+      try {
+        micStream = await tryGetMic(attempt.constraints);
+        break;
+      } catch (err) {
+        lastErr = err;
+        // If permission denied, no point retrying with different constraints
+        if (err instanceof DOMException && err.name === "NotAllowedError") break;
       }
     }
+
+    if (!micStream!) {
+      const errName = lastErr instanceof DOMException ? lastErr.name : "";
+      const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+
+      if (errName === "NotAllowedError") {
+        throw new Error(
+          "Microphone permission denied.\n\n" +
+          "1. Click the lock/tune icon in Chrome's address bar → Microphone → Allow\n" +
+          "2. macOS: System Settings → Privacy & Security → Microphone → Chrome ON\n" +
+          "3. Reload this page"
+        );
+      }
+
+      // Check devices for diagnostics
+      let mics: MediaDeviceInfo[] = [];
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        mics = devices.filter((d) => d.kind === "audioinput");
+      } catch { /* ignore */ }
+
+      if (mics.length === 0) {
+        throw new Error(
+          "Chrome cannot see any microphones.\n\n" +
+          "Fix: Quit Chrome completely (Cmd+Q), then relaunch it.\n\n" +
+          "If that doesn't work:\n" +
+          "• macOS System Settings → Privacy & Security → Microphone → toggle Chrome OFF then ON\n" +
+          "• Relaunch Chrome"
+        );
+      }
+
+      throw new Error(
+        `Mic access failed: ${errName || errMsg}\n\n` +
+        `${mics.length} mic(s) detected: ${mics.map((m) => m.label || "unnamed").join(", ")}\n\n` +
+        "Try: Quit Chrome (Cmd+Q) and relaunch, or click lock icon → Microphone → Allow."
+      );
+    }
     this.micStream = micStream;
+
+    // Diagnostics: figure out which mic we actually got
+    try {
+      const activeTrack = micStream.getAudioTracks()[0];
+      const settings = activeTrack?.getSettings?.();
+      const allDevices = await navigator.mediaDevices.enumerateDevices();
+      const match = allDevices.find((d) => d.deviceId === settings?.deviceId);
+      this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";
+      if (this.onTranscript) {
+        this.onTranscript(`[Mic active: ${this.activeMicLabel}]`, true);
+      }
+    } catch { /* ignore */ }
+
+    // Set up level monitoring — always runs so the UI can show audio presence
+    if (this.onLevel) {
+      try {
+        const levelCtx = new AudioContext();
+        const source = levelCtx.createMediaStreamSource(micStream);
+        const analyser = levelCtx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser);
+        this.levelCtx = levelCtx;
+        this.levelAnalyser = analyser;
+
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          if (this.stopped || !this.levelAnalyser) return;
+          this.levelAnalyser.getByteTimeDomainData(data);
+          // Compute RMS around 128 (silent center)
+          let sumSq = 0;
+          for (let i = 0; i < data.length; i++) {
+            const v = (data[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          const rms = Math.sqrt(sumSq / data.length);
+          // Normalize roughly — human speech typically ~0.05-0.3 RMS
+          const level = Math.min(1, rms * 4);
+          if (this.onLevel) this.onLevel(level);
+          this.levelRafId = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch (err) {
+        console.warn("[NoteAI] Level meter setup failed:", err);
+      }
+    }
 
     // 2. Try BlackHole for system audio loopback (captures ALL speaker output)
     const blackHoleId = await findBlackHoleDevice();
@@ -272,47 +380,128 @@ export class AudioRecorder {
     this.whisperBusy = true;
     this.lastWhisperChunkCount = this.chunks.length;
 
-    // Always send the full recording from chunk 0 — webm container headers live
-    // in the first chunk and later chunks are not valid standalone files.
-    // The deduplication logic below strips already-transcribed text.
-    const blob = new Blob(this.chunks, { type: "audio/webm" });
-
-    // Use last transcription as prompt context to maintain coherence
-    const promptContext = this.lastWhisperText.slice(-150) || undefined;
+    // Hard timeout so a hung upstream can't deadlock future polls. Without this,
+    // a single stuck fetch freezes all subsequent transcription — and since
+    // SpeechRecognition finals are dropped while Whisper is active, the UI
+    // stops updating entirely.
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 45000);
 
     try {
-      const text = await whisperTranscribe(blob, promptContext);
-      if (text && this.onTranscript) {
-        // Deduplicate: strip any leading text that matches the tail of last result
-        let cleaned = text.trim();
-        if (this.lastWhisperText) {
-          const lastTail = this.lastWhisperText.slice(-80).trim().toLowerCase();
-          const candidateHead = cleaned.slice(0, 120).toLowerCase();
-          // If the new text starts with the tail of the old text, skip the overlap
-          if (lastTail.length > 20) {
-            // Try progressively shorter suffixes of the old tail
-            for (let len = lastTail.length; len >= 20; len -= 5) {
-              const suffix = lastTail.slice(-len);
-              const idx = candidateHead.indexOf(suffix);
-              if (idx >= 0) {
-                cleaned = cleaned.slice(idx + suffix.length).trim();
-                break;
-              }
-            }
-          }
+      // Always send the full recording from chunk 0 — webm container headers live
+      // in the first chunk and later chunks are not valid standalone files.
+      // The deduplication logic below strips already-transcribed text.
+      const blob = new Blob(this.chunks, { type: "audio/webm" });
+
+      // Whisper API file size limit is 25 MB. For long recordings we eventually
+      // exceed this. When we do, skip this poll — SpeechRecognition still runs
+      // in the background for fresh content.
+      const WHISPER_MAX_BYTES = 24 * 1024 * 1024; // 24 MB safety margin
+      if (blob.size > WHISPER_MAX_BYTES) {
+        console.warn(`[NoteAI] Whisper blob too large (${(blob.size / 1024 / 1024).toFixed(1)} MB) — disabling Whisper polling`);
+        this.whisperDisabled = true; // Let SpeechRecognition emit finals from now on
+        if (this.onTranscript && !this.whisperOversizeNotified) {
+          this.whisperOversizeNotified = true;
+          this.onTranscript("[Recording long — switched to mic-only transcription for remainder]", true);
         }
+        return;
+      }
+
+      // Use last transcription as prompt context to maintain coherence
+      const promptContext = this.lastWhisperText.slice(-150) || undefined;
+
+      const text = await whisperTranscribe(blob, promptContext, controller.signal);
+      console.log(`[NoteAI] Whisper poll OK — ${text.length} chars returned`);
+      this.whisperFailureCount = 0;
+
+      if (text && this.onTranscript) {
+        // Whisper returns the FULL cumulative transcript each poll.
+        // Extract only the NEW text appended since last call.
+        const newTail = this.extractNewTranscriptTail(text.trim());
         this.lastWhisperText = text.trim();
 
-        if (cleaned) {
-          this.onTranscript(cleaned, true);
+        if (newTail) {
+          this.onTranscript(newTail, true);
         }
       }
     } catch (err) {
-      if (this.onTranscript) {
-        this.onTranscript(`[Whisper error: ${err instanceof Error ? err.message : "unknown"}]`, true);
+      this.whisperFailureCount++;
+      console.warn(`[NoteAI] Whisper poll failed (${this.whisperFailureCount}):`, err);
+
+      // After repeated failures, assume Whisper is unreachable and let
+      // SpeechRecognition take over finals for the rest of the recording.
+      // Better to lose remote audio than lose everything.
+      if (this.whisperFailureCount >= 3) {
+        this.whisperDisabled = true;
+        if (this.onTranscript && !this.whisperOversizeNotified) {
+          this.whisperOversizeNotified = true;
+          this.onTranscript("[Whisper unavailable — switched to mic-only transcription for remainder]", true);
+        }
+      }
+    } finally {
+      clearTimeout(timeoutHandle);
+      // CRITICAL: always reset this flag, otherwise future polls deadlock
+      this.whisperBusy = false;
+    }
+  }
+
+  /**
+   * Given a fresh cumulative Whisper transcript, return only the portion that
+   * was NOT already present in lastWhisperText. Whisper always returns the full
+   * cumulative text, so we need to find the overlap and emit only new content.
+   *
+   * Strategy: find a tail of the old transcript (progressively shorter) within
+   * the new transcript using substring search on a normalized form. Once found,
+   * everything after it in the new text is the "new tail" to emit.
+   *
+   * If no tail match is found (Whisper heavily re-interpreted), fall back to
+   * emitting the last N words, where N is the word-count delta.
+   *
+   * Returns the new tail in original casing, or '' if there's genuinely nothing new.
+   */
+  private extractNewTranscriptTail(fullText: string): string {
+    if (!this.lastWhisperText.trim()) return fullText;
+
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+
+    const oldN = norm(this.lastWhisperText);
+    const newN = norm(fullText);
+
+    // Nothing new — new transcript is shorter/equal to old in normalized form
+    if (!newN || newN.length <= oldN.length) return "";
+
+    const oldNormWords = oldN.split(" ").filter(Boolean);
+    const newOrigWords = fullText.split(/\s+/).filter(Boolean);
+
+    // Try progressively shorter tails of old text to find in new text.
+    // Start long so we get precise matches; fall back to shorter if needed.
+    for (let tailN = Math.min(20, oldNormWords.length); tailN >= 3; tailN -= 2) {
+      const tailPhrase = oldNormWords.slice(-tailN).join(" ");
+      if (!tailPhrase) continue;
+      const idx = newN.lastIndexOf(tailPhrase);
+      if (idx !== -1) {
+        // Count normalized words up to and including the found tail
+        const endCharPos = idx + tailPhrase.length;
+        const prefixWordCount = newN
+          .slice(0, endCharPos)
+          .split(" ")
+          .filter(Boolean).length;
+        return newOrigWords.slice(prefixWordCount).join(" ").trim();
       }
     }
-    this.whisperBusy = false;
+
+    // Fallback: substring match failed (Whisper heavily re-worded earlier content).
+    // Emit the last N words where N = word-count delta between new and old.
+    // This may double-emit a few words but avoids losing new content entirely.
+    const oldWordCount = oldNormWords.length;
+    const newWordCount = newOrigWords.length;
+    const delta = newWordCount - oldWordCount;
+    if (delta > 0 && delta < newWordCount) {
+      return newOrigWords.slice(-delta).join(" ").trim();
+    }
+
+    return "";
   }
 
   // --- SpeechRecognition (always active) ---
@@ -353,15 +542,17 @@ export class AudioRecorder {
         const text = result[0].transcript.trim();
         if (!text || !this.onTranscript) continue;
 
-        if (this.hasTabAudio) {
-          // When we have system audio, Whisper handles final segments (it hears
-          // both speakers). SpeechRecognition only provides interim previews.
+        if (this.hasTabAudio && !this.whisperDisabled) {
+          // When we have system audio AND Whisper is still running, Whisper
+          // handles final segments (it hears both speakers). SpeechRecognition
+          // only provides interim previews.
           if (!result.isFinal) {
             this.onTranscript(text, false);
           }
-          // Drop SpeechRecognition finals — Whisper will produce the authoritative version.
+          // Drop SpeechRecognition finals — Whisper will produce them.
         } else {
-          // Mic-only mode: SpeechRecognition is the only transcription source.
+          // Mic-only mode, OR Whisper disabled (blob too large): SpeechRecognition
+          // is the transcription source.
           this.onTranscript(text, result.isFinal);
         }
       }
@@ -464,8 +655,12 @@ export class AudioRecorder {
     if (this.mixedStream) { this.mixedStream.getTracks().forEach((t) => t.stop()); this.mixedStream = null; }
     if (this.systemStream) { this.systemStream.getTracks().forEach((t) => t.stop()); this.systemStream = null; }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
+    if (this.levelRafId) { cancelAnimationFrame(this.levelRafId); this.levelRafId = 0; }
+    if (this.levelCtx) { this.levelCtx.close().catch(() => {}); this.levelCtx = null; }
+    this.levelAnalyser = null;
     this.micSourceNode = null;
     this.onTranscript = null;
+    this.onLevel = null;
     const blob = new Blob(this.chunks, { type: "audio/webm" });
     this.chunks = [];
     return blob;

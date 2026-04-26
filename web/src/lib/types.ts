@@ -5,6 +5,8 @@ export interface CoachInsight {
   timestamp: string;
   type: CoachInsightType;
   content: string;
+  /** When set, this entry is a chat message rather than an auto-generated insight. */
+  role?: "user" | "assistant";
 }
 
 export interface TranscriptSegment {
@@ -76,6 +78,9 @@ export interface TodoItem {
   createdDate: string;
   modifiedDate: string;
   pinned?: number;
+  // Google Docs sync tracking (manager's running log). 0/1 flag + ISO timestamp.
+  syncedToGoogleDocs?: number;
+  googleDocsSyncedAt?: string | null;
 }
 
 // ===== Daily Logs =====
@@ -132,6 +137,11 @@ export interface T5TIdentity {
   role: string;
   team: string;
   managers: T5TManager[];
+  // New fields for the Top 5 Things email format
+  focus?: string;      // e.g. "Inference Ops"
+  region?: string;     // e.g. "NALA"
+  roleShort?: string;  // e.g. "SA" (used in subject line)
+  mobile?: string;     // e.g. "+1 407 725-1322"
 }
 
 export interface T5TEmailSettings {
@@ -194,20 +204,35 @@ export interface T5TConfig {
 }
 
 export const DEFAULT_T5T_CONFIG: T5TConfig = {
-  identity: { name: "", email: "", role: "", team: "", managers: [] },
+  identity: {
+    name: "JP Santana",
+    email: "jbuenosantan@nvidia.com",
+    role: "Senior Solutions Architect",
+    team: "",
+    managers: [],
+    focus: "Inference Ops",
+    region: "NALA",
+    roleShort: "SA",
+    mobile: "+1 407 725-1322",
+  },
   emailSettings: {
-    subjectFormat: "Weekly Report ({{start_date}} ~ {{end_date}})",
-    greeting: "Hi {{managers}},\n\nHere is my weekly report:",
-    closing: "Best Regards,\n{{name}}",
+    subjectFormat: "Top 5 Things - {{focus}} | {{region}} | {{roleShort}}",
+    greeting: "",
+    closing: "Thank you,\n \n{{name}} | {{role}}\nEmail: {{email}}\nMobile: {{mobile}}",
   },
   reportTemplate: [
-    { id: "summary", name: "Summary", type: "bullets", placeholder: "3-5 key achievements from a manager's perspective" },
-    { id: "issues", name: "Key Issues", type: "bullets", placeholder: "Active bugs or issues with impact and status" },
-    { id: "projects", name: "Projects", type: "bullets", placeholder: "Main project work — deliverables, status, metrics" },
-    { id: "automation", name: "Automation / Tooling", type: "bullets", placeholder: "Automation, scripts, tools — business value" },
-    { id: "other", name: "Other Activities", type: "bullets", placeholder: "Collaboration, knowledge sharing, process improvements" },
-    { id: "meetings", name: "Meetings Attended", type: "table", placeholder: "Markdown table grouped by day" },
-    { id: "nextweek", name: "Next Week", type: "bullets", placeholder: "3-5 actionable priorities for next week" },
+    {
+      id: "account-updates",
+      name: "Industry Business Development / Account Updates",
+      type: "freeform",
+      placeholder: "4-5 outcome-focused updates, each with a bold headline + substantive paragraph.",
+    },
+    {
+      id: "future-plans",
+      name: "Future Plans",
+      type: "bullets",
+      placeholder: "3-5 short, concrete upcoming priorities.",
+    },
   ],
   dailyTemplate: [
     { name: "Morning Plan", classification: "personal", hint: "Top priorities for the day" },

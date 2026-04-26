@@ -1,18 +1,29 @@
 /**
- * T5T Generation Engine
+ * T5T Generation Engine — "Top 5 Things" format
  *
- * Template-driven weekly report generation following NVIDIA's T5T (Top 5 Things) culture.
- * Ported from the Claude Code T5T skill to work in the NoteAI web app.
+ * Generates an outcome-focused weekly email following the format:
+ *   Subject: Top 5 Things - {focus} | {region} | {roleShort}
+ *
+ *   Industry Business Development / Account Updates
+ *   **{Outcome headline}**
+ *   {Paragraph explaining what was delivered and the outcome/value}
+ *   ... (4-5 items)
+ *
+ *   Future Plans
+ *   - {short bullet}
+ *   ... (3-5 bullets)
+ *
+ *   Thank you,
+ *   {name} | {role}
+ *   Email: {email}
+ *   Mobile: {mobile}
+ *
+ * Only Todos/Tasks are used as input. Meetings and notes are ignored.
  */
 
 import type {
   T5TConfig,
   T5TReportSection,
-  T5TReportTemplateSection,
-  DailyLog,
-  Meeting,
-  Note,
-  TaskItem,
   TodoItem,
 } from "./types";
 import { chatWithAI } from "./ai";
@@ -20,178 +31,149 @@ import { chatWithAI } from "./ai";
 // ===== System Prompt =====
 
 function buildSystemPrompt(config: T5TConfig): string {
-  const { identity, writingPrinciples, reportTemplate } = config;
+  const { identity } = config;
 
-  const sectionNames = reportTemplate.map((s) => s.name).join(", ");
-  const mappingDesc = config.sectionMapping
-    .map((m) => `  - "${m.dailySection}" -> "${m.reportSection}"`)
-    .join("\n");
+  return `You are JP Santana's writing assistant, drafting his weekly "Top 5 Things" (T5T) email following NVIDIA's T5T culture. Write in FIRST PERSON as JP.
 
-  return `You are an expert technical writer specializing in executive communication for engineering teams. You generate weekly reports following NVIDIA's T5T (Top 5 Things) culture.
+## Writer
+- Name: ${identity.name || "JP Santana"}
+- Role: ${identity.role || "Senior Solutions Architect"}${identity.focus ? `\n- Focus: ${identity.focus}` : ""}${identity.region ? `\n- Region: ${identity.region}` : ""}
 
-## Writer Identity
-${identity.name ? `Writing as: ${identity.name}` : "Writing in first person"}
-${identity.role ? `Role: ${identity.role}` : ""}
-${identity.team ? `Team: ${identity.team}` : ""}
+## Output Format — strict JSON
+Return ONLY a JSON object with this exact shape (no markdown fences, no extra text):
 
-## Report Sections
-Generate content for these sections: ${sectionNames}
-
-## Section Mapping (Source -> Report)
-${mappingDesc}
-
-## Core T5T Principles
-
-1. MISSION-FOCUSED: Open with context — what mission does this work serve?
-2. PRIORITY-DRIVEN: Top 5 priorities and outcomes, not a comprehensive to-do list
-3. AUDIENCE: Write for busy managers AND a broad audience. Scannable on phones. 2-3 minute read
-4. OUTCOMES OVER ACTIVITIES: "Completed X, enabling Y" not "Worked on X"
-5. PLAIN SPOKEN: Clear, direct language. Minimize jargon
-6. AMANALAP: "As Much As Necessary, As Little As Possible." Every word earns its place
-7. ALERT / ALIGNED / AGILE: Surface threats, opportunities, direction changes
-8. DATA-DRIVEN: Ground claims in data — test counts, pass rates, time saved
-9. USE THE WHOLE TEAM: Credit colleagues by name. Flag when you need help
-10. EARLY INDICATORS: Flag signals that predict future success or failure
-
-## Writing Style
-- Audience: ${writingPrinciples.audience}
-- Tone: ${writingPrinciples.tone}
-- Person: ${writingPrinciples.person === "first" ? "First person (\"I completed...\", \"I delivered...\")" : "Third person"}
-- Detail: ${writingPrinciples.detailDepth}
-- Data: ${writingPrinciples.dataStyle}
-
-## Section-Specific Rules
-
-### Summary
-- 3-5 items MAX representing the week's top priorities and outcomes
-- Each bullet answers: "What mission? What outcome? Why does it matter?"
-- Lead with metrics when available
-
-### Key Issues / Bugs
-- Only from content mapped to this section
-- Format: "[B] Bug ID: Title" with Impact and Status sub-bullets
-- Maximum 5 bugs, prioritized by impact
-- Write "None" if no bugs
-
-### Projects
-- Group by project/test suite name
-- HIGH-LEVEL status: what was done, pass/fail results, completion status
-- Format: "{Project} ({Ticket}): {Status}. {metrics}"
-- EXCLUDE troubleshooting details, environment setup, workarounds
-
-### Automation / Tooling
-- Focus on completed automation work and business impact
-- Include identifiers: Template IDs, MR numbers
-- Explain business value: time saved, reliability improved
-
-### Other Activities
-- Collaboration, knowledge sharing, process improvements
-- Credit colleagues by name
-
-### Meetings Attended
-- Markdown table with Subject, Start Time, End Time columns
-- Group by day with bold day headers
-- Write "None" if no meeting data
-
-### Next Week
-- 3-5 actionable items, prioritized (most important first)
-- Format: "{Action verb} {what} ({links}) - {expected outcome}"
-- Write "None" if no items
-
-## Quality Rules
-- No cross-section contamination
-- No personal content leakage
-- Max 2-level bullet nesting (except bug entries)
-- No bullet exceeds ~120 chars unless single cohesive statement
-- Every statement must be traceable to source data
-- All sections present, even if empty ("None")
-
-## Bullet Structure
-- Main bullet: One sentence headline achievement
-- Sub-bullets: Supporting details, one per line
-- Max 3-4 sub-bullets per main bullet
-- Decompose long bullets (>120 chars with multiple facts)
-
-## Link Formatting
-${config.jiraBaseUrl ? `- JIRA tickets: [TICKET-ID](${config.jiraBaseUrl}/TICKET-ID)` : ""}
-${config.nvbugBaseUrl ? `- NVBugs: [BugID](${config.nvbugBaseUrl}/BugID)` : ""}
-
-## Output Format
-Return a JSON object with a "sections" array. Each section has "name" (matching the report template section name exactly) and "content" (markdown string for that section).
-
-Example:
-{"sections": [{"name": "Summary", "content": "* Completed X with 100% pass rate\\n* Delivered Y, reducing manual effort by 3 hours"}, {"name": "Key Issues", "content": "None"}, ...]}
-
-CRITICAL: Return ONLY the JSON object. No markdown fences. No additional text.`;
+{
+  "accountUpdates": [
+    { "headline": "Outcome-focused bold headline", "paragraph": "3-5 sentence paragraph explaining what was delivered and why it matters." }
+  ],
+  "futurePlans": [
+    "Short concrete upcoming priority",
+    "Another short priority"
+  ]
 }
 
-// ===== Context Builder =====
+## accountUpdates — 4-5 items (hard cap: 5)
+Each item represents a meaningful outcome delivered this week. STRUCTURE each one as:
 
-function buildSourceContext(
-  todos: TodoItem[],
-  meetings: Meeting[],
-  notes: Note[],
-  config: T5TConfig,
-): string {
+### Headline
+- Starts with a strong past-tense action verb focused on the OUTCOME, not the activity:
+  - "Enabled ..."
+  - "Delivered ..."
+  - "Expanded ..."
+  - "Built ..."
+  - "Unblocked ..."
+  - "Accelerated ..."
+- Names the specific capability, customer, partner, or tech when possible.
+- ~10-18 words. Title case. No trailing period.
+
+### Paragraph (3-5 sentences, one paragraph, no bullets)
+Follow this EXACT 3-beat structure. Study the gold-standard example below carefully.
+
+**Beat 1: Set the context (the "why" / the problem being solved)**
+- Open with a short phrase that states the mission, need, or problem this work addressed.
+- Patterns: "To {goal}, I {verb}...", "To {solve/enable/unblock X}, I...", "With {initiative/customer} needing {outcome}, I..."
+- Keep the context framing POSITIVE and mission-focused. Do NOT dwell on internal challenges, blockers, or difficulties. Focus on what we were trying to enable.
+
+**Beat 2: What was delivered (the "what" with specifics)**
+- Name the deliverable concretely in first person: "I built...", "I deployed...", "I delivered...", "I presented...", "I onboarded...".
+- Name the specific NVIDIA tech, version numbers, counts, tool names, repositories, meetings, customers, partners.
+- Include HOW it works when useful (cadence, channels, outputs, integrations).
+
+**Beat 3: Positive result / value (the "so what")**
+- Close with the concrete outcome in positive framing: what it unlocks, eliminates, accelerates, aligns, or enables going forward.
+- Patterns: "This eliminates...", "This ensures...", "This unblocks...", "This enables...", "This raises...", "This gives...".
+- Connect to broader motions when natural (GTC alignment, managed inference roadmap, federal/air-gapped enablement, customer readiness, team scalability).
+
+### Other paragraph rules
+- Name NVIDIA tech specifically when relevant: Dynamo, NIM, NIM Operator, Triton, TensorRT-LLM, vLLM, SGLang, Grove, Planner, NIXL, KVBM, Nemotron, Virtuoso, Cadence JedAI, NVCF, AI Workbench, NeMo, GPU Operator, etc.
+- Name customers, partners, and people when present in the source (Crusoe, Cadence, Palantir, etc.). Credit collaborators naturally.
+- Active voice. First person ("I delivered", "I enabled", "I built"). No "we" unless the task description explicitly uses it.
+- Concrete and specific. Avoid passive filler: "worked on", "helped with", "engaged with", "supported".
+- Do NOT describe challenges, blockers, difficulties, or troubleshooting. Frame everything around positive delivery and results.
+
+### GOLD-STANDARD EXAMPLE (study the rhythm and match it)
+**Built Automated Agent to Keep the Inference Reference Architecture Continuously Updated**
+
+To keep our Inference Reference Architecture always up to date, I built a fully unattended weekly Claude Code routine that automatically scans the 24 NVIDIA Inference Reference Architecture components, including Dynamo, TensorRT-LLM, GPU Operator, Triton, and NIXL, for new releases, CVEs, deprecations, and ecosystem changes. Every Monday morning, the agent posts structured Slack alerts to #inference-ra-maintenance with severity classifications, specific RA page links, and concrete proposed update text, requiring zero manual intervention. This eliminates the manual effort of tracking two dozen fast-moving components and ensures the RA stays current as the inference stack evolves.
+
+Notice the three beats:
+1. "To keep our Inference Reference Architecture always up to date," (context / why)
+2. "I built a fully unattended weekly Claude Code routine that automatically scans the 24 NVIDIA Inference Reference Architecture components... Every Monday morning, the agent posts..." (what + specifics)
+3. "This eliminates the manual effort of tracking two dozen fast-moving components and ensures the RA stays current..." (positive result / value)
+
+## futurePlans — 3-5 items
+- ONE line each, concrete and terse.
+- Format: "{what}, {short qualifier}" — no full sentences, no paragraphs.
+- Examples: "April Dynamo workshop (Planner + Grove), reusable package", "Crusoe support through GTC, repeatable guidance", "Cadence JedAI environment handover to engineering".
+
+## Source rules
+- Only use the todo list provided. Nothing else.
+- Completed todos become accountUpdates (pick the 4-5 most substantive; skip trivial ones).
+- Pending todos become futurePlans OR can be folded into accountUpdates if they represent in-flight work with meaningful partial outcomes.
+- If a todo has thin detail, infer reasonable specifics but NEVER fabricate customer names, dates, or deliverables that aren't in the source.
+- If fewer than 4 substantive completed todos exist, produce as many as you can (minimum 2).
+
+## Tone (study this, match exactly)
+- Professional, outcome-oriented, executive-readable.
+- Every paragraph follows context → action → positive result.
+- POSITIVE framing only. Do not describe blockers, setbacks, struggles, or troubleshooting. Frame everything as delivery and outcomes.
+- Confident and concrete. Avoid hedging ("tried to", "attempted", "hoped to").
+- Uses phrases like: "To {goal}, I {verb}...", "This eliminates...", "This ensures...", "This enables...", "This unblocks...", "directly responding to feedback that...", "so future deployments have a clearer reference".
+- Acknowledges the bigger picture when natural: GTC, roadmap, managed inference, federal/air-gapped, enablement, continuous readiness.
+- No emojis. No exclamation marks.
+
+## PUNCTUATION — CRITICAL RULE (read twice)
+NEVER use em-dashes (—) or en-dashes (–) anywhere in the output. These are AI-tells and this user explicitly bans them.
+
+Forbidden: "components — Dynamo, TensorRT-LLM", "this was great — it enabled X".
+
+Use instead:
+- A period and new sentence: "...components. Dynamo, TensorRT-LLM..."
+- A comma: "...components, Dynamo, TensorRT-LLM..."
+- A colon: "...components: Dynamo, TensorRT-LLM..."
+- Parentheses: "...components (Dynamo, TensorRT-LLM)..."
+- A semicolon when joining two related clauses.
+
+Regular hyphens inside hyphenated words ARE fine and should be used normally:
+- "on-prem", "air-gapped", "low-latency", "end-to-end", "TensorRT-LLM", "TP-parallel", "high-priority", "real-time", "production-grade"
+
+Double-check every paragraph before returning. If you see an em-dash (—) or en-dash (–), rewrite that sentence.
+
+CRITICAL: Return ONLY the JSON object. No preamble, no markdown fences, no commentary.`;
+}
+
+// ===== Context Builder — Todos only =====
+
+function buildSourceContext(todos: TodoItem[]): string {
   const parts: string[] = [];
 
-  // Todos — primary source, organized by status and due date
-  if (todos.length > 0) {
-    parts.push("# Tasks / Todos (Primary Source)\n");
+  parts.push("# Tasks / Todos");
+  parts.push("");
 
-    const completed = todos.filter((t) => t.completed);
-    const pending = todos.filter((t) => !t.completed);
+  const completed = todos.filter((t) => t.completed);
+  const pending = todos.filter((t) => !t.completed);
 
-    if (completed.length > 0) {
-      parts.push("## Completed");
-      for (const t of completed) {
-        const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
-        parts.push(`- [DONE] ${t.title || "Untitled"}${due}${t.description ? ": " + t.description.slice(0, 400) : ""}`);
-      }
-      parts.push("");
+  if (completed.length > 0) {
+    parts.push("## Completed (use these as the basis for accountUpdates)");
+    for (const t of completed) {
+      const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
+      const created = t.createdDate ? ` (created: ${t.createdDate.slice(0, 10)})` : "";
+      parts.push(`- [DONE] ${t.title || "Untitled"}${due}${created}${t.description ? "\n  Description: " + t.description : ""}`);
     }
-
-    if (pending.length > 0) {
-      parts.push("## In Progress / Pending");
-      for (const t of pending) {
-        const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
-        parts.push(`- [PENDING] ${t.title || "Untitled"}${due}${t.description ? ": " + t.description.slice(0, 400) : ""}`);
-      }
-      parts.push("");
-    }
+    parts.push("");
   }
 
-  // Meetings — secondary source
-  if (meetings.length > 0) {
-    parts.push("# Meetings\n");
-    for (const m of meetings) {
-      parts.push(`## ${m.title} (${m.date.slice(0, 10)})`);
-      if (m.summary.wasSummarized) {
-        if (m.summary.decisions.length > 0)
-          parts.push("Decisions: " + m.summary.decisions.join("; "));
-        if (m.summary.topics.length > 0)
-          parts.push("Topics: " + m.summary.topics.join("; "));
-        if (m.summary.actionItems.length > 0)
-          parts.push(
-            "Actions: " +
-              m.summary.actionItems.map((a) => a.task).join("; ")
-          );
-      } else {
-        const text = m.transcript.map((s) => s.text).join(" ");
-        parts.push(text.slice(0, 1500));
-      }
-      parts.push("");
+  if (pending.length > 0) {
+    parts.push("## Pending / In-Progress (use these for futurePlans, or in-flight accountUpdates)");
+    for (const t of pending) {
+      const due = t.dueDate ? ` (due: ${t.dueDate})` : "";
+      parts.push(`- [PENDING] ${t.title || "Untitled"}${due}${t.description ? "\n  Description: " + t.description : ""}`);
     }
+    parts.push("");
   }
 
-  // Notes — supplementary source
-  if (notes.length > 0) {
-    parts.push("# Notes\n");
-    for (const n of notes) {
-      parts.push(`## ${n.title}`);
-      parts.push(n.content.slice(0, 800));
-      parts.push("");
-    }
+  if (todos.length === 0) {
+    parts.push("(No todos available — generate minimal placeholder with clear 'Needs tasks' messaging.)");
   }
 
   return parts.join("\n");
@@ -208,124 +190,147 @@ export interface QualityCheck {
 
 export function runQualityChecks(
   sections: T5TReportSection[],
-  config: T5TConfig,
+  _config: T5TConfig,
 ): QualityCheck[] {
   const checks: QualityCheck[] = [];
 
-  // 1. All template sections present
-  const sectionNames = new Set(sections.map((s) => s.name));
-  const missingCount = config.reportTemplate.filter(
-    (t) => !sectionNames.has(t.name)
-  ).length;
-  checks.push({
-    id: "completeness",
-    name: "All sections present",
-    passed: missingCount === 0,
-    message:
-      missingCount === 0
-        ? "All sections present"
-        : `${missingCount} section(s) missing`,
-  });
+  const accountUpdates = sections.find((s) => s.id === "account-updates" || s.name.toLowerCase().includes("account updates"));
+  const futurePlans = sections.find((s) => s.id === "future-plans" || s.name.toLowerCase().includes("future plans"));
 
-  // 2. Summary has 3-5 items
-  const summary = sections.find((s) => s.name === "Summary");
-  if (summary) {
-    const bullets = summary.content
+  // 1. Account updates count (by counting bold headlines)
+  if (accountUpdates) {
+    const boldHeadlines = (accountUpdates.content.match(/\*\*[^*]+\*\*/g) || []).length;
+    checks.push({
+      id: "updates_count",
+      name: "Account Updates: 4-5 items",
+      passed: boldHeadlines >= 3 && boldHeadlines <= 5,
+      message: `${boldHeadlines} outcome item(s)${boldHeadlines < 3 ? " (aim for 4-5)" : boldHeadlines > 5 ? " (trim to top 5)" : ""}`,
+    });
+  }
+
+  // 2. Headlines start with action verbs
+  if (accountUpdates) {
+    const headlines = (accountUpdates.content.match(/\*\*([^*]+)\*\*/g) || []).map((h) => h.replace(/\*\*/g, "").trim());
+    const actionVerbs = /^(Enabled|Delivered|Expanded|Built|Unblocked|Accelerated|Launched|Completed|Drove|Established|Advanced|Shipped|Deployed)\b/i;
+    const bad = headlines.filter((h) => !actionVerbs.test(h)).length;
+    checks.push({
+      id: "action_verbs",
+      name: "Headlines lead with action verbs",
+      passed: bad === 0,
+      message: bad === 0 ? "All headlines start with outcome verbs" : `${bad} headline(s) don't lead with a strong verb`,
+    });
+  }
+
+  // 3. Future plans count
+  if (futurePlans) {
+    const bullets = futurePlans.content
       .split("\n")
-      .filter((l) => l.trim().startsWith("*") || l.trim().startsWith("-"));
-    const count = bullets.length;
+      .filter((l) => l.trim().startsWith("-") || l.trim().startsWith("*"));
     checks.push({
-      id: "summary_count",
-      name: "Summary: 3-5 items",
-      passed: count >= 3 && count <= 5,
-      message: `${count} item(s) in summary${count < 3 ? " (aim for at least 3)" : count > 5 ? " (trim to top 5)" : ""}`,
+      id: "plans_count",
+      name: "Future Plans: 3-5 items",
+      passed: bullets.length >= 2 && bullets.length <= 5,
+      message: `${bullets.length} plan(s)${bullets.length < 2 ? " (aim for 3-5)" : bullets.length > 5 ? " (trim to top 5)" : ""}`,
     });
   }
 
-  // 3. No excessively long bullets
-  let longBullets = 0;
-  for (const s of sections) {
-    const lines = s.content.split("\n");
-    for (const line of lines) {
-      if (
-        (line.trim().startsWith("*") || line.trim().startsWith("-")) &&
-        line.length > 150
-      ) {
-        longBullets++;
-      }
-    }
+  // 4. Paragraphs are substantive (>= 3 sentences roughly)
+  if (accountUpdates) {
+    const paragraphs = accountUpdates.content
+      .split(/\n\s*\n/)
+      .filter((p) => p.trim() && !p.trim().startsWith("**"));
+    const thin = paragraphs.filter((p) => {
+      const sentenceCount = (p.match(/[.!?]+\s/g) || []).length;
+      return sentenceCount < 2;
+    }).length;
+    checks.push({
+      id: "paragraph_depth",
+      name: "Paragraphs are substantive",
+      passed: thin === 0,
+      message: thin === 0 ? "All paragraphs have real substance" : `${thin} paragraph(s) feel thin`,
+    });
   }
-  checks.push({
-    id: "bullet_length",
-    name: "Bullet length (<150 chars)",
-    passed: longBullets === 0,
-    message:
-      longBullets === 0
-        ? "All bullets concise"
-        : `${longBullets} bullet(s) may be too long`,
-  });
 
-  // 4. Next Week items
-  const nextWeek = sections.find(
-    (s) => s.name === "Next Week" || s.name.toLowerCase().includes("next week")
-  );
-  if (nextWeek) {
-    const nwBullets = nextWeek.content
+  // 5. No bullets inside account updates (should be paragraph form)
+  if (accountUpdates) {
+    const bulletLines = accountUpdates.content
       .split("\n")
-      .filter((l) => l.trim().startsWith("*") || l.trim().startsWith("-"));
+      .filter((l) => l.trim().startsWith("-") || l.trim().startsWith("*"))
+      .filter((l) => !l.includes("**")); // allow bold
     checks.push({
-      id: "nextweek_count",
-      name: "Next Week: actionable items",
-      passed: nwBullets.length > 0 || nextWeek.content.trim() === "None",
-      message:
-        nextWeek.content.trim() === "None"
-          ? "No next-week items (OK if intentional)"
-          : `${nwBullets.length} planned item(s)`,
+      id: "no_bullets",
+      name: "Account Updates use paragraphs, not bullets",
+      passed: bulletLines.length === 0,
+      message: bulletLines.length === 0 ? "Clean paragraph form" : `${bulletLines.length} bullet line(s), should be paragraphs`,
     });
   }
 
-  // 5. Data-driven check — look for numbers/metrics in summary
-  if (summary) {
-    const hasNumbers = /\d+/.test(summary.content);
-    checks.push({
-      id: "data_driven",
-      name: "Data-driven summary",
-      passed: hasNumbers,
-      message: hasNumbers
-        ? "Summary includes quantifiable data"
-        : "Consider adding metrics (counts, percentages, time saved)",
-    });
-  }
-
-  // 6. Empty sections check
-  const emptySections = sections.filter(
-    (s) => !s.content.trim() || s.content.trim().length < 4
-  );
+  // 6. No em-dashes or en-dashes (user bans them as AI-tells)
+  const combined = sections.map((s) => s.content).join("\n");
+  const dashCount = (combined.match(/[—–]/g) || []).length;
   checks.push({
-    id: "no_empty",
-    name: "No empty sections",
-    passed: emptySections.length === 0,
-    message:
-      emptySections.length === 0
-        ? 'All sections have content (or "None")'
-        : `${emptySections.length} section(s) empty — write "None" if intentional`,
+    id: "no_dashes",
+    name: "No em-dashes or en-dashes",
+    passed: dashCount === 0,
+    message: dashCount === 0 ? "Clean punctuation" : `${dashCount} forbidden dash(es) found`,
   });
+
+  // 7. Paragraphs open with a context/problem framing (e.g. "To X, I Y...", "With X...", "For X...")
+  if (accountUpdates) {
+    const paragraphs = accountUpdates.content
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p && !p.startsWith("**"));
+    const contextOpeners = /^(To\s|With\s|For\s|Following\s|After\s|Ahead of\s|In support of\s|In response to\s|Responding to\s)/i;
+    const weakOpeners = paragraphs.filter((p) => !contextOpeners.test(p)).length;
+    checks.push({
+      id: "context_first",
+      name: "Paragraphs open with context (To X / With X / For X)",
+      passed: weakOpeners === 0,
+      message: weakOpeners === 0
+        ? "All paragraphs lead with the 'why'"
+        : `${weakOpeners} paragraph(s) jump straight to the action`,
+    });
+  }
+
+  // 8. Paragraphs close with a positive result statement
+  if (accountUpdates) {
+    const paragraphs = accountUpdates.content
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p && !p.startsWith("**"));
+    const resultClosers = /(This\s+(eliminates|ensures|enables|unblocks|accelerates|raises|gives|delivers|equips|aligns|positions|sets up|establishes|frees|lets|allows)|\bso\s+(that\s+)?(we|the\s+team|future|customers))/i;
+    const weakClosers = paragraphs.filter((p) => !resultClosers.test(p)).length;
+    checks.push({
+      id: "result_last",
+      name: "Paragraphs close with a positive result",
+      passed: weakClosers <= 1,
+      message: weakClosers === 0
+        ? "All paragraphs land on a clear outcome"
+        : `${weakClosers} paragraph(s) miss the 'so what'`,
+    });
+  }
 
   return checks;
 }
 
 // ===== Report Generation =====
 
+interface GeneratedPayload {
+  accountUpdates: { headline: string; paragraph: string }[];
+  futurePlans: string[];
+}
+
 export async function generateT5TReport(
   config: T5TConfig,
   todos: TodoItem[],
-  meetings: Meeting[],
-  notes: Note[],
+  _meetingsUnused: unknown[],
+  _notesUnused: unknown[],
   periodStart: string,
   periodEnd: string,
 ): Promise<T5TReportSection[]> {
   const systemPrompt = buildSystemPrompt(config);
-  const context = buildSourceContext(todos, meetings, notes, config);
+  const context = buildSourceContext(todos);
 
   const startDate = new Date(periodStart).toLocaleDateString("en-US", {
     month: "2-digit",
@@ -338,119 +343,174 @@ export async function generateT5TReport(
     year: "2-digit",
   });
 
-  const userPrompt = `Generate a T5T weekly report for the period ${startDate} to ${endDate}.
+  const userPrompt = `Generate the Top 5 Things email for the period ${startDate} to ${endDate}.
 
-Here is the source data:
+Source todos:
 
 ${context}
 
-Generate the report following the template and T5T principles. Return JSON with the sections array.`;
+Return the JSON object with accountUpdates and futurePlans as specified.`;
 
   const result = await chatWithAI(
     [{ role: "user", content: userPrompt }],
     systemPrompt,
   );
 
-  // Parse JSON response
-  const cleaned = result
-    .replace(/```json\n?/g, "")
-    .replace(/```\n?/g, "")
-    .trim();
-  const parsed = JSON.parse(cleaned);
-
-  const sections: T5TReportSection[] = [];
-  const responseSections: { name: string; content: string }[] =
-    parsed.sections || [];
-
-  // Map response sections to template sections, ensuring all template sections exist
-  for (const templateSection of config.reportTemplate) {
-    const found = responseSections.find(
-      (s) => s.name.toLowerCase() === templateSection.name.toLowerCase()
-    );
-    sections.push({
-      id: templateSection.id,
-      name: templateSection.name,
-      content: found?.content || "None",
-    });
+  // Parse JSON
+  const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  let parsed: GeneratedPayload;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Try to extract JSON object if the model added any wrapper text
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("LLM did not return valid JSON");
+    parsed = JSON.parse(match[0]);
   }
 
-  return sections;
+  // Safety net: strip em-dashes and en-dashes the LLM may have slipped in,
+  // since they're a clear AI-tell the user bans. Replace with commas or periods
+  // depending on surrounding context.
+  const stripDashes = (s: string): string => {
+    return s
+      // " — " or " – " between clauses becomes ", "
+      .replace(/\s+[—–]\s+/g, ", ")
+      // em-dash or en-dash flush against a word becomes a simple comma
+      .replace(/[—–]/g, ",")
+      // collapse any accidental ", ," pairs
+      .replace(/,\s*,/g, ",")
+      // collapse any accidental double-commas with spacing
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  };
+
+  // Build section contents
+  const accountUpdatesContent = (parsed.accountUpdates || [])
+    .map((u) => `**${stripDashes(u.headline)}**\n\n${stripDashes(u.paragraph)}`)
+    .join("\n\n");
+
+  const futurePlansContent = (parsed.futurePlans || [])
+    .map((p) => `- ${stripDashes(p)}`)
+    .join("\n");
+
+  // Return in section shape for backwards compat with the composer UI
+  return [
+    {
+      id: "account-updates",
+      name: "Industry Business Development / Account Updates",
+      content: accountUpdatesContent || "(No completed work available to report.)",
+    },
+    {
+      id: "future-plans",
+      name: "Future Plans",
+      content: futurePlansContent || "- (No pending priorities captured.)",
+    },
+  ];
 }
 
-// ===== Markdown Builder =====
+// ===== Markdown Builder — matches the Top 5 Things email format =====
+//
+// Output structure (drives both the markdown preview and the Outlook HTML):
+//
+//   ## Industry Business Development / Account Updates
+//
+//   **Outcome Headline**
+//
+//   - Paragraph for this account update.
+//
+//   **Next Outcome Headline**
+//
+//   - Paragraph.
+//
+//   ## Future Plans
+//
+//   - Short plan 1
+//   - Short plan 2
+//
+//   Thank you,
+//    \n JP Santana | Senior Solutions Architect ...
 
 export function buildReportMarkdown(
   config: T5TConfig,
   sections: T5TReportSection[],
-  periodStart: string,
-  periodEnd: string,
+  _periodStart: string,
+  _periodEnd: string,
 ): string {
   const { identity, emailSettings } = config;
 
-  const startDate = new Date(periodStart).toLocaleDateString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const endDate = new Date(periodEnd).toLocaleDateString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-
-  const managerNames = identity.managers.map((m) => m.name).join(" and ");
-
-  // Build greeting
-  let greeting = emailSettings.greeting
-    .replace("{{managers}}", managerNames || "Team")
-    .replace("{{name}}", identity.name || "");
-
-  // Build closing
-  let closing = emailSettings.closing.replace(
-    "{{name}}",
-    identity.name || ""
+  const accountUpdates = sections.find(
+    (s) => s.id === "account-updates" || s.name.toLowerCase().includes("account updates"),
+  );
+  const futurePlans = sections.find(
+    (s) => s.id === "future-plans" || s.name.toLowerCase().includes("future plans"),
   );
 
+  const closing = (emailSettings.closing || "")
+    .replace("{{name}}", identity.name || "")
+    .replace("{{role}}", identity.role || "")
+    .replace("{{email}}", identity.email || "")
+    .replace("{{mobile}}", identity.mobile || "");
+
   const lines: string[] = [];
-  lines.push(greeting);
+
+  // Section 1: Account Updates
+  lines.push("## Industry Business Development / Account Updates");
   lines.push("");
 
-  // Summary first (no bracket header)
-  const summary = sections.find((s) => s.name === "Summary");
-  if (summary) {
-    lines.push("Summary:");
-    lines.push(summary.content);
-    lines.push("");
+  if (accountUpdates?.content.trim()) {
+    // Engine stores each update as `**Headline**\n\nParagraph text`.
+    // Convert each "Paragraph" line under a headline into a bulleted paragraph
+    // so it lands in Outlook as a nested bullet under the bold headline.
+    const blocks = accountUpdates.content.split(/\n\s*\n/);
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith("**") && trimmed.endsWith("**") && !trimmed.includes("\n")) {
+        // Bold headline line
+        lines.push(trimmed);
+        lines.push("");
+      } else if (trimmed.startsWith("-") || trimmed.startsWith("*")) {
+        // Already a bullet — keep as-is
+        lines.push(trimmed);
+        lines.push("");
+      } else {
+        // Paragraph body → render as bullet under the preceding headline
+        lines.push(`- ${trimmed.replace(/\n/g, " ")}`);
+        lines.push("");
+      }
+    }
   }
 
-  // Rest of sections with bracket headers
-  for (const section of sections) {
-    if (section.name === "Summary") continue;
-    lines.push(`[${section.name}]`);
-    lines.push(section.content);
-    lines.push("");
+  // Section 2: Future Plans
+  lines.push("## Future Plans");
+  lines.push("");
+  if (futurePlans?.content.trim()) {
+    lines.push(futurePlans.content.trim());
+  }
+  lines.push("");
+
+  if (closing.trim()) {
+    lines.push(closing);
   }
 
-  lines.push(closing);
-
-  return lines.join("\n");
+  return lines.join("\n").trim() + "\n";
 }
 
 // ===== Email Subject Builder =====
 
 export function buildEmailSubject(
   config: T5TConfig,
-  periodStart: string,
-  periodEnd: string,
+  _periodStart: string,
+  _periodEnd: string,
 ): string {
-  const startDate = new Date(periodStart).toLocaleDateString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const endDate = new Date(periodEnd).toLocaleDateString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-  });
-
-  return config.emailSettings.subjectFormat
-    .replace("{{start_date}}", startDate)
-    .replace("{{end_date}}", endDate);
+  const { identity } = config;
+  const format = config.emailSettings.subjectFormat || "Top 5 Things - {{focus}} | {{region}} | {{roleShort}}";
+  return format
+    .replace("{{focus}}", identity.focus || "")
+    .replace("{{region}}", identity.region || "")
+    .replace("{{roleShort}}", identity.roleShort || "SA")
+    .replace(/\s*\|\s*\|/g, " |") // clean up empty segments
+    .replace(/-\s*\|/g, "-")
+    .replace(/\|\s*$/, "")
+    .trim();
 }

@@ -9,12 +9,61 @@ struct T5TReport: Identifiable, Codable {
     var meetingIDs: [UUID]
     var noteIDs: [UUID] = []
     var taskIDs: [UUID] = []
+    var todoIDs: [UUID] = []
     var sections: T5TSections
     var status: Status
 
     enum Status: String, Codable {
         case draft
         case finalized
+    }
+
+    // Make `todoIDs` decode-safe for reports saved before this field existed.
+    enum CodingKeys: String, CodingKey {
+        case id, title, createdDate, periodStart, periodEnd
+        case meetingIDs, noteIDs, taskIDs, todoIDs
+        case sections, status
+    }
+
+    init(
+        id: UUID,
+        title: String,
+        createdDate: Date,
+        periodStart: Date,
+        periodEnd: Date,
+        meetingIDs: [UUID],
+        noteIDs: [UUID] = [],
+        taskIDs: [UUID] = [],
+        todoIDs: [UUID] = [],
+        sections: T5TSections,
+        status: Status
+    ) {
+        self.id = id
+        self.title = title
+        self.createdDate = createdDate
+        self.periodStart = periodStart
+        self.periodEnd = periodEnd
+        self.meetingIDs = meetingIDs
+        self.noteIDs = noteIDs
+        self.taskIDs = taskIDs
+        self.todoIDs = todoIDs
+        self.sections = sections
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        createdDate = try c.decode(Date.self, forKey: .createdDate)
+        periodStart = try c.decode(Date.self, forKey: .periodStart)
+        periodEnd = try c.decode(Date.self, forKey: .periodEnd)
+        meetingIDs = try c.decode([UUID].self, forKey: .meetingIDs)
+        noteIDs = (try? c.decode([UUID].self, forKey: .noteIDs)) ?? []
+        taskIDs = (try? c.decode([UUID].self, forKey: .taskIDs)) ?? []
+        todoIDs = (try? c.decode([UUID].self, forKey: .todoIDs)) ?? []
+        sections = try c.decode(T5TSections.self, forKey: .sections)
+        status = try c.decode(Status.self, forKey: .status)
     }
 
     var periodLabel: String {

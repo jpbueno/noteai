@@ -82,49 +82,61 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-12 py-10">
+      <div className="mx-auto max-w-5xl px-8 py-8">
         {/* Title */}
-        <h1 className="text-[40px] font-bold text-text-primary mb-3 leading-tight">
-          {meeting.title}
-        </h1>
+        <div className="v4-panel mb-6 p-6">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-text-tertiary">
+            Meeting intelligence
+          </p>
+          <div className="mt-2 flex items-start justify-between gap-6">
+            <div>
+              <h1 className="text-[38px] font-bold leading-tight tracking-[-0.025em] text-text-primary">
+                {meeting.title}
+              </h1>
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-text-secondary">
+                <span className="flex items-center gap-1.5 rounded-full border border-border bg-content/55 px-3 py-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  {formatDateTime(meeting.date)}
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-border bg-content/55 px-3 py-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  {formatDuration(meeting.duration)}
+                </span>
+                <span className="flex items-center gap-1.5 rounded-full border border-border bg-content/55 px-3 py-1">
+                  <Volume2 className="w-3.5 h-3.5" />
+                  {meeting.transcript.length} segments
+                </span>
+              </div>
+            </div>
+            {hasSummary && (
+              <span className="rounded-full bg-green-400/12 px-3 py-1 text-xs font-bold text-green-400">
+                Summarized
+              </span>
+            )}
+          </div>
 
-        {/* Meta */}
-        <div className="flex items-center gap-4 text-sm text-text-secondary mb-6">
-          <span className="flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5" />
-            {formatDateTime(meeting.date)}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5" />
-            {formatDuration(meeting.duration)}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Volume2 className="w-3.5 h-3.5" />
-            {meeting.transcript.length} segments
-          </span>
-        </div>
-
-        {/* Actions bar */}
-        <div className="flex gap-2 mb-6">
-          <button
-            onClick={copyToClipboard}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-hover hover:bg-selected text-sm text-text-secondary transition-colors"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            Copy
-          </button>
-          <button
-            onClick={downloadMarkdown}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-hover hover:bg-selected text-sm text-text-secondary transition-colors"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Export .md
-          </button>
-          <ReadAloudButton
-            state={tts.state}
-            onSpeak={() => tts.speak(readableText)}
-            onStop={tts.stop}
-          />
+          {/* Actions bar */}
+          <div className="mt-6 flex flex-wrap gap-2">
+            <button
+              onClick={copyToClipboard}
+              className="v4-soft-button flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Copy
+            </button>
+            <button
+              onClick={downloadMarkdown}
+              className="v4-soft-button flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export .md
+            </button>
+            <ReadAloudButton
+              state={tts.state}
+              onSpeak={() => tts.speak(readableText)}
+              onStop={tts.stop}
+            />
+          </div>
         </div>
 
         <TTSPlayer
@@ -138,14 +150,14 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
         />
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 border-b border-border pb-px">
+        <div className="mb-6 flex gap-2 rounded-xl border border-border bg-sidebar/70 p-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-t-md transition-colors ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                 activeTab === tab.id
-                  ? "text-text-primary border-b-2 border-accent -mb-px"
+                  ? "bg-selected text-text-primary"
                   : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
@@ -157,7 +169,7 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
 
         {/* Tab content */}
         {activeTab === "summary" && hasSummary && (
-          <div className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-2">
             {summary.decisions.length > 0 && (
               <SummaryBlock title="Key Decisions" color="text-blue-400">
                 <ul className="space-y-1.5">
@@ -210,7 +222,7 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
         )}
 
         {activeTab === "transcript" && (
-          <div className="space-y-3">
+          <div className="v4-panel space-y-3 p-5">
             {meeting.transcript.map((seg) => (
               <div key={seg.id} className="flex gap-3">
                 <span className="text-xs text-text-tertiary font-mono w-12 pt-0.5 flex-shrink-0 text-right">
@@ -247,7 +259,7 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
                 Copy raw text
               </button>
             </div>
-            <pre className="bg-sidebar border border-border rounded-lg p-4 text-sm text-text-primary font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto select-all">
+            <pre className="bg-sidebar border border-border rounded-xl p-4 text-sm text-text-primary font-mono leading-relaxed whitespace-pre-wrap overflow-x-auto select-all">
               {rawText || "[No transcript data]"}
             </pre>
           </div>
@@ -271,8 +283,8 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
 
 function SummaryBlock({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className={`text-lg font-semibold ${color} mb-3`}>{title}</h3>
+    <div className="v4-panel p-5">
+      <h3 className={`text-sm font-bold uppercase tracking-[0.14em] ${color} mb-3`}>{title}</h3>
       {children}
     </div>
   );
@@ -280,7 +292,7 @@ function SummaryBlock({ title, color, children }: { title: string; color: string
 
 function ActionItemRow({ item, onToggle }: { item: ActionItem; onToggle: () => void }) {
   return (
-    <li className="flex items-start gap-2">
+    <li className="v4-row flex items-start gap-2 p-3">
       <button onClick={onToggle} className="mt-0.5 flex-shrink-0">
         {item.isCompleted ? (
           <CheckCircle className="w-4 h-4 text-green-500" />

@@ -79,26 +79,29 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-sidebar">
+    <div className="flex h-full flex-col bg-sidebar">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <BrainHeadIcon className="w-4 h-4 text-accent" />
-          <span className="text-sm font-medium text-text-primary">
-            AI Assistant
-          </span>
+          <div>
+            <span className="block text-sm font-bold text-text-primary">
+              AI copilot
+            </span>
+            <span className="block text-[11px] text-text-tertiary">Workspace-aware</span>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={clearChat}
-            className="p-1 rounded text-text-tertiary hover:text-text-secondary hover:bg-hover transition-colors"
+            className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-hover hover:text-text-secondary"
             title="Clear chat"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onClose}
-            className="p-1 rounded text-text-tertiary hover:text-text-secondary hover:bg-hover transition-colors"
+            className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-hover hover:text-text-secondary"
           >
             <X className="w-4 h-4" />
           </button>
@@ -106,13 +109,18 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 p-4">
         {messages.length === 0 && !isLoading && (
-          <div className="text-center py-12">
+          <div className="v4-panel px-4 py-8 text-center">
             <BrainHeadIcon className="w-8 h-8 text-text-tertiary mx-auto mb-3" />
-            <p className="text-sm text-text-tertiary">
-              Ask me anything about your meetings, notes, or tasks.
+            <p className="text-sm font-semibold text-text-secondary">
+              Ask about meetings, notes, tasks, or T5T drafts.
             </p>
+            <div className="mt-4 grid gap-2 text-left">
+              <Suggestion text="Summarize today's meetings" />
+              <Suggestion text="Find unassigned action items" />
+              <Suggestion text="Draft a T5T update" />
+            </div>
           </div>
         )}
 
@@ -124,10 +132,10 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm ${
                   msg.role === "user"
-                    ? "bg-accent text-white"
-                    : "bg-hover text-text-primary"
+                    ? "bg-accent text-black"
+                    : "border border-border bg-hover text-text-primary"
                 }`}
               >
                 {msg.role === "assistant" ? (
@@ -145,7 +153,7 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-hover rounded-lg px-3 py-2">
+            <div className="rounded-2xl border border-border bg-hover px-3 py-2">
               <Loader2 className="w-4 h-4 animate-spin text-accent" />
             </div>
           </div>
@@ -166,17 +174,25 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
             }}
             placeholder="Ask NoteAI..."
             rows={1}
-            className="flex-1 bg-hover border border-border rounded-md text-sm text-text-primary p-2.5 outline-none resize-none max-h-32 placeholder:text-text-tertiary focus:border-accent"
+            className="max-h-32 flex-1 resize-none rounded-xl border border-border bg-content/70 p-2.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary focus:border-accent"
           />
           <button
             onClick={sendMessage}
             disabled={!input.trim() || isLoading}
-            className="flex items-center justify-center w-9 h-9 rounded-md bg-accent text-white hover:bg-accent/80 transition-colors disabled:opacity-50"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-black transition-colors hover:bg-accent/85 disabled:opacity-50"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Suggestion({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-content/55 px-3 py-2 text-xs font-semibold text-text-secondary">
+      {text}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export function NoteListView({
           <button
             key={n.id}
             onClick={() => onSelect({ type: "note", id: n.id })}
-            className="flex flex-col gap-1 w-full px-4 py-3 rounded-lg hover:bg-hover transition-colors text-left"
+            className="v4-row flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:border-accent/35 hover:bg-hover"
           >
             <div className="flex items-center gap-2">
               <StickyNote className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
@@ -75,7 +75,7 @@ export function NoteListView({
                 {tags.slice(0, 4).map((t) => (
                   <span
                     key={t}
-                    className="text-[11px] px-1.5 py-0.5 rounded bg-hover text-text-secondary"
+                  className="text-[11px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent"
                   >
                     {t}
                   </span>
@@ -122,7 +122,7 @@ export function MeetingListView({
           <button
             key={m.id}
             onClick={() => onSelect({ type: "meeting", id: m.id })}
-            className="flex flex-col gap-1 w-full px-4 py-3 rounded-lg hover:bg-hover transition-colors text-left"
+            className="v4-row flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:border-accent/35 hover:bg-hover"
           >
             <div className="flex items-center gap-2">
               <FileText className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
@@ -141,7 +141,7 @@ export function MeetingListView({
               {topicCount > 0 && <span>{topicCount} topics</span>}
               {actionCount > 0 && <span>{actionCount} action items</span>}
               {m.summary?.wasSummarized && (
-                <span className="px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 text-[11px]">
+                <span className="px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 text-[11px]">
                   Summarized
                 </span>
               )}
@@ -190,7 +190,7 @@ export function T5TListView({
           <button
             key={r.id}
             onClick={() => onSelect({ type: "t5t", id: r.id })}
-            className="flex flex-col gap-1 w-full px-4 py-3 rounded-lg hover:bg-hover transition-colors text-left"
+            className="v4-row flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:border-accent/35 hover:bg-hover"
           >
             <div className="flex items-center gap-2">
               <ListChecks className={`w-3.5 h-3.5 flex-shrink-0 ${r.status === "draft" ? "text-orange-400" : "text-green-400"}`} />
@@ -198,7 +198,7 @@ export function T5TListView({
                 {r.title}
               </span>
               <span
-                className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
                   r.status === "draft"
                     ? "bg-orange-500/15 text-orange-400"
                     : "bg-green-500/15 text-green-400"
@@ -250,19 +250,24 @@ function ListShell({
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-12 py-10">
-        <div className="flex items-center justify-between mb-6">
+      <div className="mx-auto max-w-4xl px-8 py-8">
+        <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {icon}
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-sidebar/80">
+              {icon}
+            </div>
             <div>
-              <h1 className="text-2xl font-bold text-text-primary">{title}</h1>
-              <p className="text-sm text-text-tertiary mt-0.5">{count} items</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-text-tertiary">
+                Library
+              </p>
+              <h1 className="text-[30px] font-bold tracking-[-0.02em] text-text-primary">{title}</h1>
+              <p className="text-sm text-text-tertiary">{count} items</p>
             </div>
           </div>
           {onNew && newLabel && (
             <button
               onClick={onNew}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/80 transition-colors"
+              className="flex h-10 items-center gap-2 rounded-xl bg-accent px-3.5 text-sm font-bold text-black hover:bg-accent/85 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               {newLabel}
@@ -271,9 +276,9 @@ function ListShell({
         </div>
 
         {hasChildren ? (
-          <div className="space-y-px">{children}</div>
+          <div className="grid gap-2">{children}</div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="v4-panel flex flex-col items-center justify-center gap-3 py-20">
             {emptyIcon}
             <p className="text-base font-medium text-text-secondary">{emptyText}</p>
             <p className="text-xs text-text-tertiary">{emptyHint}</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { MessageSquare, Plus, Search } from "lucide-react";
 import HomeDashboard from "@/components/HomeDashboard";
 import { NoteListView, MeetingListView, T5TListView } from "@/components/SectionListView";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
@@ -87,7 +88,7 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
           <BrainHeadIcon className="w-8 h-8 text-text-secondary" />
           <div className="flex flex-col leading-tight">
             <span className="text-2xl font-semibold text-text-primary">NoteAI</span>
-            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
+            <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v4.0</span>
           </div>
         </div>
         <p className="text-sm text-text-tertiary">Sign in to access your meetings and notes</p>
@@ -374,7 +375,7 @@ export default function Home() {
 
   return (
     <div className="relative h-screen bg-content">
-      {/* Fixed header — always visible, never moves */}
+      {/* Fixed brand header — current logo preserved */}
       <div
         onClick={() => setSidebarCollapsed((v) => !v)}
         className="fixed top-0 left-0 z-30 flex items-center gap-2.5 px-3.5 py-3 cursor-pointer hover:opacity-80 transition-opacity"
@@ -383,14 +384,14 @@ export default function Home() {
         <BrainHeadIcon className="w-[22px] h-[22px] text-text-secondary" />
         <div className="flex flex-col leading-tight">
           <span className="text-lg font-semibold text-text-primary">NoteAI</span>
-          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v3.0</span>
+          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v4.0 Command Center</span>
         </div>
       </div>
 
       <div className="flex h-screen">
         {/* Sidebar — slides via negative margin, always in DOM */}
         <div
-          className={`flex-shrink-0 bg-sidebar border-r border-border relative ${isSidebarDragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
+          className={`flex-shrink-0 bg-sidebar/95 border-r border-border relative ${isSidebarDragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
           style={{ width: sidebarWidth, marginLeft: sidebarCollapsed ? -sidebarWidth : 0 }}
         >
           {/* Resize handle */}
@@ -446,24 +447,48 @@ export default function Home() {
 
         {/* Main content */}
         <div className="flex-1 relative bg-content overflow-hidden">
-          {renderDetail()}
+          <div className="absolute top-0 left-0 right-0 z-20 h-[62px] border-b border-border/70 bg-content/88 backdrop-blur-xl">
+            <div className="flex h-full items-center justify-between gap-4 px-7">
+              <button
+                onClick={() => document.querySelector<HTMLInputElement>("[data-search-input]")?.focus()}
+                className="flex h-10 min-w-[340px] max-w-[560px] flex-1 items-center gap-3 rounded-xl border border-border bg-sidebar/70 px-4 text-left text-sm text-text-tertiary hover:border-accent/45 hover:text-text-secondary transition-colors"
+              >
+                <Search className="h-4 w-4 text-text-tertiary" />
+                <span>Command + K  Search meetings, notes, tasks...</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleNewNote}
+                  className="flex h-10 items-center gap-2 rounded-xl border border-border bg-sidebar/70 px-3 text-sm font-semibold text-text-secondary hover:bg-selected hover:text-text-primary transition-colors"
+                  title="New note"
+                >
+                  <Plus className="h-4 w-4" />
+                  New note
+                </button>
+                {!showChat && (
+                  <button
+                    onClick={() => setShowChat(true)}
+                    className="flex h-10 items-center gap-2 rounded-xl bg-accent px-3 text-sm font-semibold text-black hover:bg-accent/85 transition-colors"
+                    title="Open AI copilot"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    AI copilot
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
 
-          {/* Floating chat button */}
-          {!showChat && (
-            <button
-              onClick={() => setShowChat(true)}
-              className="absolute bottom-5 right-5 flex items-center justify-center w-12 h-12 rounded-full bg-accent text-white shadow-lg shadow-black/30 hover:bg-accent/80 transition-colors z-10"
-            >
-              <BrainHeadIcon className="w-[22px] h-[22px]" />
-            </button>
-          )}
+          <div className="h-full pt-[62px]">
+            {renderDetail()}
+          </div>
         </div>
 
         {/* Chat drawer */}
         {showChat && (
           <>
-            <div className="w-px bg-border" />
-            <div className="w-[340px] flex-shrink-0">
+            <div className="w-px bg-border/80" />
+            <div className="w-[360px] flex-shrink-0">
               <ChatPanel
                 messages={chatMessages}
                 onClose={() => setShowChat(false)}

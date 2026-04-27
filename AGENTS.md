@@ -17,6 +17,19 @@ After work:
 - Create linked follow-up issues for discovered bugs, deferred risks, or new improvements.
 - If the work spans several issues, add or update a worklog issue summarizing the session.
 
+Delivery gate before `Done`:
+- Do not move a NoteAI Linear issue to `Done` until repository delivery is complete.
+- For any issue with repository changes, completion requires:
+  - the intended changes are committed with the Linear issue ID in the commit message;
+  - the branch is pushed to `origin`;
+  - a pull request is opened and references the Linear issue ID;
+  - required CI checks pass on the pull request;
+  - the pull request is merged into `main`;
+  - post-merge `main` checks are green, or no post-merge checks are applicable;
+  - for web or deployment-impacting changes, the Cloudflare deploy workflow succeeds and the live app smoke check passes.
+- If no repository changes are required, the Linear update must explicitly say `No repository changes required` and explain why.
+- If Linear updates are blocked by connector or credential handling, still complete the git, CI, merge, and deployment path first, then provide the exact manual Linear update text for the user to paste.
+
 Standing Linear anchor:
 - `JPB-24` records this operating rule.
 - `JPB-26` tracks the current functionality test session if no more specific test issue exists.

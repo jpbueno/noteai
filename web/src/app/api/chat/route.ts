@@ -66,6 +66,10 @@ function extractChatContent(provider: string, data: unknown): string {
   return "";
 }
 
+function supportsTemperature(provider: string, model: string): boolean {
+  return !(provider === "nvidia" && model.startsWith("aws/anthropic/"));
+}
+
 export async function POST(request: NextRequest) {
   const authError = await requireApiAuth(request);
   if (authError) return authError;
@@ -137,12 +141,15 @@ export async function POST(request: NextRequest) {
         messages: otherMsgs,
       });
     } else {
-      body = JSON.stringify({
+      const payload: Record<string, unknown> = {
         model,
         messages,
-        temperature,
         max_tokens: safeMaxTokens,
-      });
+      };
+      if (supportsTemperature(provider, model)) {
+        payload.temperature = temperature;
+      }
+      body = JSON.stringify(payload);
     }
 
     const controller = new AbortController();

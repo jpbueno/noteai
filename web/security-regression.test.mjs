@@ -77,10 +77,13 @@ test("provider API keys are write-only from browser settings APIs", () => {
 });
 
 test("cost-bearing AI endpoints enforce local request bounds", () => {
+  const aiClient = read("./src/lib/ai.ts");
   const chatRoute = read("./src/app/api/chat/route.ts");
   const transcribeRoute = read("./src/app/api/transcribe/route.ts");
   const ttsRoute = read("./src/app/api/tts/route.ts");
 
+  assert.match(aiClient, /CLIENT_CHAT_TIMEOUT_MS\s*=\s*75_000/);
+  assert.match(aiClient, /AI copilot request timed out/);
   assert.match(chatRoute, /MAX_CHAT_MESSAGES/);
   assert.match(chatRoute, /MAX_CHAT_TOKENS/);
   assert.match(chatRoute, /CHAT_UPSTREAM_TIMEOUT_MS\s*=\s*60_000/);

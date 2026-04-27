@@ -449,7 +449,11 @@ export default function Home() {
         {/* Main content */}
         <div className="flex-1 relative bg-content overflow-hidden">
           <div className="absolute top-0 left-0 right-0 z-20 h-[62px] border-b border-border/70 bg-content/88 backdrop-blur-xl">
-            <div className="flex h-full items-center justify-between gap-4 px-7">
+            <div
+              className={`flex h-full items-center justify-between gap-4 pr-7 transition-[padding-left] duration-300 ease-in-out ${
+                sidebarCollapsed ? "pl-[72px]" : "pl-7"
+              }`}
+            >
               <button
                 onClick={() => document.querySelector<HTMLInputElement>("[data-search-input]")?.focus()}
                 className="flex h-10 min-w-[340px] max-w-[560px] flex-1 items-center gap-3 rounded-xl border border-border bg-sidebar/70 px-4 text-left text-sm text-text-tertiary hover:border-accent/45 hover:text-text-secondary transition-colors"

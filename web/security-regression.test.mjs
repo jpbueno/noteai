@@ -57,6 +57,13 @@ test("missing Turso config uses a non-production local persistence fallback only
   assert.match(serverDb, /localTables/);
 });
 
+test("chat messages are served oldest-first for conversation rendering", () => {
+  const serverDb = read("./src/lib/server-db.ts");
+
+  assert.match(serverDb, /function orderDirection/);
+  assert.match(serverDb, /table === "chatMessages" \? "ASC" : "DESC"/);
+});
+
 test("programmatic API auth is not derived from NOTEAI_AUTH_SECRET", () => {
   const apiAuth = read("./src/lib/api-auth.ts");
   const apiKeyRoute = read("./src/app/api/auth/apikey/route.ts");

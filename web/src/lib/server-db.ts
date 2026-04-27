@@ -201,12 +201,18 @@ function localOrderColumn(table: string): string {
   return "id";
 }
 
+function orderDirection(table: string): "ASC" | "DESC" {
+  return table === "chatMessages" ? "ASC" : "DESC";
+}
+
 function localSort(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
   const orderCol = localOrderColumn(table);
+  const direction = orderDirection(table);
   return rows.sort((a, b) => {
     const pinnedDelta = Number(b.pinned || 0) - Number(a.pinned || 0);
     if (pinnedDelta) return pinnedDelta;
-    return String(b[orderCol] || "").localeCompare(String(a[orderCol] || ""));
+    const valueDelta = String(a[orderCol] || "").localeCompare(String(b[orderCol] || ""));
+    return direction === "ASC" ? valueDelta : -valueDelta;
   });
 }
 
@@ -222,7 +228,7 @@ export async function getAll(table: string): Promise<Record<string, unknown>[]> 
   else if (table === "dailyLogs") { orderCol = "date"; pinPrefix = "pinned DESC, "; }
   else if (["notes", "tasks", "t5tReports", "todos"].includes(table)) { orderCol = "createdDate"; pinPrefix = "pinned DESC, "; }
   else if (table === "chatMessages") orderCol = "timestamp";
-  const result = await query(`SELECT * FROM ${table} ORDER BY ${pinPrefix}${orderCol} DESC`);
+  const result = await query(`SELECT * FROM ${table} ORDER BY ${pinPrefix}${orderCol} ${orderDirection(table)}`);
   return result.rows.map((r) => deserializeRow(table, result.columns, r));
 }
 

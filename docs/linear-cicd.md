@@ -9,6 +9,27 @@ This runbook describes the NoteAI workflow for moving from a Linear issue to com
 - GitHub Actions runs CI on pull requests and `main`.
 - Cloudflare Workers hosts the web app through the existing OpenNext/Wrangler setup.
 - Codex may commit and push implementation branches when the user asks it to finish a task, but production deploys happen only from `main`.
+- The current NoteAI remote is GitHub. If the repository moves to GitLab later, update this runbook and the automation references before relying on the same workflow names.
+
+## Done Means Delivered
+
+Do not mark a NoteAI Linear issue as `Done` just because local work is complete or a chat summary says it is complete.
+
+For any task with repository changes, `Done` requires all of this evidence:
+
+- The branch contains committed changes with the Linear issue ID in the commit message.
+- The branch has been pushed to `origin`.
+- A pull request exists and references the Linear issue ID.
+- Required pull request checks pass.
+- The pull request is merged into `main`.
+- Post-merge `main` checks are green, or the task is in a path that intentionally does not trigger checks.
+- For web or deployment-impacting changes, the Cloudflare deploy workflow succeeds after merge.
+- For web deployments, a live smoke check passes, starting with `GET /api/health`.
+- Linear has a completion comment with the PR link, merge commit, verification commands/results, deployment status, affected files/modules, and any follow-ups.
+
+If the task did not require repository changes, the Linear completion comment must explicitly say `No repository changes required` and explain why.
+
+If Linear updates are blocked by connector or credential handling, complete the git, CI, merge, and deployment path anyway, then provide a manual Linear update for the user to paste. Do not treat the issue as delivered based only on local verification.
 
 ## Linear Setup
 
@@ -81,7 +102,9 @@ When Codex completes a NoteAI task:
 6. Open a PR with the Linear issue ID in the title.
 7. Let GitHub Actions and branch protection gate the merge.
 8. After merge, the Cloudflare workflow deploys web changes automatically.
-9. Update Linear with changed files, verification results, deployment status, and follow-ups.
+9. For web or deployment-impacting changes, verify the Cloudflare deployment succeeded and run a live smoke check.
+10. Update Linear with changed files, verification results, deployment status, and follow-ups.
+11. Move Linear to `Done` only after the required evidence above is complete.
 
 ## Cost Guardrails
 

@@ -5,17 +5,32 @@ import { X, Send, Loader2, Trash2 } from "lucide-react";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "@/lib/types";
+import type { Components } from "react-markdown";
+import type { ChatMessage, Meeting, Note, SidebarSelection, T5TReport, TodoItem } from "@/lib/types";
 import { db } from "@/lib/db";
 import { chatWithAI } from "@/lib/ai";
 import { triggerRefresh } from "@/lib/hooks";
+import { buildChatSourceContext, sourceSelectionFromUrl } from "@/lib/chat-sources";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
+  meetings: Meeting[];
+  notes: Note[];
+  todos: TodoItem[];
+  t5tReports: T5TReport[];
   onClose: () => void;
+  onNavigate: (selection: NonNullable<SidebarSelection>) => void;
 }
 
-export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
+export default function ChatPanel({
+  messages,
+  meetings,
+  notes,
+  todos,
+  t5tReports,
+  onClose,
+  onNavigate,
+}: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -46,8 +61,9 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
         .filter((m) => m.role !== "system")
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
+      const sourceContext = buildChatSourceContext({ meetings, notes, todos, t5tReports });
 
-      const reply = await chatWithAI(history);
+      const reply = await chatWithAI(history, sourceContext);
 
       const assistantMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -69,6 +85,35 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const markdownComponents: Components = {
+    a({ href, children }) {
+      const selection = href ? sourceSelectionFromUrl(href) : null;
+      if (selection) {
+        return (
+          <button
+            type="button"
+            onClick={() => onNavigate(selection)}
+            className="rounded-md border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/18"
+            title="Open source"
+          >
+            {children}
+          </button>
+        );
+      }
+
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent underline decoration-accent/40 underline-offset-2"
+        >
+          {children}
+        </a>
+      );
+    },
   };
 
   const clearChat = async () => {
@@ -140,7 +185,7 @@ export default function ChatPanel({ messages, onClose }: ChatPanelProps) {
               >
                 {msg.role === "assistant" ? (
                   <div className="markdown-body text-sm [&_p]:mb-1.5 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                       {msg.content}
                     </ReactMarkdown>
                   </div>

@@ -63,8 +63,16 @@ final class ChatManager: ObservableObject {
 
         let chatTask = _Concurrency.Task { @MainActor in
             do {
+                let sourceContext = meetingManager.map {
+                    ChatSourceContext.build(
+                        meetings: $0.meetings,
+                        notes: $0.notes,
+                        tasks: $0.tasks,
+                        t5tReports: $0.t5tReports
+                    )
+                } ?? ""
                 var llmMessages: [(role: String, content: String)] = [
-                    (role: "system", content: systemPrompt)
+                    (role: "system", content: sourceContext.isEmpty ? systemPrompt : "\(systemPrompt)\n\n\(sourceContext)")
                 ]
                 for msg in messages.suffix(20) {
                     llmMessages.append((role: msg.role.rawValue, content: msg.content))

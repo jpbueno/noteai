@@ -12,6 +12,59 @@ const ENDPOINTS: Record<string, string> = {
 const MAX_CHAT_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 12_000;
 const MAX_CHAT_TOKENS = 4096;
+const CHAT_UPSTREAM_TIMEOUT_MS = 60_000;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function extractUpstreamError(upstreamText: string): string {
+  try {
+    const parsed = JSON.parse(upstreamText);
+    const rawError = parsed?.error;
+    if (typeof parsed?.detail === "string") return parsed.detail;
+    if (typeof parsed?.message === "string") return parsed.message;
+    if (typeof rawError === "string") return rawError;
+    if (typeof rawError?.message === "string") return rawError.message;
+    if (typeof rawError?.detail === "string") return rawError.detail;
+  } catch {
+    // Fall through to a bounded text snippet below.
+  }
+  return upstreamText.slice(0, 300);
+}
+
+function extractChatContent(provider: string, data: unknown): string {
+  const root = asRecord(data);
+  if (!root) return "";
+
+  if (provider === "anthropic") {
+    const content = Array.isArray(root.content) ? root.content : [];
+    const first = asRecord(content[0]);
+    return typeof first?.text === "string" ? first.text : "";
+  }
+
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const firstChoice = asRecord(choices[0]);
+  const message = asRecord(firstChoice?.message);
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        const contentPart = asRecord(item);
+        if (typeof contentPart?.text === "string") return contentPart.text;
+        if (typeof contentPart?.content === "string") return contentPart.content;
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+
+  if (typeof root.content === "string") return root.content;
+  if (typeof root.output_text === "string") return root.output_text;
+  return "";
+}
 
 export async function POST(request: NextRequest) {
   const authError = await requireApiAuth(request);
@@ -92,26 +145,31 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CHAT_UPSTREAM_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return NextResponse.json(
+          { error: "LLM request timed out. Try again or choose a faster model." },
+          { status: 504 },
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const upstreamText = await response.text();
-      let upstreamDetail = "";
-      try {
-        const parsed = JSON.parse(upstreamText);
-        upstreamDetail =
-          typeof parsed?.detail === "string"
-            ? parsed.detail
-            : typeof parsed?.error === "string"
-              ? parsed.error
-              : "";
-      } catch {
-        upstreamDetail = "";
-      }
+      const upstreamDetail = extractUpstreamError(upstreamText);
       return NextResponse.json(
         {
           error: `LLM request failed (${response.status})${
@@ -124,11 +182,12 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json();
 
-    let content: string;
-    if (provider === "anthropic") {
-      content = data.content?.[0]?.text || "";
-    } else {
-      content = data.choices?.[0]?.message?.content || "";
+    const content = extractChatContent(provider, data);
+    if (!content) {
+      return NextResponse.json(
+        { error: "LLM request returned an empty response." },
+        { status: 502 },
+      );
     }
 
     return NextResponse.json({ content });

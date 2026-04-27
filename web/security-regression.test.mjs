@@ -83,6 +83,9 @@ test("cost-bearing AI endpoints enforce local request bounds", () => {
 
   assert.match(chatRoute, /MAX_CHAT_MESSAGES/);
   assert.match(chatRoute, /MAX_CHAT_TOKENS/);
+  assert.match(chatRoute, /CHAT_UPSTREAM_TIMEOUT_MS\s*=\s*60_000/);
+  assert.match(chatRoute, /controller\.abort\(\)/);
+  assert.match(chatRoute, /returned an empty response/);
   assert.match(transcribeRoute, /MAX_AUDIO_BYTES/);
   assert.match(ttsRoute, /MAX_TTS_CHARS/);
 });

@@ -11,6 +11,8 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const secret = process.env.NOTEAI_AUTH_SECRET;
 
+  if (pathname.startsWith("/api/health")) return NextResponse.next();
+
   if (!isBrowserAuthConfigured()) {
     if (isExplicitAuthBypassEnabled()) return NextResponse.next();
     if (pathname.startsWith("/api/auth")) return NextResponse.next();

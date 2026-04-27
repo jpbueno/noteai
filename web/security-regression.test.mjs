@@ -21,6 +21,15 @@ test("local browser auth bypass is reflected in the auth status endpoint", () =>
   assert.match(authRoute, /authenticated:\s*true,\s*required:\s*false/);
 });
 
+test("release health endpoint is public and non-sensitive", () => {
+  const middleware = read("./src/middleware.ts");
+  const healthRoute = read("./src/app/api/health/route.ts");
+
+  assert.match(middleware, /pathname\.startsWith\("\/api\/health"\)/);
+  assert.match(healthRoute, /ok:\s*true/);
+  assert.doesNotMatch(healthRoute, /process\.env/);
+});
+
 test("browser API client rejects failed HTTP responses before data reaches list hooks", () => {
   const db = read("./src/lib/db.ts");
   const hooks = read("./src/lib/hooks.ts");

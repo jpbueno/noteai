@@ -29,7 +29,7 @@ With the GitHub integration enabled, Linear links branches, commits, and pull re
 Required checks for branch protection:
 
 - `Web CI / Lint, build, and security regression`
-- `macOS CI / Swift package tests`
+- `macOS CI / Xcode build and test`
 
 Recommended branch protection for `main`:
 
@@ -65,9 +65,9 @@ Optional Cloudflare Worker secrets:
 
 ## macOS Deployment
 
-The macOS workflow runs Swift package tests on GitHub-hosted macOS runners. It does not notarize, sign for distribution, or publish a user-facing app update. That keeps this zero-cost and avoids requiring Apple Developer release automation in CI.
+The macOS workflow builds and tests the Xcode project on GitHub-hosted macOS runners. It does not notarize, sign for distribution, or publish a user-facing app update. That keeps this zero-cost and avoids requiring Apple Developer release automation in CI.
 
-Treat macOS CI as a merge gate for shared Swift logic. Create release artifacts manually when needed, or add a separate manually triggered release workflow later after the checked-in Xcode project is regenerated and signing/notarization credentials are available.
+Treat macOS CI as a merge gate for the native app. Create release artifacts manually when needed, or add a separate manually triggered release workflow later if signing/notarization credentials are available.
 
 ## Codex Finish Workflow
 

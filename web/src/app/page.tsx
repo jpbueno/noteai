@@ -136,6 +136,7 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(220);
   const [isSidebarDragging, setIsSidebarDragging] = useState(false);
+  const chatWidth = 360;
 
   const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
     useSearch(meetings, notes, todos);
@@ -375,25 +376,25 @@ export default function Home() {
 
   return (
     <div className="relative h-screen bg-content">
-      {/* Fixed brand header — current logo preserved */}
-      <div
-        onClick={() => setSidebarCollapsed((v) => !v)}
-        className="fixed top-0 left-0 z-30 flex items-center gap-2.5 px-3.5 py-3 cursor-pointer hover:opacity-80 transition-opacity"
-        style={{ height: 52 }}
-      >
-        <BrainHeadIcon className="w-[22px] h-[22px] text-text-secondary" />
-        <div className="flex flex-col leading-tight">
-          <span className="text-lg font-semibold text-text-primary">NoteAI</span>
-          <span className="text-[10px] font-medium text-text-tertiary -mt-0.5">v4.0 Command Center</span>
-        </div>
-      </div>
-
       <div className="flex h-screen">
         {/* Sidebar — slides via negative margin, always in DOM */}
         <div
           className={`flex-shrink-0 bg-sidebar/95 border-r border-border relative ${isSidebarDragging ? "" : "transition-[margin-left] duration-300 ease-in-out"}`}
           style={{ width: sidebarWidth, marginLeft: sidebarCollapsed ? -sidebarWidth : 0 }}
         >
+          {/* Brand header lives inside the sliding drawer so it cannot overlap the command bar */}
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="absolute left-0 top-0 z-30 flex h-[52px] w-full items-center gap-2.5 px-3.5 py-3 text-left transition-opacity hover:opacity-80"
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          >
+            <BrainHeadIcon className="w-[22px] h-[22px] flex-shrink-0 text-text-secondary" />
+            <div className="min-w-0 flex flex-col leading-tight">
+              <span className="truncate text-lg font-semibold text-text-primary">NoteAI</span>
+              <span className="-mt-0.5 truncate text-[10px] font-medium text-text-tertiary">v4.0 Command Center</span>
+            </div>
+          </button>
+
           {/* Resize handle */}
           <div
             className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-20 hover:bg-accent/40 active:bg-accent/60 transition-colors"
@@ -465,16 +466,18 @@ export default function Home() {
                   <Plus className="h-4 w-4" />
                   New note
                 </button>
-                {!showChat && (
-                  <button
-                    onClick={() => setShowChat(true)}
-                    className="flex h-10 items-center gap-2 rounded-xl bg-accent px-3 text-sm font-semibold text-black hover:bg-accent/85 transition-colors"
-                    title="Open AI copilot"
-                  >
-                    <MessageSquare className="h-4 w-4" />
-                    AI copilot
-                  </button>
-                )}
+                <button
+                  onClick={() => setShowChat((v) => !v)}
+                  className={`flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                    showChat
+                      ? "border border-accent/45 bg-accent/12 text-accent hover:bg-accent/18"
+                      : "bg-accent text-black hover:bg-accent/85"
+                  }`}
+                  title={showChat ? "Hide AI copilot" : "Open AI copilot"}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  AI copilot
+                </button>
               </div>
             </div>
           </div>
@@ -484,19 +487,32 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Chat drawer */}
-        {showChat && (
-          <>
-            <div className="w-px bg-border/80" />
-            <div className="w-[360px] flex-shrink-0">
-              <ChatPanel
-                messages={chatMessages}
-                onClose={() => setShowChat(false)}
-              />
-            </div>
-          </>
-        )}
+        {/* Chat drawer — slides via negative margin, always in DOM */}
+        <div
+          className={`flex h-full flex-shrink-0 ${showChat ? "" : "pointer-events-none"} transition-[margin-right] duration-300 ease-in-out`}
+          style={{ width: chatWidth, marginRight: showChat ? 0 : -chatWidth }}
+          aria-hidden={!showChat}
+        >
+          <div className="w-px flex-shrink-0 bg-border/80" />
+          <div className="min-w-0 flex-1">
+            <ChatPanel
+              messages={chatMessages}
+              onClose={() => setShowChat(false)}
+            />
+          </div>
+        </div>
       </div>
+
+      {sidebarCollapsed && (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="fixed left-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-sidebar/95 text-text-secondary shadow-lg shadow-black/25 transition-colors hover:border-accent/45 hover:text-accent"
+          title="Show sidebar"
+          aria-label="Show sidebar"
+        >
+          <BrainHeadIcon className="h-5 w-5" />
+        </button>
+      )}
     </div>
   );
 }

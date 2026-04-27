@@ -72,6 +72,7 @@ const POPULAR_MODELS: Record<LLMProvider, { id: string; name: string }[]> = {
     { id: "o3-mini", name: "o3-mini" },
   ],
   nvidia: [
+    { id: "aws/anthropic/bedrock-claude-opus-4-7", name: "Claude Opus 4.7" },
     { id: "nvidia/llama-3.3-nemotron-super-49b-v1.5", name: "Nemotron Super 49B v1.5" },
     { id: "nvidia/llama-3.1-nemotron-ultra-253b-v1", name: "Nemotron Ultra 253B v1" },
     { id: "nvidia/llama-3.1-nemotron-70b-instruct", name: "Nemotron 70B Instruct" },

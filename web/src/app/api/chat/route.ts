@@ -6,7 +6,7 @@ const ENDPOINTS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   openai: "https://api.openai.com/v1/chat/completions",
-  nvidia: "https://integrate.api.nvidia.com/v1/chat/completions",
+  nvidia: "https://inference-api.nvidia.com/v1/chat/completions",
 };
 
 const MAX_CHAT_MESSAGES = 40;

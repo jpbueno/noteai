@@ -130,10 +130,11 @@ test("NVIDIA provider uses current API catalog endpoint and model IDs", () => {
   const nextConfig = read("./next.config.ts");
   const settings = read("./src/components/Settings.tsx");
 
-  assert.match(chatRoute, /https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/);
-  assert.match(nextConfig, /https:\/\/integrate\.api\.nvidia\.com/);
-  assert.doesNotMatch(nextConfig, /inference-api\.nvidia\.com/);
-  assert.doesNotMatch(chatRoute, /inference-api\.nvidia\.com/);
+  assert.match(chatRoute, /https:\/\/inference-api\.nvidia\.com\/v1\/chat\/completions/);
+  assert.match(nextConfig, /https:\/\/inference-api\.nvidia\.com/);
+  assert.doesNotMatch(nextConfig, /integrate\.api\.nvidia\.com/);
+  assert.doesNotMatch(chatRoute, /integrate\.api\.nvidia\.com/);
+  assert.match(settings, /aws\/anthropic\/bedrock-claude-opus-4-7/);
   assert.match(settings, /nvidia\/llama-3\.3-nemotron-super-49b-v1\.5/);
   assert.doesNotMatch(settings, /nvcf\/nvidia/);
   assert.doesNotMatch(settings, /azure\/anthropic/);

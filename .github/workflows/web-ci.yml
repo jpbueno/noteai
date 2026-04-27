@@ -41,6 +41,9 @@ jobs:
       - name: Lint web app
         run: npm run lint
 
+      - name: Typecheck web app
+        run: npx tsc --noEmit --pretty false
+
       - name: Run security regression tests
         run: node --test security-regression.test.mjs
 

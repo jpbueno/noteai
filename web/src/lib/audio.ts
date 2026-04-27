@@ -1,7 +1,18 @@
+import {
+  createRecordingDiagnostics,
+  diagnosticLogLines,
+  updateRecordingDiagnosticLevel,
+  updateRecordingDiagnosticPermission,
+  updateRecordingDiagnosticSource,
+  type RecordingDiagnostics,
+  type RecordingSource,
+} from "./recording-diagnostics";
+
 export type RecordingState = "idle" | "recording" | "processing";
 
 type TranscriptCallback = (text: string, isFinal: boolean) => void;
 type LevelCallback = (level: number) => void;
+type DiagnosticsCallback = (diagnostics: RecordingDiagnostics) => void;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SpeechRecognitionInstance = any;
@@ -123,7 +134,11 @@ export class AudioRecorder {
   private levelAnalyser: AnalyserNode | null = null;
   private levelCtx: AudioContext | null = null;
   private levelRafId: number = 0;
+  private diagnosticLevelContexts: AudioContext[] = [];
+  private diagnosticLevelRafIds: number[] = [];
   private onLevel: LevelCallback | null = null;
+  private onDiagnostics: DiagnosticsCallback | null = null;
+  private diagnostics: RecordingDiagnostics = createRecordingDiagnostics();
   private activeMicLabel: string = "";
 
   /**
@@ -131,9 +146,14 @@ export class AudioRecorder {
    * @param micDeviceId - specific mic device ID (or undefined for default)
    * @param captureTab - if true, prompt user to share a tab for system audio capture
    * @param onLevel - optional callback for mic level (0-1) — useful for UI meters
+   * @param onDiagnostics - optional callback for permission/capture/level diagnostics
    */
-  async start(onTranscript?: TranscriptCallback, micDeviceId?: string, captureTab = false, onLevel?: LevelCallback): Promise<void> {
+  async start(onTranscript?: TranscriptCallback, micDeviceId?: string, captureTab = false, onLevel?: LevelCallback, onDiagnostics?: DiagnosticsCallback): Promise<void> {
     this.onLevel = onLevel || null;
+    this.onDiagnostics = onDiagnostics || null;
+    this.diagnostics = createRecordingDiagnostics();
+    await this.refreshPermissionDiagnostics();
+    this.emitDiagnostics();
     this.chunks = [];
     this.stopped = false;
     this.hasTabAudio = false;
@@ -167,6 +187,13 @@ export class AudioRecorder {
     for (const attempt of attempts) {
       try {
         micStream = await tryGetMic(attempt.constraints);
+        this.updateDiagnostics((current) =>
+          updateRecordingDiagnosticPermission(
+            updateRecordingDiagnosticSource(current, "microphone", "capturing"),
+            "microphonePermission",
+            "granted"
+          )
+        );
         break;
       } catch (err) {
         lastErr = err;
@@ -178,6 +205,19 @@ export class AudioRecorder {
     if (!micStream!) {
       const errName = lastErr instanceof DOMException ? lastErr.name : "";
       const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticSource(
+          updateRecordingDiagnosticPermission(
+            current,
+            "microphonePermission",
+            errName === "NotAllowedError" ? "denied" : current.microphonePermission
+          ),
+          "microphone",
+          "unavailable",
+          errName || errMsg || "Mic access failed"
+        )
+      );
+      this.writeDiagnosticsLog("Microphone unavailable");
 
       if (errName === "NotAllowedError") {
         throw new Error(
@@ -226,38 +266,7 @@ export class AudioRecorder {
     } catch { /* ignore */ }
 
     // Set up level monitoring — always runs so the UI can show audio presence
-    if (this.onLevel) {
-      try {
-        const levelCtx = new AudioContext();
-        const source = levelCtx.createMediaStreamSource(micStream);
-        const analyser = levelCtx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.4;
-        source.connect(analyser);
-        this.levelCtx = levelCtx;
-        this.levelAnalyser = analyser;
-
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        const tick = () => {
-          if (this.stopped || !this.levelAnalyser) return;
-          this.levelAnalyser.getByteTimeDomainData(data);
-          // Compute RMS around 128 (silent center)
-          let sumSq = 0;
-          for (let i = 0; i < data.length; i++) {
-            const v = (data[i] - 128) / 128;
-            sumSq += v * v;
-          }
-          const rms = Math.sqrt(sumSq / data.length);
-          // Normalize roughly — human speech typically ~0.05-0.3 RMS
-          const level = Math.min(1, rms * 4);
-          if (this.onLevel) this.onLevel(level);
-          this.levelRafId = requestAnimationFrame(tick);
-        };
-        tick();
-      } catch (err) {
-        console.warn("[NoteAI] Level meter setup failed:", err);
-      }
-    }
+    this.startLevelMeter(micStream, "microphone", this.onLevel || undefined);
 
     // 2. Try BlackHole for system audio loopback (captures ALL speaker output)
     const blackHoleId = await findBlackHoleDevice();
@@ -269,10 +278,20 @@ export class AudioRecorder {
           audio: { deviceId: { exact: blackHoleId } },
         });
         this.hasTabAudio = true;
+        this.updateDiagnostics((current) =>
+          updateRecordingDiagnosticPermission(
+            updateRecordingDiagnosticSource(current, "systemAudio", "capturing"),
+            "systemAudioPermission",
+            "granted"
+          )
+        );
         if (this.onTranscript) {
           this.onTranscript("[System audio captured via BlackHole — all speaker output will be transcribed]", true);
         }
       } catch (err) {
+        this.updateDiagnostics((current) =>
+          updateRecordingDiagnosticSource(current, "systemAudio", "unavailable", err instanceof Error ? err.message : "BlackHole capture failed")
+        );
         console.warn("[NoteAI] BlackHole capture failed:", err);
       }
     }
@@ -290,19 +309,42 @@ export class AudioRecorder {
           systemStream = displayStream;
           this.tabStream = displayStream;
           this.hasTabAudio = true;
+          this.updateDiagnostics((current) =>
+            updateRecordingDiagnosticPermission(
+              updateRecordingDiagnosticSource(current, "systemAudio", "capturing"),
+              "systemAudioPermission",
+              "granted"
+            )
+          );
           if (this.onTranscript) {
             this.onTranscript("[Tab audio captured — Whisper transcription active]", true);
           }
-        } else if (this.onTranscript) {
-          this.onTranscript("[Tab shared but no audio track — did you check 'Also share tab audio'?]", true);
+        } else {
+          this.updateDiagnostics((current) =>
+            updateRecordingDiagnosticSource(current, "systemAudio", "unavailable", "Tab audio was not shared")
+          );
+          if (this.onTranscript) {
+            this.onTranscript("[Tab shared but no audio track — did you check 'Also share tab audio'?]", true);
+          }
         }
       } catch (err) {
+        this.updateDiagnostics((current) =>
+          updateRecordingDiagnosticSource(current, "systemAudio", "unavailable", err instanceof Error ? err.message : "Tab capture cancelled")
+        );
         if (this.onTranscript) {
           this.onTranscript(`[Tab capture skipped: ${err instanceof Error ? err.message : "cancelled"}]`, true);
         }
       }
     }
     this.systemStream = systemStream;
+    if (!systemStream && !captureTab && !blackHoleId) {
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticSource(current, "systemAudio", "unavailable", "Start with tab audio to capture system sound")
+      );
+    }
+    if (systemStream) {
+      this.startLevelMeter(systemStream, "systemAudio");
+    }
 
     // 4. Mix system audio + mic via AudioContext, or use mic only
     let recordStream: MediaStream;
@@ -352,6 +394,7 @@ export class AudioRecorder {
     // When the user switches devices, reconnect mic to follow the new device
     this.deviceChangeHandler = () => this.handleDeviceChange();
     navigator.mediaDevices.addEventListener("devicechange", this.deviceChangeHandler);
+    this.writeDiagnosticsLog("Capture started");
   }
 
   // --- Whisper polling ---
@@ -600,6 +643,10 @@ export class AudioRecorder {
         this.micStream.getTracks().forEach((t) => t.stop());
       }
       this.micStream = newMicStream;
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticSource(current, "microphone", "capturing")
+      );
+      this.startLevelMeter(newMicStream, "microphone", this.onLevel || undefined);
 
       // If we have a mixing AudioContext, swap the mic source node
       if (this.audioCtx && this.audioCtx.state !== "closed") {
@@ -626,6 +673,9 @@ export class AudioRecorder {
         this.onTranscript(`[Mic switched to: ${label}]`, true);
       }
     } catch (err) {
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticSource(current, "microphone", "unavailable", err instanceof Error ? err.message : "Device reconnect failed")
+      );
       console.warn("[NoteAI] Failed to reconnect mic after device change:", err);
     }
   }
@@ -657,10 +707,23 @@ export class AudioRecorder {
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
     if (this.levelRafId) { cancelAnimationFrame(this.levelRafId); this.levelRafId = 0; }
     if (this.levelCtx) { this.levelCtx.close().catch(() => {}); this.levelCtx = null; }
+    this.diagnosticLevelRafIds.forEach((id) => cancelAnimationFrame(id));
+    this.diagnosticLevelRafIds = [];
+    this.diagnosticLevelContexts.forEach((ctx) => ctx.close().catch(() => {}));
+    this.diagnosticLevelContexts = [];
     this.levelAnalyser = null;
     this.micSourceNode = null;
     this.onTranscript = null;
     this.onLevel = null;
+    this.updateDiagnostics((current) =>
+      updateRecordingDiagnosticSource(
+        updateRecordingDiagnosticSource(current, "microphone", "idle"),
+        "systemAudio",
+        "idle"
+      )
+    );
+    this.writeDiagnosticsLog("Capture stopped");
+    this.onDiagnostics = null;
     const blob = new Blob(this.chunks, { type: "audio/webm" });
     this.chunks = [];
     return blob;
@@ -677,5 +740,70 @@ export class AudioRecorder {
 
   get capturingTabAudio(): boolean {
     return this.hasTabAudio;
+  }
+
+  get diagnosticSnapshot(): RecordingDiagnostics {
+    return this.diagnostics;
+  }
+
+  private async refreshPermissionDiagnostics(): Promise<void> {
+    if (!("permissions" in navigator) || !navigator.permissions?.query) return;
+
+    try {
+      const micPermission = await navigator.permissions.query({ name: "microphone" as PermissionName });
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticPermission(
+          current,
+          "microphonePermission",
+          micPermission.state === "granted" ? "granted" : micPermission.state === "denied" ? "denied" : "prompt"
+        )
+      );
+    } catch { /* Browser may not support microphone permission query. */ }
+  }
+
+  private startLevelMeter(stream: MediaStream, source: RecordingSource, onLevel?: LevelCallback): void {
+    try {
+      const ctx = new AudioContext();
+      const mediaSource = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.4;
+      mediaSource.connect(analyser);
+      this.diagnosticLevelContexts.push(ctx);
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let rafId = 0;
+      const tick = () => {
+        if (this.stopped) return;
+        analyser.getByteTimeDomainData(data);
+        let sumSq = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / data.length);
+        const level = Math.min(1, rms * 4);
+        onLevel?.(level);
+        this.updateDiagnostics((current) => updateRecordingDiagnosticLevel(current, source, level));
+        rafId = requestAnimationFrame(tick);
+      };
+      tick();
+      this.diagnosticLevelRafIds.push(rafId);
+    } catch (err) {
+      console.warn("[NoteAI] Diagnostic level meter setup failed:", err);
+    }
+  }
+
+  private updateDiagnostics(update: (current: RecordingDiagnostics) => RecordingDiagnostics): void {
+    this.diagnostics = update(this.diagnostics);
+    this.emitDiagnostics();
+  }
+
+  private emitDiagnostics(): void {
+    this.onDiagnostics?.(this.diagnostics);
+  }
+
+  private writeDiagnosticsLog(event: string): void {
+    console.info(`[NoteAI] Recording diagnostics ${event}: ${diagnosticLogLines(this.diagnostics).join(" | ")}`);
   }
 }

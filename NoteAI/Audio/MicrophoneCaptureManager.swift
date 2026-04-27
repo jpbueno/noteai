@@ -8,16 +8,27 @@ final class MicrophoneCaptureManager {
     private var onBufferCallback: ((AVAudioPCMBuffer) -> Void)?
     private var configObserver: NSObjectProtocol?
 
-    func startCapture(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) throws {
-        let hasPermission = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        if !hasPermission {
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                if !granted {
-                    print("[MicCapture] Microphone access denied")
+    static func requestAccessIfNeeded() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .denied, .restricted:
+            return false
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
                 }
             }
+        @unknown default:
+            return false
         }
+    }
 
+    func startCapture(onBuffer: @escaping (AVAudioPCMBuffer) -> Void) throws {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            throw AudioCaptureError.microphoneAccessDenied
+        }
         onBufferCallback = onBuffer
 
         let engine = AVAudioEngine()

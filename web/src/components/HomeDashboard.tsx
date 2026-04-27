@@ -1,15 +1,18 @@
 "use client";
 
 import { useMemo } from "react";
-import { CheckSquare, Square, Calendar, Circle, Plus, Activity, Clock, ListTodo } from "lucide-react";
+import { CheckCircle2, CheckSquare, Square, Calendar, Circle, Plus, Activity, Clock, ListTodo, Settings, AlertTriangle } from "lucide-react";
 import type { TodoItem, SidebarSelection } from "@/lib/types";
+import type { OnboardingChecklist, OnboardingChecklistItem } from "@/lib/onboarding";
 import { db } from "@/lib/db";
 import { parseDueDate, triggerRefresh } from "@/lib/hooks";
 
 interface HomeDashboardProps {
   todos: TodoItem[];
+  onboardingChecklist: OnboardingChecklist;
   onSelect: (sel: SidebarSelection) => void;
   onNewTodo: () => void;
+  onOnboardingAction: (item: OnboardingChecklistItem) => void;
 }
 
 function getDueDateInfo(dueDate: string | null, completed: boolean) {
@@ -35,7 +38,7 @@ function getDueDateInfo(dueDate: string | null, completed: boolean) {
   return { label: due.toLocaleDateString("en-US", { month: "short", day: "numeric" }), color: "text-text-tertiary" };
 }
 
-export default function HomeDashboard({ todos, onSelect, onNewTodo }: HomeDashboardProps) {
+export default function HomeDashboard({ todos, onboardingChecklist, onSelect, onNewTodo, onOnboardingAction }: HomeDashboardProps) {
   const { overdue, today: todayTodos, upcoming, noDue, completed } = useMemo(() => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -151,6 +154,11 @@ export default function HomeDashboard({ todos, onSelect, onNewTodo }: HomeDashbo
           </div>
         </section>
 
+        <OnboardingPanel
+          checklist={onboardingChecklist}
+          onAction={onOnboardingAction}
+        />
+
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <TaskColumn title="Focus Queue" subtitle="Overdue and due today" tone="danger">
             {[...overdue, ...todayTodos].map((t) => (
@@ -180,6 +188,79 @@ export default function HomeDashboard({ todos, onSelect, onNewTodo }: HomeDashbo
       </div>
     </div>
   );
+}
+
+function OnboardingPanel({
+  checklist,
+  onAction,
+}: {
+  checklist: OnboardingChecklist;
+  onAction: (item: OnboardingChecklistItem) => void;
+}) {
+  const needsAttention = checklist.completedCount < checklist.totalCount;
+
+  return (
+    <section className="v4-panel mb-5 p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-text-primary">Setup checklist</h2>
+          <p className="mt-1 text-xs text-text-tertiary">
+            {checklist.completedCount}/{checklist.totalCount} complete
+            {needsAttention ? " · finish required items before the first recording" : " · ready for capture"}
+          </p>
+        </div>
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-bold ${
+            checklist.requiredReady
+              ? "bg-green-400/12 text-green-400"
+              : "bg-yellow-400/12 text-yellow-300"
+          }`}
+        >
+          {checklist.requiredReady ? "Ready" : "Setup needed"}
+        </span>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {checklist.items.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => onAction(item)}
+            disabled={!item.target || item.status === "complete" || item.status === "blocked" || item.status === "unsupported"}
+            className="v4-row flex min-h-[92px] w-full items-start gap-3 px-3 py-3 text-left transition-colors enabled:hover:border-accent/35 enabled:hover:bg-hover disabled:cursor-default"
+          >
+            <StatusIcon item={item} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="truncate text-sm font-bold text-text-primary">{item.label}</span>
+                {item.required && (
+                  <span className="rounded-full bg-accent/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
+                    Required
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-text-tertiary">{item.detail}</span>
+              {item.actionLabel && item.status !== "complete" && item.status !== "blocked" && item.status !== "unsupported" && (
+                <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-accent">
+                  <Settings className="h-3 w-3" />
+                  {item.actionLabel}
+                </span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StatusIcon({ item }: { item: OnboardingChecklistItem }) {
+  if (item.status === "complete") {
+    return <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-400" />;
+  }
+  if (item.status === "blocked" || item.status === "unsupported") {
+    return <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-yellow-300" />;
+  }
+  return <Circle className="mt-1 h-4 w-4 flex-shrink-0 text-text-tertiary" />;
 }
 
 function Metric({

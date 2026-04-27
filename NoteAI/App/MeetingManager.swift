@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UserNotifications
 
 /// Central orchestrator that coordinates audio capture, transcription, and summarization.
 @MainActor
@@ -15,6 +16,8 @@ final class MeetingManager: ObservableObject {
     @Published var meetings: [Meeting] = []
     @Published var lastError: String?
     @Published var recordingDuration: TimeInterval = 0
+    @Published var recordingDiagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+    @Published var onboardingNotificationPermission: OnboardingPermissionStatus = .unknown
     @Published var summarizationStatus: SummarizationStatus = .idle
     @Published var searchQuery: String = ""
     @Published var showMeetingNamePrompt = false
@@ -119,9 +122,67 @@ final class MeetingManager: ObservableObject {
         loadTasks()
         loadT5TData()
         loadTodos()
+        refreshOnboardingChecklistState()
         setupToggleListener()
         setupTranscriptionPipeline()
         setupAutoDetection()
+    }
+
+    var onboardingChecklist: OnboardingChecklist {
+        let permissions = RecordingDiagnosticsSnapshot.currentPermissions().permissions
+        let providerRaw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
+        let provider = LLMProviderType(rawValue: providerRaw) ?? .openRouter
+
+        return OnboardingChecklist.build(
+            provider: provider,
+            providerKeyConfigured: !APIKeyStore.key(for: provider).isEmpty,
+            microphonePermission: Self.onboardingPermission(from: permissions[.microphone] ?? .unknown),
+            screenRecordingPermission: Self.onboardingPermission(from: permissions[.screenRecording] ?? .unknown),
+            notificationPermission: onboardingNotificationPermission,
+            calendarAuthConfigured: KeychainHelper.load(key: "google_access_token") != nil,
+            meetingCount: meetings.count
+        )
+    }
+
+    func refreshOnboardingChecklistState() {
+        recordingDiagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            let status: OnboardingPermissionStatus
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                status = .granted
+            case .denied:
+                status = .denied
+            case .notDetermined:
+                status = .unknown
+            @unknown default:
+                status = .unsupported("Unknown notification authorization status")
+            }
+            Task { @MainActor in
+                self?.onboardingNotificationPermission = status
+            }
+        }
+    }
+
+    func requestNotificationPermissionForOnboarding() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.refreshOnboardingChecklistState()
+            }
+        }
+    }
+
+    private static func onboardingPermission(from status: RecordingPermissionStatus) -> OnboardingPermissionStatus {
+        switch status {
+        case .unknown:
+            return .unknown
+        case .granted:
+            return .granted
+        case .denied:
+            return .denied
+        case .unavailable(let reason):
+            return .unsupported(reason)
+        }
     }
 
     func toggleRecording() {
@@ -138,6 +199,10 @@ final class MeetingManager: ObservableObject {
     func startRecording() {
         guard state == .idle else { return }
         lastError = nil
+        if let blocker = onboardingChecklist.firstRecordingBlocker {
+            lastError = blocker
+            return
+        }
         state = .recording
         currentTranscript = []
         currentMeetingStart = Date()
@@ -677,6 +742,11 @@ final class MeetingManager: ObservableObject {
                 } catch {
                     print("Transcription error: \(error)")
                 }
+            }
+        }
+        audioCaptureManager.onDiagnosticsChange = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.recordingDiagnostics = snapshot
             }
         }
     }

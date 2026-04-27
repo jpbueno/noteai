@@ -30,6 +30,19 @@ Required checks for branch protection:
 
 - `Web CI / Lint, build, and security regression`
 - `macOS CI / Swift package tests`
+- `CI Coverage Staleness / Coverage parity cleanup check`
+- `Secret Scan / Gitleaks git history scan`
+
+## CI Coverage Matrix
+
+JPB-32 tracks parity between the web and Swift/macOS verification gates. The first parity slice is a staleness/cleanup check: keep workflow triggers, branch-protection names, documentation, and lightweight regression tests aligned before expanding runner-heavy native coverage.
+
+| Area | Workflow check | Runner | Current gate | Cleanup guard |
+| --- | --- | --- | --- | --- |
+| Web app | `Web CI / Lint, build, and security regression` | Ubuntu with Node.js 22 | `npm ci`, ESLint, `tsc --noEmit`, every checked-in `web/*.test.mjs`, production dependency audit, and Next.js build | `CI Coverage Staleness / Coverage parity cleanup check` fails if a checked-in web regression test is not invoked by web CI. |
+| Swift/macOS | `macOS CI / Swift package tests` | GitHub-hosted `macos-15` | Toolchain version logging and `swift test` for shared Swift logic | `CI Coverage Staleness / Coverage parity cleanup check` records the current Swift gate and keeps the deferred Xcode build/test follow-up visible. |
+| Secrets | `Secret Scan / Gitleaks git history scan` | Ubuntu | Full-history Gitleaks scan with the reviewed baseline and uploaded SARIF report | `scripts/secret-scanning-workflow.test.mjs` keeps the secret-scan workflow and docs aligned. |
+| CI parity docs | `CI Coverage Staleness / Coverage parity cleanup check` | Ubuntu | `node --test scripts/ci-coverage-parity.test.mjs` | Runs on workflow, CI documentation, web regression test, and macOS test changes. |
 
 Recommended branch protection for `main`:
 
@@ -38,6 +51,8 @@ Recommended branch protection for `main`:
 - Require conversation resolution before merge.
 - Allow squash merge.
 - Disable direct pushes to `main` for normal development.
+- Add `Secret Scan / Gitleaks git history scan` to required checks after the first scheduled run is stable and any reviewed baseline entries are committed.
+- Add `CI Coverage Staleness / Coverage parity cleanup check` to required checks after the first run is stable so CI drift is caught before merge.
 
 This keeps automatic deploys cheap and predictable: Codex can push branches freely, but production only changes after checks pass and the PR merges.
 
@@ -75,13 +90,15 @@ When Codex completes a NoteAI task:
 
 1. Update the Linear issue to `In Progress` or `In Review`.
 2. Run the relevant local verification commands.
-3. Commit only the files changed for that task.
-4. Include the Linear issue ID in the commit message.
-5. Push the branch.
-6. Open a PR with the Linear issue ID in the title.
-7. Let GitHub Actions and branch protection gate the merge.
-8. After merge, the Cloudflare workflow deploys web changes automatically.
-9. Update Linear with changed files, verification results, deployment status, and follow-ups.
+3. Commit only the files changed for that task and include the Linear issue ID in the commit message.
+4. Push completed and tested work to `main` so `main` remains the source of truth. If branch protection blocks direct push, push a branch, open a PR with the Linear issue ID in the title, merge it, and then verify `main`.
+5. Confirm the commit is visible on the remote `main` branch.
+6. Confirm GitHub Actions ran for the `main` push.
+7. For web-affecting changes, confirm `Web Deploy to Cloudflare` completed successfully and smoke-check the deployed Worker when the workflow exposes a URL or health endpoint.
+8. Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
+9. Update Linear with changed files, verification results, remote commit, deployment status, branch cleanup, and follow-ups.
+
+Do not mark a Linear item `Done` while its completed implementation exists only on a local worktree or side branch. If any local check, push, CI job, or Cloudflare deployment fails, keep the issue active, record the failure, and create or link follow-up work rather than treating the task as complete.
 
 ## Cost Guardrails
 
@@ -91,3 +108,9 @@ When Codex completes a NoteAI task:
 - Avoid storing large build artifacts.
 - Prefer Cloudflare Worker secrets and GitHub repository secrets over paid secret-management services.
 - Use manual `workflow_dispatch` reruns when debugging expensive CI failures.
+
+## Secret and History Scanning
+
+`.github/workflows/secret-scan.yml` runs Gitleaks on pull requests, pushes to `main`, a weekly Monday schedule, and manual dispatch. It checks out the full git history with `fetch-depth: 0`, runs the pinned `ghcr.io/gitleaks/gitleaks` container, redacts findings in logs, and uploads the SARIF report as a workflow artifact for review.
+
+The committed `.gitleaks.baseline.json` is intentionally empty. If a historical finding is confirmed as already rotated or otherwise accepted, regenerate a Gitleaks JSON report, review each entry, commit only the approved baseline entries, and document the accepted risk in Linear before making the secret scan a required branch protection check.

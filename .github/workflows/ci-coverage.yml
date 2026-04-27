@@ -1,0 +1,42 @@
+name: CI Coverage Staleness
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "docs/linear-cicd.md"
+      - "docs/ci-security-followups.md"
+      - "scripts/ci-coverage-parity.test.mjs"
+      - "web/*.test.mjs"
+      - "NoteAITests/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "docs/linear-cicd.md"
+      - "docs/ci-security-followups.md"
+      - "scripts/ci-coverage-parity.test.mjs"
+      - "web/*.test.mjs"
+      - "NoteAITests/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-coverage-staleness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage-parity:
+    name: Coverage parity cleanup check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate CI coverage matrix
+        run: node --test scripts/ci-coverage-parity.test.mjs

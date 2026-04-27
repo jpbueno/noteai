@@ -76,4 +76,62 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Update changelog"))
         XCTAssertTrue(markdown.contains("Welcome everyone."))
     }
+
+    func testMarkdownExportIncludesSharedSourceFieldsAndTaskList() {
+        let meetingID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = Meeting(
+            id: meetingID,
+            title: "Q3 / Launch: Readout?",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 3661,
+            transcript: [
+                TranscriptSegment(id: 1, text: "We approved launch.", startTime: 0, endTime: 2, speaker: "Ana", confidence: 0.95),
+                TranscriptSegment(id: 2, text: "I will update the brief.", startTime: 65, endTime: 68, speaker: nil, confidence: 0.9)
+            ],
+            summary: MeetingSummary(
+                decisions: ["Launch next week"],
+                actionItems: [
+                    ActionItem(task: "Update launch brief", owner: "Dev", deadline: "2026-05-01", isCompleted: false),
+                    ActionItem(task: "Publish notes", owner: nil, deadline: nil, isCompleted: true)
+                ],
+                topics: ["Launch", "Readout"],
+                openQuestions: ["Who sends the customer note?"],
+                wasSummarized: true
+            )
+        )
+
+        let markdown = ExportManager.exportAsMarkdown(meeting)
+
+        XCTAssertTrue(markdown.contains("**Source:** `noteai://meeting/11111111-1111-1111-1111-111111111111`"))
+        XCTAssertTrue(markdown.contains("**Segments:** 2"))
+        XCTAssertTrue(markdown.contains("- [ ] Update launch brief — **Dev** (by 2026-05-01)"))
+        XCTAssertTrue(markdown.contains("- [x] Publish notes"))
+        XCTAssertTrue(markdown.contains("**[01:05] Speaker:** I will update the brief."))
+        XCTAssertEqual(ExportManager.markdownFilename(for: meeting), "Q3 - Launch- Readout.md")
+    }
+
+    func testPDFExportCreatesShareableMeetingRecord() throws {
+        let meeting = Meeting(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            title: "PDF Export Review",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 120,
+            transcript: [
+                TranscriptSegment(id: 1, text: "Review the PDF export.", startTime: 3, endTime: 5, speaker: "PM", confidence: 0.95)
+            ],
+            summary: MeetingSummary(
+                decisions: ["Ship PDF export"],
+                actionItems: [ActionItem(task: "Verify generated PDF", owner: "QA", deadline: nil)],
+                topics: ["Export"],
+                openQuestions: [],
+                wasSummarized: true
+            )
+        )
+
+        let pdfData = try ExportManager.exportAsPDFData(meeting)
+
+        XCTAssertGreaterThan(pdfData.count, 100)
+        XCTAssertEqual(String(data: pdfData.prefix(4), encoding: .ascii), "%PDF")
+        XCTAssertEqual(ExportManager.pdfFilename(for: meeting), "PDF Export Review.pdf")
+    }
 }

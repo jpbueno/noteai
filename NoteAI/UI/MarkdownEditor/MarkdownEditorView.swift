@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// A split-pane Markdown editor with live preview for meeting notes.
 /// Users can edit the raw Markdown on the left and see rendered output on the right.
@@ -97,6 +98,9 @@ struct MarkdownEditorView: View {
                 }
                 Button("Export as .md File...") {
                     exportToFile()
+                }
+                Button("Export as PDF...") {
+                    exportPDFToFile()
                 }
                 if !autoExportPath.isEmpty {
                     Button("Save to Vault (\(URL(fileURLWithPath: autoExportPath).lastPathComponent))") {
@@ -214,20 +218,29 @@ struct MarkdownEditorView: View {
     private func exportToFile() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.text]
-        panel.nameFieldStringValue = "\(meeting.title).md"
+        panel.nameFieldStringValue = ExportManager.markdownFilename(for: meeting)
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             try? markdownText.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 
+    private func exportPDFToFile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = ExportManager.pdfFilename(for: meeting)
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            if let pdfData = try? ExportManager.exportMarkdownAsPDFData(markdownText) {
+                try? pdfData.write(to: url, options: .atomic)
+            }
+        }
+    }
+
     private func saveToVault() {
         guard !autoExportPath.isEmpty else { return }
         let dir = URL(fileURLWithPath: autoExportPath)
-        let sanitizedTitle = meeting.title
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        let fileURL = dir.appendingPathComponent("\(sanitizedTitle).md")
+        let fileURL = dir.appendingPathComponent(ExportManager.markdownFilename(for: meeting))
         try? markdownText.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }

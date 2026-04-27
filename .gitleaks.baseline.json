@@ -1,0 +1,23 @@
+[
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 17,
+  "EndLine": 17,
+  "StartColumn": 18,
+  "EndColumn": 58,
+  "Match": "clientSecret = \"REDACTED\"",
+  "Secret": "REDACTED",
+  "File": "NoteAI/Auth/GoogleAuthManager.swift",
+  "SymlinkFile": "",
+  "Commit": "bfe25c4bb8a7cb1cb61f7865f4a904f8b9e6c6db",
+  "Link": "https://github.com/jpbueno/noteai/blob/bfe25c4bb8a7cb1cb61f7865f4a904f8b9e6c6db/NoteAI/Auth/GoogleAuthManager.swift#L17",
+  "Entropy": 4.168296,
+  "Author": "JP Santana",
+  "Email": "jbuenosantan@nvidia.com",
+  "Date": "2026-03-26T03:37:11Z",
+  "Message": "Working baseline: editor with drag-resize, floating toolbar, image persistence\n\nAll features functional:\n- Drag-to-resize images with persistent width\n- Floating formatting toolbar (Notion-style)\n- Image paste + OCR in tasks\n- Meeting name prompt on stop recording\n- Keychain-backed API keys\n- Full-width layout\n- Apple Development signing\n\nMade-with: Cursor",
+  "Tags": [],
+  "Fingerprint": "bfe25c4bb8a7cb1cb61f7865f4a904f8b9e6c6db:NoteAI/Auth/GoogleAuthManager.swift:generic-api-key:17"
+ }
+]

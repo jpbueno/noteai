@@ -18,7 +18,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://openrouter.ai https://api.anthropic.com https://api.openai.com https://api.groq.com https://inference-api.nvidia.com",
+  "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://openrouter.ai https://api.anthropic.com https://api.openai.com https://api.groq.com https://integrate.api.nvidia.com",
   "frame-src https://accounts.google.com",
   "form-action 'self'",
 ].join("; ");

@@ -169,3 +169,5 @@ npm run lint
 npx tsc --noEmit --pretty false
 npm run build
 ```
+
+See [docs/release-checklist.md](docs/release-checklist.md) for the full pre-release checklist, Cloudflare secret inventory, `/api/health` smoke check, and release notes template.

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
 
 const ENDPOINTS: Record<string, string> = {
@@ -13,6 +14,9 @@ const MAX_MESSAGE_CHARS = 12_000;
 const MAX_CHAT_TOKENS = 4096;
 
 export async function POST(request: NextRequest) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   try {
     const { provider, model, messages, temperature = 0.3, maxTokens = 4096 } =
       await request.json();

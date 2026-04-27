@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 import { getAll, getById, upsert, remove, clearTable, bulkUpsert } from "@/lib/server-db";
 
 const VALID = ["meetings", "notes", "tasks", "t5tReports", "dailyLogs", "chatMessages", "todos", "settings"];
@@ -6,6 +7,9 @@ const VALID = ["meetings", "notes", "tasks", "t5tReports", "dailyLogs", "chatMes
 type Params = { params: Promise<{ table: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   const { table } = await params;
   if (!VALID.includes(table)) {
     return NextResponse.json({ error: "Invalid table" }, { status: 400 });
@@ -24,6 +28,9 @@ export async function GET(request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   const { table } = await params;
   if (!VALID.includes(table)) {
     return NextResponse.json({ error: "Invalid table" }, { status: 400 });
@@ -42,6 +49,9 @@ export async function POST(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   const { table } = await params;
   if (!VALID.includes(table)) {
     return NextResponse.json({ error: "Invalid table" }, { status: 400 });

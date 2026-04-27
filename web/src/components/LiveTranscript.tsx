@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, Square, BrainCircuit } from "lucide-react";
+import { BrainCircuit, Mic, MonitorSpeaker, Square, TriangleAlert } from "lucide-react";
 import type { TranscriptSegment, CoachInsight } from "@/lib/types";
 import { formatDuration } from "@/lib/hooks";
 import CoachPanel from "@/components/CoachPanel";
+import {
+  emptyRecordingDiagnostics,
+  recordingDiagnosticsWarnings,
+  type RecordingDiagnostics,
+  type RecordingSourceDiagnostic,
+} from "@/lib/recording-diagnostics";
 
 const COACH_WIDTH_KEY = "noteai_coach_width";
 
@@ -15,6 +21,7 @@ interface LiveTranscriptProps {
   onStop: () => void;
   capturingTabAudio?: boolean;
   micLevel?: number;
+  diagnostics?: RecordingDiagnostics;
   coachInsights: CoachInsight[];
   coachAnalyzing: boolean;
   coachReplying?: boolean;
@@ -30,6 +37,7 @@ export default function LiveTranscript({
   onStop,
   capturingTabAudio,
   micLevel = 0,
+  diagnostics = emptyRecordingDiagnostics,
   coachInsights,
   coachAnalyzing,
   coachReplying,
@@ -46,6 +54,7 @@ export default function LiveTranscript({
     return !isNaN(width) && width >= 220 && width <= 700 ? width : 300;
   });
   const isDraggingRef = useRef(false);
+  const warnings = recordingDiagnosticsWarnings(diagnostics);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -96,24 +105,22 @@ export default function LiveTranscript({
           <span className="text-2xl font-mono text-danger font-semibold">
             {formatDuration(duration)}
           </span>
-          {/* Mic level meter */}
-          <div className="flex items-center gap-1.5" title="Mic level — bars should move when you speak">
-            <Mic className={`w-4 h-4 ${micLevel > 0.02 ? "text-green-400" : "text-text-tertiary"}`} />
-            <div className="flex items-end gap-[2px] h-5 w-[70px]">
-              {[0.08, 0.18, 0.3, 0.45, 0.6, 0.75].map((threshold, i) => (
-                <div
-                  key={i}
-                  className={`w-[8px] rounded-sm transition-colors ${
-                    micLevel >= threshold
-                      ? i < 3 ? "bg-green-400" : i < 5 ? "bg-yellow-400" : "bg-red-400"
-                      : "bg-border"
-                  }`}
-                  style={{ height: `${(i + 1) * 15}%` }}
-                />
-              ))}
-            </div>
-            {micLevel < 0.02 && (
-              <span className="text-[11px] text-orange-400 font-medium">Silent</span>
+          <div className="flex items-center gap-2">
+            <LevelPill
+              label="Mic"
+              icon={<Mic className={`h-3.5 w-3.5 ${micLevel > 0.02 ? "text-green-400" : "text-text-tertiary"}`} />}
+              diagnostic={{ ...diagnostics.microphone, level: Math.max(diagnostics.microphone.level, micLevel) }}
+            />
+            <LevelPill
+              label="System"
+              icon={<MonitorSpeaker className={`h-3.5 w-3.5 ${diagnostics.systemAudio.level > 0.02 ? "text-green-400" : "text-text-tertiary"}`} />}
+              diagnostic={diagnostics.systemAudio}
+            />
+            {warnings.length > 0 && (
+              <TriangleAlert
+                className="h-4 w-4 text-orange-400"
+                aria-label="Recording diagnostics warning"
+              />
             )}
           </div>
         </div>
@@ -229,9 +236,47 @@ export default function LiveTranscript({
             {capturingTabAudio ? "Tab audio captured" : "Mic only"}
           </span>
         )}
+        {warnings.slice(0, 2).map((warning) => (
+          <span key={warning} className="text-orange-400">
+            {warning}
+          </span>
+        ))}
         {coachEnabled && coachInsights.length > 0 && (
           <span className="text-accent">{coachInsights.length} insights</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function LevelPill({
+  label,
+  icon,
+  diagnostic,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  diagnostic: RecordingSourceDiagnostic;
+}) {
+  const active = diagnostic.status === "capturing";
+  return (
+    <div
+      className={`flex h-8 items-center gap-1.5 rounded-md border px-2 text-[11px] ${
+        active
+          ? "border-border bg-hover text-text-secondary"
+          : "border-orange-400/30 bg-hover/70 text-text-tertiary"
+      }`}
+      title={`${label}: ${diagnostic.status}${diagnostic.reason ? ` — ${diagnostic.reason}` : ""}`}
+    >
+      {icon}
+      <span className="font-medium">{label}</span>
+      <div className="h-1.5 w-12 overflow-hidden rounded-full bg-border">
+        <div
+          className={`h-full rounded-full transition-[width] ${
+            active ? "bg-green-400" : "bg-text-tertiary"
+          }`}
+          style={{ width: `${Math.max(4, diagnostic.level * 100)}%` }}
+        />
       </div>
     </div>
   );

@@ -353,6 +353,6 @@ export type SidebarSelection =
   | { type: "meetingList" }
   | { type: "noteList" }
   | { type: "t5tList" }
-  | { type: "settings" }
+  | { type: "settings"; tab?: "general" | "ai" | "privacy" | "t5t" | "export" | "about" }
   | { type: "liveTranscript" }
   | null;

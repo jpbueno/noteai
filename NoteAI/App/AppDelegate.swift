@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 extension Notification.Name {
     static let toggleRecording = Notification.Name("toggleRecording")
     static let navigateToNote = Notification.Name("navigateToNote")
+    static let navigateToSource = Notification.Name("navigateToSource")
     static let toggleChatPanel = Notification.Name("toggleChatPanel")
 }
 

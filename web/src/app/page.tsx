@@ -13,9 +13,15 @@ import T5TComposer from "@/components/T5TComposer";
 import ChatPanel from "@/components/ChatPanel";
 import Settings from "@/components/Settings";
 import LiveTranscript from "@/components/LiveTranscript";
-import { db, getT5TConfig } from "@/lib/db";
-import type { SidebarSelection, T5TConfig, TaskItem } from "@/lib/types";
+import { db, getSetting, getT5TConfig, isSettingConfigured } from "@/lib/db";
+import type { LLMProvider, SidebarSelection, T5TConfig, TaskItem } from "@/lib/types";
 import { DEFAULT_T5T_CONFIG } from "@/lib/types";
+import {
+  buildOnboardingChecklist,
+  type OnboardingChecklistItem,
+  type OnboardingPermission,
+} from "@/lib/onboarding";
+import type { LibraryQuickFilter } from "@/lib/search";
 import {
   useMeetings,
   useNotes,
@@ -105,6 +111,20 @@ function LoginForm({ clientId, onSuccess }: { clientId: string; onSuccess: () =>
   );
 }
 
+function quickFilterLabel(filter: LibraryQuickFilter) {
+  switch (filter) {
+    case "recent":
+      return "Recent meetings";
+    case "openTodos":
+      return "Open todos";
+    case "unreviewed":
+      return "Unreviewed summaries";
+    case "all":
+    default:
+      return "All workspace";
+  }
+}
+
 export default function Home() {
   const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
   const [googleClientId, setGoogleClientId] = useState("");
@@ -128,7 +148,7 @@ export default function Home() {
   const todos = useTodos();
   const t5tReports = useT5TReports();
   const chatMessages = useChatMessages();
-  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording } = useRecording();
+  const { state: recordingState, duration, liveTranscript, interimText, capturingTabAudio, micLevel, recordingDiagnostics, startRecording, stopRecording } = useRecording();
   const { insights: coachInsights, isAnalyzing: coachAnalyzing, isReplying: coachReplying, enabled: coachEnabled, setEnabled: setCoachEnabled, sendMessage: sendCoachMessage } = useAICoach(liveTranscript, recordingState === "recording");
 
   const [selection, setSelection] = useState<SidebarSelection>(null);
@@ -136,10 +156,26 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(220);
   const [isSidebarDragging, setIsSidebarDragging] = useState(false);
+  const [quickFilter, setQuickFilter] = useState<LibraryQuickFilter>("all");
+  const [onboardingProvider, setOnboardingProvider] = useState<LLMProvider>("openrouter");
+  const [providerKeyConfigured, setProviderKeyConfigured] = useState(false);
+  const [transcriptionKeyConfigured, setTranscriptionKeyConfigured] = useState(false);
+  const [microphonePermission, setMicrophonePermission] = useState<OnboardingPermission>(() =>
+    typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) ? "unknown" : "unsupported",
+  );
+  const [notificationPermission, setNotificationPermission] = useState<OnboardingPermission>(() =>
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported",
+  );
+  const [supportsMediaDevices] = useState(() =>
+    typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia),
+  );
+  const [supportsNotifications] = useState(() =>
+    typeof window !== "undefined" && "Notification" in window,
+  );
   const chatWidth = 360;
 
   const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
-    useSearch(meetings, notes, todos);
+    useSearch(meetings, notes, todos, quickFilter);
 
   // One-time migration: clean up any remaining old TaskItems
   const migrationDone = useRef(false);
@@ -155,6 +191,96 @@ export default function Home() {
       triggerRefresh();
     })();
   }, []);
+
+  const loadOnboardingState = useCallback(async () => {
+    const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
+    const providerConfigured = await isSettingConfigured(`api_key_${provider}`);
+    const groqConfigured = await isSettingConfigured("api_key_groq");
+    const openAIConfigured = await isSettingConfigured("api_key_openai");
+    return {
+      provider,
+      providerConfigured,
+      transcriptionConfigured: groqConfigured || openAIConfigured,
+    };
+  }, []);
+
+  const applyOnboardingState = useCallback(
+    (state: Awaited<ReturnType<typeof loadOnboardingState>>) => {
+      setOnboardingProvider(state.provider);
+      setProviderKeyConfigured(state.providerConfigured);
+      setTranscriptionKeyConfigured(state.transcriptionConfigured);
+    },
+    [],
+  );
+
+  const refreshOnboardingState = useCallback(async () => {
+    applyOnboardingState(await loadOnboardingState());
+  }, [applyOnboardingState, loadOnboardingState]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const state = await loadOnboardingState();
+        if (!cancelled) applyOnboardingState(state);
+      } catch {
+        if (!cancelled) {
+          setProviderKeyConfigured(false);
+          setTranscriptionKeyConfigured(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyOnboardingState, loadOnboardingState]);
+
+  useEffect(() => {
+    if (selection?.type !== "settings") {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const state = await loadOnboardingState();
+          if (!cancelled) applyOnboardingState(state);
+        } catch {}
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [applyOnboardingState, loadOnboardingState, selection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (supportsMediaDevices && navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: "microphone" as PermissionName })
+        .then((status) => {
+          if (cancelled) return;
+          setMicrophonePermission(status.state);
+          status.onchange = () => setMicrophonePermission(status.state);
+        })
+        .catch(() => {
+          if (!cancelled && supportsMediaDevices) setMicrophonePermission("unknown");
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supportsMediaDevices]);
+
+  const onboardingChecklist = buildOnboardingChecklist({
+    provider: onboardingProvider,
+    providerKeyConfigured,
+    transcriptionKeyConfigured,
+    authConfigured: authState === "authenticated",
+    microphonePermission,
+    notificationPermission,
+    supportsMediaDevices,
+    supportsNotifications,
+    meetingCount: meetings.length,
+  });
 
   const handleNewNote = useCallback(async () => {
     const note = {
@@ -225,6 +351,55 @@ export default function Home() {
     setSelection({ type: "t5t", id: report.id });
   }, [todos]);
 
+  const guardedStartRecording = useCallback(
+    (micDeviceId?: string, captureTab = false) => {
+      if (onboardingChecklist.firstRecordingBlocker) {
+        alert(onboardingChecklist.firstRecordingBlocker);
+        setSelection({ type: "settings", tab: "ai" });
+        return;
+      }
+
+      startRecording(micDeviceId, captureTab);
+      setSelection({ type: "liveTranscript" });
+    },
+    [onboardingChecklist.firstRecordingBlocker, startRecording],
+  );
+
+  const handleOnboardingAction = useCallback(
+    async (item: OnboardingChecklistItem) => {
+      if (item.target === "recording") {
+        guardedStartRecording(undefined, true);
+        return;
+      }
+
+      if (item.target === "settings-ai") {
+        setSelection({ type: "settings", tab: "ai" });
+        refreshOnboardingState();
+        return;
+      }
+
+      if (item.target === "settings-general") {
+        setSelection({ type: "settings", tab: "general" });
+        refreshOnboardingState();
+        return;
+      }
+
+      if (item.target === "settings-privacy") {
+        if (
+          item.id === "notifications" &&
+          supportsNotifications &&
+          Notification.permission === "default"
+        ) {
+          const next = await Notification.requestPermission();
+          setNotificationPermission(next);
+        }
+        setSelection({ type: "settings", tab: "privacy" });
+        refreshOnboardingState();
+      }
+    },
+    [guardedStartRecording, refreshOnboardingState, supportsNotifications],
+  );
+
   const handleStopRecording = useCallback(async () => {
     const title = prompt("Meeting name:", `Meeting ${new Date().toLocaleDateString()}`);
     const meeting = await stopRecording(title || undefined);
@@ -277,7 +452,7 @@ export default function Home() {
         if (recordingState === "recording") {
           handleStopRecording();
         } else if (recordingState === "idle") {
-          startRecording();
+          guardedStartRecording();
         }
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
@@ -291,7 +466,7 @@ export default function Home() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [recordingState, startRecording, handleStopRecording]);
+  }, [recordingState, guardedStartRecording, handleStopRecording]);
 
   if (authState === "loading") return null;
   if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
@@ -301,8 +476,10 @@ export default function Home() {
       return (
         <HomeDashboard
           todos={todos}
+          onboardingChecklist={onboardingChecklist}
           onSelect={setSelection}
           onNewTodo={handleNewTodo}
+          onOnboardingAction={handleOnboardingAction}
         />
       );
     }
@@ -316,6 +493,7 @@ export default function Home() {
           onStop={handleStopRecording}
           capturingTabAudio={capturingTabAudio}
           micLevel={micLevel}
+          diagnostics={recordingDiagnostics}
           coachInsights={coachInsights}
           coachAnalyzing={coachAnalyzing}
           coachReplying={coachReplying}
@@ -327,7 +505,7 @@ export default function Home() {
     }
 
     if (selection.type === "settings") {
-      return <Settings />;
+      return <Settings initialTab={selection.tab} />;
     }
 
     if (selection.type === "noteList") {
@@ -429,11 +607,12 @@ export default function Home() {
             onSelect={setSelection}
             searchQuery={query}
             onSearchChange={setQuery}
+            quickFilter={quickFilter}
+            onQuickFilterChange={setQuickFilter}
             recordingState={recordingState}
             recordingDuration={duration}
             onStartRecording={(micDeviceId, captureTab) => {
-              startRecording(micDeviceId, captureTab);
-              setSelection({ type: "liveTranscript" });
+              guardedStartRecording(micDeviceId, captureTab);
             }}
             onStopRecording={handleStopRecording}
             onNewNote={handleNewNote}
@@ -459,7 +638,11 @@ export default function Home() {
                 className="flex h-10 min-w-[340px] max-w-[560px] flex-1 items-center gap-3 rounded-xl border border-border bg-sidebar/70 px-4 text-left text-sm text-text-tertiary hover:border-accent/45 hover:text-text-secondary transition-colors"
               >
                 <Search className="h-4 w-4 text-text-tertiary" />
-                <span>Command + K  Search meetings, notes, tasks...</span>
+                <span className="truncate">
+                  {quickFilter === "all"
+                    ? "Command + K  Search meetings, notes, tasks..."
+                    : `Command + K  ${quickFilterLabel(quickFilter)} filter active`}
+                </span>
               </button>
               <div className="flex items-center gap-2">
                 <button
@@ -501,7 +684,15 @@ export default function Home() {
           <div className="min-w-0 flex-1">
             <ChatPanel
               messages={chatMessages}
+              meetings={meetings}
+              notes={notes}
+              todos={todos}
+              t5tReports={t5tReports}
               onClose={() => setShowChat(false)}
+              onNavigate={(nextSelection) => {
+                setSelection(nextSelection);
+                setShowChat(false);
+              }}
             />
           </div>
         </div>

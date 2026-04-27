@@ -10,6 +10,7 @@ import ScreenCaptureKit
 /// All audio is resampled to 16kHz mono before being delivered to the transcription engine.
 final class AudioCaptureManager: NSObject {
     var onAudioBuffer: ((AVAudioPCMBuffer) -> Void)?
+    var onDiagnosticsChange: ((RecordingDiagnosticsSnapshot) -> Void)?
 
     private var processTap: Any?  // ProcessTapProvider (macOS 14.2+)
     private var scStream: SCStream?
@@ -18,6 +19,8 @@ final class AudioCaptureManager: NSObject {
 
     private let appAudioRing = AudioBufferRing(capacity: 60)
     private let micAudioRing = AudioBufferRing(capacity: 60)
+    private var diagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+    private let diagnosticsLock = NSLock()
 
     private func log(_ msg: String) {
         let logDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -51,6 +54,11 @@ final class AudioCaptureManager: NSObject {
 
     func startCapture() async throws {
         guard !isCapturing else { return }
+        updateDiagnostics { snapshot in
+            snapshot = RecordingDiagnosticsSnapshot.currentPermissions()
+            snapshot.updateCapture(.microphone, status: .idle)
+            snapshot.updateCapture(.systemAudio, status: .idle)
+        }
 
         // Try to capture meeting app audio
         let appCaptureStarted = await startAppAudioCapture()
@@ -60,13 +68,37 @@ final class AudioCaptureManager: NSObject {
         }
 
         // Always start microphone — captures the local user's voice
+        let hasMicAccess = await MicrophoneCaptureManager.requestAccessIfNeeded()
+        updateDiagnostics { snapshot in
+            snapshot.updatePermission(.microphone, status: hasMicAccess ? .granted : .denied)
+        }
+        guard hasMicAccess else {
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.microphone, status: .unavailable("Permission denied"))
+            }
+            writeDiagnosticsLog("Microphone unavailable")
+            throw AudioCaptureError.microphoneAccessDenied
+        }
+
         let mic = MicrophoneCaptureManager()
-        try mic.startCapture { [weak self] buffer in
-            self?.handleMicBuffer(buffer)
+        do {
+            try mic.startCapture { [weak self] buffer in
+                self?.handleMicBuffer(buffer)
+            }
+        } catch {
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.microphone, status: .unavailable(error.localizedDescription))
+            }
+            writeDiagnosticsLog("Microphone start failed")
+            throw error
         }
         microphoneCapture = mic
         isCapturing = true
+        updateDiagnostics { snapshot in
+            snapshot.updateCapture(.microphone, status: .capturing)
+        }
         log("Capture started: mic=true appAudio=\(appCaptureStarted)")
+        writeDiagnosticsLog("Capture started")
         print("[AudioCapture] Capture started (mic + \(appCaptureStarted ? "app audio" : "no app audio"))")
     }
 
@@ -89,6 +121,11 @@ final class AudioCaptureManager: NSObject {
         micAudioRing.clear()
         converterCache.removeAll()
         isCapturing = false
+        updateDiagnostics { snapshot in
+            snapshot.updateCapture(.microphone, status: .idle)
+            snapshot.updateCapture(.systemAudio, status: .idle)
+        }
+        writeDiagnosticsLog("Capture stopped")
         print("[AudioCapture] Capture stopped")
     }
 
@@ -98,8 +135,15 @@ final class AudioCaptureManager: NSObject {
         // Check if we have Screen Recording permission before attempting
         // anything that triggers the system prompt
         let hasScreenPermission = CGPreflightScreenCaptureAccess()
+        updateDiagnostics { snapshot in
+            snapshot.updatePermission(.screenRecording, status: hasScreenPermission ? .granted : .denied)
+        }
         if !hasScreenPermission {
             log("No Screen Recording permission — app audio disabled")
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.systemAudio, status: .unavailable("Screen Recording permission is denied"))
+                snapshot.updatePermission(.processTap, status: .unavailable("Screen Recording permission is denied"))
+            }
             print("[AudioCapture] No Screen Recording permission — skipping app audio, mic only")
             return false
         }
@@ -113,12 +157,23 @@ final class AudioCaptureManager: NSObject {
                         self?.handleAppAudioBuffer(buffer)
                     }
                     processTap = tap
+                    updateDiagnostics { snapshot in
+                        snapshot.updatePermission(.processTap, status: .granted)
+                        snapshot.updateCapture(.systemAudio, status: .capturing)
+                    }
                     log("ProcessTap OK: PID=\(app.processIdentifier) app=\(app.localizedName ?? "unknown")")
                     print("[AudioCapture] ProcessTap capturing PID \(app.processIdentifier) (\(app.localizedName ?? "unknown"))")
                     return true
                 } catch {
+                    updateDiagnostics { snapshot in
+                        snapshot.updatePermission(.processTap, status: .unavailable(error.localizedDescription))
+                    }
                     log("ProcessTap FAILED: \(error)")
                     print("[AudioCapture] ProcessTap failed: \(error) — trying ScreenCaptureKit")
+                }
+            } else {
+                updateDiagnostics { snapshot in
+                    snapshot.updatePermission(.processTap, status: .unavailable("No supported meeting app is running"))
                 }
             }
         }
@@ -128,10 +183,16 @@ final class AudioCaptureManager: NSObject {
         // so it works regardless of which app is producing sound
         do {
             try await startSCKDesktopAudioCapture()
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.systemAudio, status: .capturing)
+            }
             log("ScreenCaptureKit desktop audio OK")
             print("[AudioCapture] ScreenCaptureKit capturing all desktop audio")
             return true
         } catch {
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.systemAudio, status: .unavailable(error.localizedDescription))
+            }
             log("ScreenCaptureKit desktop audio FAILED: \(error)")
             print("[AudioCapture] SCK desktop audio failed: \(error)")
         }
@@ -175,6 +236,9 @@ final class AudioCaptureManager: NSObject {
 
     private func handleAppAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         let resampled = resampleTo16kMono(buffer)
+        updateDiagnostics { snapshot in
+            snapshot.updateLevel(.systemAudio, rms: rms(resampled))
+        }
         appAudioRing.append(resampled)
         if let merged = appAudioRing.mergeIfReady(targetDuration: 7.0) {
             print("[AudioCapture] App audio chunk: \(merged.frameLength) frames, RMS=\(rms(merged))")
@@ -184,6 +248,9 @@ final class AudioCaptureManager: NSObject {
 
     private func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
         let resampled = resampleTo16kMono(buffer)
+        updateDiagnostics { snapshot in
+            snapshot.updateLevel(.microphone, rms: rms(resampled))
+        }
         micAudioRing.append(resampled)
         if let merged = micAudioRing.mergeIfReady(targetDuration: 7.0) {
             print("[AudioCapture] Mic audio chunk: \(merged.frameLength) frames, RMS=\(rms(merged))")
@@ -253,6 +320,21 @@ final class AudioCaptureManager: NSObject {
             sum += s * s
         }
         return sqrt(sum / Float(count))
+    }
+
+    private func updateDiagnostics(_ update: (inout RecordingDiagnosticsSnapshot) -> Void) {
+        diagnosticsLock.lock()
+        update(&diagnostics)
+        let snapshot = diagnostics
+        diagnosticsLock.unlock()
+        onDiagnosticsChange?(snapshot)
+    }
+
+    private func writeDiagnosticsLog(_ event: String) {
+        diagnosticsLock.lock()
+        let snapshot = diagnostics
+        diagnosticsLock.unlock()
+        log("Diagnostics \(event): \(snapshot.troubleshootingLines().joined(separator: " | "))")
     }
 }
 

@@ -123,16 +123,41 @@ struct ChatPanelView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Color.accentColor)
                     .padding(.top, 3)
-                Text(message.content)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(10)
-                    .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 10))
-                    .textSelection(.enabled)
+                assistantBubbleContent(message.content)
                 Spacer(minLength: 40)
             }
         }
         .padding(.horizontal, 12)
+    }
+
+    private func assistantBubbleContent(_ content: String) -> some View {
+        let sourceLinks = extractSourceLinks(from: content)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(content)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .textSelection(.enabled)
+
+            if !sourceLinks.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(sourceLinks, id: \.urlString) { link in
+                        Button {
+                            NotificationCenter.default.post(name: .navigateToSource, object: link.urlString)
+                        } label: {
+                            Text(link.label)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func sendMessage() {
@@ -140,5 +165,27 @@ struct ChatPanelView: View {
         inputText = ""
         chatManager.send(text)
     }
-}
 
+    private func extractSourceLinks(from content: String) -> [SourceChip] {
+        let pattern = #"\[([^\]]+)\]\((noteai://[^)]+)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsRange = NSRange(content.startIndex..<content.endIndex, in: content)
+        var seen = Set<String>()
+        return regex.matches(in: content, range: nsRange).compactMap { match in
+            guard match.numberOfRanges == 3,
+                  let labelRange = Range(match.range(at: 1), in: content),
+                  let urlRange = Range(match.range(at: 2), in: content)
+            else { return nil }
+            let urlString = String(content[urlRange])
+            guard seen.insert(urlString).inserted,
+                  ChatSourceLink(urlString: urlString) != nil
+            else { return nil }
+            return SourceChip(label: String(content[labelRange]), urlString: urlString)
+        }
+    }
+
+    private struct SourceChip {
+        let label: String
+        let urlString: String
+    }
+}

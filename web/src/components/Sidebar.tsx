@@ -26,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
+import type { LibraryQuickFilter } from "@/lib/search";
 
 type CollapsibleSection = "t5t" | "notes" | "todos" | "meetings";
 
@@ -38,6 +39,8 @@ interface SidebarProps {
   onSelect: (sel: SidebarSelection) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  quickFilter: LibraryQuickFilter;
+  onQuickFilterChange: (filter: LibraryQuickFilter) => void;
   recordingState: RecordingState;
   recordingDuration: number;
   onStartRecording: (micDeviceId?: string, captureTab?: boolean) => void;
@@ -60,6 +63,8 @@ export default function Sidebar({
   onSelect,
   searchQuery,
   onSearchChange,
+  quickFilter,
+  onQuickFilterChange,
   recordingState,
   recordingDuration,
   onStartRecording,
@@ -159,6 +164,23 @@ export default function Sidebar({
               <X className="w-2.5 h-2.5" />
             </button>
           )}
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-1">
+          <QuickFilterButton
+            label="Recent"
+            active={quickFilter === "recent"}
+            onClick={() => onQuickFilterChange(quickFilter === "recent" ? "all" : "recent")}
+          />
+          <QuickFilterButton
+            label="Open"
+            active={quickFilter === "openTodos"}
+            onClick={() => onQuickFilterChange(quickFilter === "openTodos" ? "all" : "openTodos")}
+          />
+          <QuickFilterButton
+            label="Unreviewed"
+            active={quickFilter === "unreviewed"}
+            onClick={() => onQuickFilterChange(quickFilter === "unreviewed" ? "all" : "unreviewed")}
+          />
         </div>
       </div>
 
@@ -293,6 +315,31 @@ export default function Sidebar({
         </button>
       </div>
     </div>
+  );
+}
+
+function QuickFilterButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-7 truncate rounded-lg border px-1.5 text-[11px] font-semibold transition-colors ${
+        active
+          ? "border-accent/45 bg-accent/12 text-accent"
+          : "border-border/70 bg-content/35 text-text-tertiary hover:border-accent/30 hover:text-text-secondary"
+      }`}
+      title={label}
+    >
+      {label}
+    </button>
   );
 }
 

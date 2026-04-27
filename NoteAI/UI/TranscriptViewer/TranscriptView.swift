@@ -85,6 +85,8 @@ struct LiveTranscriptView: View {
                 .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(hex: "E03E3E"))
 
+            RecordingDiagnosticsCompactView(snapshot: meetingManager.recordingDiagnostics)
+
             Spacer()
 
             Button {
@@ -211,6 +213,10 @@ struct LiveTranscriptView: View {
         HStack(spacing: 16) {
             Text("\(meetingManager.currentTranscript.count) segments")
             Text(formatDuration(meetingManager.recordingDuration))
+            ForEach(meetingManager.recordingDiagnostics.warnings.prefix(2), id: \.self) { warning in
+                Text(warning)
+                    .foregroundStyle(Color(hex: "FFA94D"))
+            }
             if meetingManager.coachEnabled && !meetingManager.coachInsights.isEmpty {
                 Text("\(meetingManager.coachInsights.count) insights")
                     .foregroundStyle(Color.accentColor)
@@ -232,5 +238,63 @@ struct LiveTranscriptView: View {
             return String(format: "%d:%02d:%02d", h, m, s)
         }
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+struct RecordingDiagnosticsCompactView: View {
+    let snapshot: RecordingDiagnosticsSnapshot
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RecordingLevelPill(
+                title: "Mic",
+                icon: "mic.fill",
+                diagnostic: snapshot.microphone
+            )
+            RecordingLevelPill(
+                title: "System",
+                icon: "speaker.wave.2.fill",
+                diagnostic: snapshot.systemAudio
+            )
+            if !snapshot.warnings.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(hex: "FFA94D"))
+                    .help(snapshot.warnings.joined(separator: "\n"))
+            }
+        }
+    }
+}
+
+struct RecordingLevelPill: View {
+    let title: String
+    let icon: String
+    let diagnostic: RecordingSourceDiagnostic
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.border)
+                    Capsule()
+                        .fill(diagnostic.status.isCapturing ? Color.accentColor : Theme.textTertiary)
+                        .frame(width: max(4, geometry.size.width * diagnostic.level.meterValue))
+                }
+            }
+            .frame(width: 42, height: 5)
+        }
+        .foregroundStyle(diagnostic.status.isCapturing ? Theme.textSecondary : Theme.textTertiary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(diagnostic.status.isCapturing ? Theme.border : Color(hex: "FFA94D").opacity(0.35), lineWidth: 1)
+        )
+        .help(diagnostic.status.diagnosticDescription)
     }
 }

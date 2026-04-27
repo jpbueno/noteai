@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 import { getAll, getById } from "@/lib/server-db";
 
 const STOPWORDS = new Set([
@@ -74,6 +75,9 @@ function getSearchableText(item: Record<string, unknown>, type: string): string 
 }
 
 export async function GET(request: NextRequest) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   try {
     const type = request.nextUrl.searchParams.get("type");
     const id = request.nextUrl.searchParams.get("id");

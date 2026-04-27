@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Search,
   FileText,
@@ -13,6 +14,7 @@ import {
   Plus,
   X,
   LayoutDashboard,
+  ChevronDown,
 } from "lucide-react";
 
 import type {
@@ -24,6 +26,8 @@ import type {
 } from "@/lib/types";
 import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
+
+type CollapsibleSection = "t5t" | "notes" | "todos" | "meetings";
 
 interface SidebarProps {
   meetings: Meeting[];
@@ -68,8 +72,22 @@ export default function Sidebar({
   onDeleteTodo,
   onDeleteT5T,
 }: SidebarProps) {
+  const [collapsedSections, setCollapsedSections] = useState<Record<CollapsibleSection, boolean>>({
+    t5t: false,
+    notes: false,
+    todos: false,
+    meetings: false,
+  });
+
   const isSelected = (type: string, id: string) =>
     selection?.type === type && "id" in selection && selection.id === id;
+
+  const toggleSection = (section: CollapsibleSection) => {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  };
 
   return (
     <div className="flex flex-col h-full bg-sidebar select-none pt-[58px]">
@@ -161,7 +179,13 @@ export default function Sidebar({
         </div>
 
         {/* T5T Reports */}
-        <SidebarSection title="T5T Reports" icon={ListChecks} action={{ label: "New", onClick: onNewT5T }} onTitleClick={() => onSelect({ type: "t5tList" })}>
+        <SidebarSection
+          title="T5T Reports"
+          icon={ListChecks}
+          action={{ label: "New", onClick: onNewT5T }}
+          collapsed={collapsedSections.t5t}
+          onToggle={() => toggleSection("t5t")}
+        >
           {t5tReports.map((r) => (
             <SidebarItem
               key={r.id}
@@ -176,7 +200,13 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Notes */}
-        <SidebarSection title="Notes" icon={StickyNote} action={{ label: "New", onClick: onNewNote }} onTitleClick={() => onSelect({ type: "noteList" })}>
+        <SidebarSection
+          title="Notes"
+          icon={StickyNote}
+          action={{ label: "New", onClick: onNewNote }}
+          collapsed={collapsedSections.notes}
+          onToggle={() => toggleSection("notes")}
+        >
           {notes.map((n) => (
             <SidebarItem
               key={n.id}
@@ -191,7 +221,13 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Todos */}
-        <SidebarSection title="Todos" icon={CheckSquare} action={{ label: "New", onClick: onNewTodo }} onTitleClick={() => onSelect(null)}>
+        <SidebarSection
+          title="Todos"
+          icon={CheckSquare}
+          action={{ label: "New", onClick: onNewTodo }}
+          collapsed={collapsedSections.todos}
+          onToggle={() => toggleSection("todos")}
+        >
           {todos.map((t) => {
             const todayMidnight = new Date();
             todayMidnight.setHours(0, 0, 0, 0);
@@ -220,7 +256,12 @@ export default function Sidebar({
         </SidebarSection>
 
         {/* Meetings */}
-        <SidebarSection title="Meetings" icon={AudioWaveform} onTitleClick={() => onSelect({ type: "meetingList" })}>
+        <SidebarSection
+          title="Meetings"
+          icon={AudioWaveform}
+          collapsed={collapsedSections.meetings}
+          onToggle={() => toggleSection("meetings")}
+        >
           {meetings.map((m) => (
             <SidebarItem
               key={m.id}
@@ -259,27 +300,37 @@ function SidebarSection({
   title,
   icon: Icon,
   action,
-  onTitleClick,
+  collapsed,
+  onToggle,
   children,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   action?: { label: string; onClick: () => void };
-  onTitleClick?: () => void;
+  collapsed: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <div className="flex items-center px-4 pt-4 pb-1.5">
-        <div
-          className={`flex items-center gap-1.5 flex-1 ${onTitleClick ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-          onClick={onTitleClick}
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-1.5 rounded-lg py-0.5 text-left transition-opacity hover:opacity-80"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          title={collapsed ? `Expand ${title}` : `Collapse ${title}`}
         >
+          <ChevronDown
+            className={`h-3 w-3 flex-shrink-0 text-text-tertiary transition-transform duration-150 ${
+              collapsed ? "-rotate-90" : ""
+            }`}
+          />
           <Icon className="w-3.5 h-3.5 text-text-tertiary" />
           <span className="text-[11px] font-bold text-text-tertiary uppercase tracking-[0.14em]">
             {title}
           </span>
-        </div>
+        </button>
         {action && (
           <button
             onClick={action.onClick}
@@ -290,7 +341,7 @@ function SidebarSection({
           </button>
         )}
       </div>
-      {children}
+      {!collapsed && children}
     </div>
   );
 }

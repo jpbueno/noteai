@@ -501,7 +501,15 @@ export default function Home() {
           <div className="min-w-0 flex-1">
             <ChatPanel
               messages={chatMessages}
+              meetings={meetings}
+              notes={notes}
+              todos={todos}
+              t5tReports={t5tReports}
               onClose={() => setShowChat(false)}
+              onNavigate={(nextSelection) => {
+                setSelection(nextSelection);
+                setShowChat(false);
+              }}
             />
           </div>
         </div>

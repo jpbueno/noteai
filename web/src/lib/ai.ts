@@ -1,6 +1,8 @@
 import type { LLMProvider, MeetingTemplate, MeetingSummary, CoachInsight, CoachInsightType } from "./types";
 import { getSetting } from "./db";
 
+const CLIENT_CHAT_TIMEOUT_MS = 75_000;
+
 async function proxyChat(params: {
   provider: string;
   model: string;
@@ -8,16 +10,34 @@ async function proxyChat(params: {
   temperature?: number;
   maxTokens?: number;
 }): Promise<string> {
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CLIENT_CHAT_TIMEOUT_MS);
 
-  const data = await response.json();
+  let response: Response;
+  try {
+    response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("AI copilot request timed out. Try again or choose a faster model.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
-  if (!response.ok || data.error) {
-    throw new Error(data.error || `Request failed (${response.status})`);
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || data?.error) {
+    throw new Error(data?.error || `Request failed (${response.status})`);
+  }
+
+  if (typeof data?.content !== "string" || !data.content) {
+    throw new Error("AI copilot returned an empty response.");
   }
 
   return data.content;

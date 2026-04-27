@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
 
 const TTS_ENDPOINTS: Record<string, { url: string; model: string }> = {
@@ -15,6 +16,9 @@ const TTS_ENDPOINTS: Record<string, { url: string; model: string }> = {
 const MAX_TTS_CHARS = 4096;
 
 export async function POST(request: NextRequest) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   try {
     const { text, voice = "nova" } = await request.json();
 

@@ -5,12 +5,13 @@ import { test } from "node:test";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 test("web auth fails closed unless an explicit non-production bypass is enabled", () => {
-  const middleware = read("./src/middleware.ts");
+  const apiAuth = read("./src/lib/api-auth.ts");
   const authRoute = read("./src/app/api/auth/route.ts");
   const security = read("./src/lib/security.ts");
 
   assert.match(security, /NOTEAI_DISABLE_AUTH/);
-  assert.doesNotMatch(middleware, /if \(!secret \|\| !clientId\) return NextResponse\.next\(\)/);
+  assert.doesNotMatch(apiAuth, /if \(!secret \|\| !clientId\) return null/);
+  assert.match(apiAuth, /Authentication is not configured/);
   assert.match(authRoute, /isExplicitAuthBypassEnabled/);
 });
 
@@ -22,11 +23,13 @@ test("local browser auth bypass is reflected in the auth status endpoint", () =>
 });
 
 test("release health endpoint is public and non-sensitive", () => {
-  const middleware = read("./src/middleware.ts");
   const healthRoute = read("./src/app/api/health/route.ts");
 
-  assert.match(middleware, /pathname\.startsWith\("\/api\/health"\)/);
+  assert.equal(existsSync(new URL("./src/middleware.ts", import.meta.url)), false);
+  assert.equal(existsSync(new URL("./src/proxy.ts", import.meta.url)), false);
   assert.match(healthRoute, /ok:\s*true/);
+  assert.match(healthRoute, /service:\s*"noteai-web"/);
+  assert.doesNotMatch(healthRoute, /requireApiAuth/);
   assert.doesNotMatch(healthRoute, /process\.env/);
 });
 
@@ -55,12 +58,12 @@ test("missing Turso config uses a non-production local persistence fallback only
 });
 
 test("programmatic API auth is not derived from NOTEAI_AUTH_SECRET", () => {
-  const middleware = read("./src/middleware.ts");
+  const apiAuth = read("./src/lib/api-auth.ts");
   const apiKeyRoute = read("./src/app/api/auth/apikey/route.ts");
   const security = read("./src/lib/security.ts");
 
   assert.match(security, /NOTEAI_API_KEY_HASHES/);
-  assert.doesNotMatch(middleware, /hmacSign\("noteai-api-key",\s*secret\)/);
+  assert.doesNotMatch(apiAuth, /hmacSign\("noteai-api-key",\s*secret\)/);
   assert.doesNotMatch(apiKeyRoute, /return NextResponse\.json\(\{\s*apiKey/);
 });
 
@@ -124,11 +127,34 @@ test("Google Docs sync feature is removed from the web app", () => {
 
 test("NVIDIA provider uses current API catalog endpoint and model IDs", () => {
   const chatRoute = read("./src/app/api/chat/route.ts");
+  const nextConfig = read("./next.config.ts");
   const settings = read("./src/components/Settings.tsx");
 
   assert.match(chatRoute, /https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/);
+  assert.match(nextConfig, /https:\/\/integrate\.api\.nvidia\.com/);
+  assert.doesNotMatch(nextConfig, /inference-api\.nvidia\.com/);
   assert.doesNotMatch(chatRoute, /inference-api\.nvidia\.com/);
   assert.match(settings, /nvidia\/llama-3\.3-nemotron-super-49b-v1\.5/);
   assert.doesNotMatch(settings, /nvcf\/nvidia/);
   assert.doesNotMatch(settings, /azure\/anthropic/);
+});
+
+test("web app exposes a lightweight release health endpoint", () => {
+  const healthRoute = read("./src/app/api/health/route.ts");
+
+  assert.match(healthRoute, /ok:\s*true/);
+  assert.match(healthRoute, /service:\s*"noteai-web"/);
+  assert.doesNotMatch(healthRoute, /requireApiAuth/);
+});
+
+test("web API auth avoids unsupported Next request interception on Cloudflare", () => {
+  const apiAuth = read("./src/lib/api-auth.ts");
+  const dataRoute = read("./src/app/api/data/[table]/route.ts");
+  const chatRoute = read("./src/app/api/chat/route.ts");
+
+  assert.equal(existsSync(new URL("./src/middleware.ts", import.meta.url)), false);
+  assert.equal(existsSync(new URL("./src/proxy.ts", import.meta.url)), false);
+  assert.match(apiAuth, /export async function requireApiAuth/);
+  assert.match(dataRoute, /requireApiAuth/);
+  assert.match(chatRoute, /requireApiAuth/);
 });

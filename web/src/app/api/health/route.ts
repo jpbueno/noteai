@@ -4,5 +4,6 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "noteai-web",
+    timestamp: new Date().toISOString(),
   });
 }

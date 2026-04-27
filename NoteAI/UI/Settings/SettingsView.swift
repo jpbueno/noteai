@@ -1,7 +1,8 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
-    @State private var selectedTab: SettingsTab = .account
+    @State private var selectedTab: SettingsTab
     @State private var hasChanges = false
 
     enum SettingsTab: String, CaseIterable, Identifiable {
@@ -26,6 +27,10 @@ struct SettingsView: View {
             case .t5t: return "list.bullet.rectangle"
             }
         }
+    }
+
+    init(initialTab: SettingsTab = .account) {
+        _selectedTab = State(initialValue: initialTab)
     }
 
     var body: some View {
@@ -160,6 +165,7 @@ struct GeneralSettingsView: View {
     @AppStorage("autoDetectMeetings") private var autoDetect = false
     @AppStorage("autoStopSilenceDuration") private var autoStopDuration = 60.0
     @AppStorage("globalShortcutEnabled") private var globalShortcutEnabled = true
+    @StateObject private var testCapture = RecordingDiagnosticsTestCapture()
 
     var body: some View {
         Form {
@@ -186,9 +192,197 @@ struct GeneralSettingsView: View {
             Section("Recording") {
                 Toggle("Enable global shortcut (Cmd+Shift+R)", isOn: $globalShortcutEnabled)
             }
+
+            Section("Notifications") {
+                NotificationPermissionSetupView()
+            }
+
+            Section("Recording Diagnostics") {
+                RecordingDiagnosticsSettingsView(snapshot: testCapture.snapshot)
+
+                if let error = testCapture.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color(hex: "FFA94D"))
+                }
+
+                HStack {
+                    Button {
+                        testCapture.isRunning ? testCapture.stop() : testCapture.start()
+                    } label: {
+                        Label(
+                            testCapture.isRunning ? "Stop Test Capture" : "Run Test Capture",
+                            systemImage: testCapture.isRunning ? "stop.fill" : "waveform"
+                        )
+                    }
+
+                    Text(testCapture.isRunning ? "Listening for mic and system levels..." : "Runs a short local capture check without saving audio.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+private struct NotificationPermissionSetupView: View {
+    @State private var statusText = "Checking..."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Summary notifications")
+                Spacer()
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Request Notification Access") {
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+                    refresh()
+                }
+            }
+
+            Text("NoteAI uses notifications for completed summaries and processing alerts. Recording works without this permission.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear(perform: refresh)
+    }
+
+    private func refresh() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let label: String
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                label = "Allowed"
+            case .denied:
+                label = "Denied"
+            case .notDetermined:
+                label = "Not requested"
+            @unknown default:
+                label = "Unknown"
+            }
+            Task { @MainActor in
+                statusText = label
+            }
+        }
+    }
+}
+
+@MainActor
+final class RecordingDiagnosticsTestCapture: ObservableObject {
+    @Published var snapshot = RecordingDiagnosticsSnapshot.currentPermissions()
+    @Published var isRunning = false
+    @Published var errorMessage: String?
+
+    private var manager: AudioCaptureManager?
+    private var stopTask: Task<Void, Never>?
+
+    func start() {
+        guard !isRunning else { return }
+        errorMessage = nil
+        let manager = AudioCaptureManager()
+        manager.onDiagnosticsChange = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.snapshot = snapshot
+            }
+        }
+        manager.onAudioBuffer = { _ in }
+        self.manager = manager
+        isRunning = true
+
+        Task {
+            do {
+                try await manager.startCapture()
+                stopTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    await self?.stop()
+                }
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.isRunning = false
+                self.manager = nil
+            }
+        }
+    }
+
+    func stop() {
+        stopTask?.cancel()
+        stopTask = nil
+        manager?.stopCapture()
+        manager = nil
+        isRunning = false
+        snapshot = RecordingDiagnosticsSnapshot.currentPermissions()
+    }
+}
+
+private struct RecordingDiagnosticsSettingsView: View {
+    let snapshot: RecordingDiagnosticsSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RecordingDiagnosticsRow(
+                title: "Microphone",
+                icon: "mic.fill",
+                diagnostic: snapshot.microphone
+            )
+            RecordingDiagnosticsRow(
+                title: "System audio",
+                icon: "speaker.wave.2.fill",
+                diagnostic: snapshot.systemAudio
+            )
+
+            ForEach(snapshot.warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color(hex: "FFA94D"))
+            }
+        }
+    }
+}
+
+private struct RecordingDiagnosticsRow: View {
+    let title: String
+    let icon: String
+    let diagnostic: RecordingSourceDiagnostic
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .frame(width: 18)
+            Text(title)
+                .frame(width: 105, alignment: .leading)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(nsColor: .separatorColor).opacity(0.35))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(diagnostic.status.isCapturing ? Color.accentColor : Theme.textTertiary)
+                        .frame(width: max(5, geometry.size.width * diagnostic.level.meterValue))
+                }
+            }
+            .frame(height: 8)
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .trailing)
+        }
+        .font(.system(size: 12))
+    }
+
+    private var statusText: String {
+        switch diagnostic.status {
+        case .idle:
+            return "Idle"
+        case .capturing:
+            return "Capturing"
+        case .unavailable:
+            return "Unavailable"
+        }
     }
 }
 

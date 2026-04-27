@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
 
 // Whisper-compatible endpoints, tried in order
@@ -19,6 +20,9 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_PROMPT_CHARS = 1_000;
 
 export async function POST(request: NextRequest) {
+  const authError = await requireApiAuth(request);
+  if (authError) return authError;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as Blob | null;

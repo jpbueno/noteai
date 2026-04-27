@@ -44,8 +44,8 @@ jobs:
       - name: Typecheck web app
         run: npx tsc --noEmit --pretty false
 
-      - name: Run security regression tests
-        run: node --test security-regression.test.mjs
+      - name: Run web regression tests
+        run: node --test *.test.mjs
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high

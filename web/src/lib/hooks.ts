@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import { AudioRecorder, type RecordingState } from "./audio";
 import { summarizeTranscript, transcribeAudio } from "./ai";
+import { applyLibraryFilters, type LibraryQuickFilter } from "./search";
+import { emptyRecordingDiagnostics, type RecordingDiagnostics } from "./recording-diagnostics";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -84,35 +86,15 @@ export function useSelection() {
 export function useSearch(
   meetings: Meeting[],
   notes: Note[],
-  todos: TodoItem[]
+  todos: TodoItem[],
+  quickFilter: LibraryQuickFilter = "all"
 ) {
   const [query, setQuery] = useState("");
-  const q = query.toLowerCase().trim();
-
-  const filteredMeetings = q
-    ? meetings.filter(
-        (m) =>
-          m.title.toLowerCase().includes(q) ||
-          m.transcript.some((s) => s.text.toLowerCase().includes(q))
-      )
-    : meetings;
-
-  const filteredNotes = q
-    ? notes.filter(
-        (n) =>
-          n.title.toLowerCase().includes(q) ||
-          n.content.toLowerCase().includes(q) ||
-          n.tags.some((t) => t.toLowerCase().includes(q))
-      )
-    : notes;
-
-  const filteredTodos = q
-    ? todos.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q)
-      )
-    : todos;
+  const {
+    meetings: filteredMeetings,
+    notes: filteredNotes,
+    todos: filteredTodos,
+  } = applyLibraryFilters({ meetings, notes, todos }, { query, quickFilter });
 
   return { query, setQuery, filteredMeetings, filteredNotes, filteredTodos };
 }
@@ -128,6 +110,7 @@ export function useRecording() {
   const [interimText, setInterimText] = useState("");
   const [capturingTabAudio, setCapturingTabAudio] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  const [recordingDiagnostics, setRecordingDiagnostics] = useState<RecordingDiagnostics>(emptyRecordingDiagnostics);
 
   const startRecording = useCallback(async (micDeviceId?: string, captureTab = false) => {
     try {
@@ -157,11 +140,14 @@ export function useRecording() {
         }
       }, micDeviceId, captureTab, (level) => {
         setMicLevel(level);
+      }, (diagnostics) => {
+        setRecordingDiagnostics(diagnostics);
       });
 
       recorderRef.current = recorder;
       setState("recording");
       setCapturingTabAudio(recorder.capturingTabAudio);
+      setRecordingDiagnostics(recorder.diagnosticSnapshot);
       setDuration(0);
       setLiveTranscript([]);
       setInterimText("");
@@ -173,6 +159,7 @@ export function useRecording() {
       console.error("Failed to start recording:", err);
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Recording failed:\n\n${msg}`);
+      setRecordingDiagnostics(emptyRecordingDiagnostics);
     }
   }, []);
 
@@ -188,6 +175,7 @@ export function useRecording() {
       setState("processing");
       const hadTabAudio = recorderRef.current.capturingTabAudio;
       const audioBlob = recorderRef.current.stop();
+      setRecordingDiagnostics(recorderRef.current.diagnosticSnapshot);
       recorderRef.current = null;
       const recordedDuration = duration;
       const liveSegments = [...liveTranscript];
@@ -244,6 +232,7 @@ export function useRecording() {
         triggerRefresh();
         setState("idle");
         setDuration(0);
+        setRecordingDiagnostics(emptyRecordingDiagnostics);
         return meeting;
       }
 
@@ -267,6 +256,7 @@ export function useRecording() {
       triggerRefresh();
       setState("idle");
       setDuration(0);
+      setRecordingDiagnostics(emptyRecordingDiagnostics);
       return meeting;
     },
     [duration, liveTranscript]
@@ -278,7 +268,7 @@ export function useRecording() {
     };
   }, []);
 
-  return { state, duration, liveTranscript, interimText, capturingTabAudio, micLevel, startRecording, stopRecording };
+  return { state, duration, liveTranscript, interimText, capturingTabAudio, micLevel, recordingDiagnostics, startRecording, stopRecording };
 }
 
 export function formatDuration(seconds: number): string {

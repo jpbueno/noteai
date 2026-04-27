@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum SidebarSelection: Hashable {
     case home
@@ -118,6 +119,21 @@ struct MeetingLibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .navigateToNote)) { notification in
             if let noteID = notification.object as? UUID {
                 selection = .note(noteID)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToSource)) { notification in
+            guard let urlString = notification.object as? String,
+                  let link = ChatSourceLink(urlString: urlString)
+            else { return }
+            switch link.kind {
+            case .meeting:
+                selection = .meeting(link.id)
+            case .note:
+                selection = .note(link.id)
+            case .task:
+                selection = .task(link.id)
+            case .t5t:
+                selection = .t5tReport(link.id)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleChatPanel)) { _ in
@@ -501,6 +517,7 @@ struct MeetingLibraryView: View {
                 selection = .task(task.id)
             }
             Button("Export as Markdown") { exportMeeting(meeting) }
+            Button("Export as PDF") { exportMeetingPDF(meeting) }
             Divider()
             Button("Delete", role: .destructive) {
                 if selection == .meeting(meeting.id) { selection = nil }
@@ -721,9 +738,11 @@ struct MeetingLibraryView: View {
         if meetingManager.state == .processing {
             processingView
         } else if case .home = selection {
-            HomeDashboardView(meetingManager: meetingManager) { id in
-                selection = .todo(id)
-            }
+            HomeDashboardView(
+                meetingManager: meetingManager,
+                onSelectTodo: { id in selection = .todo(id) },
+                onOnboardingAction: handleOnboardingAction
+            )
         } else if case .todo(let id) = selection,
                   let index = meetingManager.todos.firstIndex(where: { $0.id == id }) {
             TodoDetailView(
@@ -880,8 +899,31 @@ struct MeetingLibraryView: View {
         return String(format: "%02d:%02d", mins, secs)
     }
 
-    private func openSettings() {
+    private func handleOnboardingAction(_ item: OnboardingChecklistItem) {
+        switch item.actionTarget {
+        case .startRecording:
+            meetingManager.startRecording()
+        case .openGeneralSettings:
+            if item.id == .notifications {
+                meetingManager.requestNotificationPermissionForOnboarding()
+            }
+            openSettings(initialTab: .general)
+        case .openAISettings:
+            openSettings(initialTab: .ai)
+        case .openAccountSettings:
+            openSettings(initialTab: .account)
+        case .openPrivacySettings:
+            openSettings(initialTab: .privacy)
+        case .openSystemPrivacySettings:
+            openSystemPrivacySettings()
+        case .none:
+            break
+        }
+    }
+
+    private func openSettings(initialTab: SettingsView.SettingsTab = .account) {
         if let existing = settingsWindow, existing.isVisible {
+            existing.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab))
             existing.makeKeyAndOrderFront(nil)
             return
         }
@@ -892,20 +934,39 @@ struct MeetingLibraryView: View {
             defer: false
         )
         window.title = "NoteAI Settings"
-        window.contentView = NSHostingView(rootView: SettingsView())
+        window.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
         settingsWindow = window
     }
 
+    private func openSystemPrivacySettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        if let url {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func exportMeeting(_ meeting: Meeting) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.text]
-        panel.nameFieldStringValue = "\(meeting.title).md"
+        panel.nameFieldStringValue = ExportManager.markdownFilename(for: meeting)
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             try? ExportManager.exportAsMarkdown(meeting).write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func exportMeetingPDF(_ meeting: Meeting) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = ExportManager.pdfFilename(for: meeting)
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            if let pdfData = try? ExportManager.exportAsPDFData(meeting) {
+                try? pdfData.write(to: url, options: .atomic)
+            }
         }
     }
 }

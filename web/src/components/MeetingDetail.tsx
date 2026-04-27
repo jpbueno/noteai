@@ -16,6 +16,7 @@ import {
 import type { Meeting, ActionItem, SidebarSelection } from "@/lib/types";
 import { formatDuration, formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { db } from "@/lib/db";
+import { generateMeetingMarkdown, meetingMarkdownFilename, printMeetingPdf } from "@/lib/exports";
 import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
 
@@ -57,19 +58,23 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(
-      activeTab === "raw" ? rawText : generateMarkdown(meeting)
+      activeTab === "raw" ? rawText : generateMeetingMarkdown(meeting, { formatDateTime })
     );
   };
 
   const downloadMarkdown = () => {
-    const md = generateMarkdown(meeting);
+    const md = generateMeetingMarkdown(meeting, { formatDateTime });
     const blob = new Blob([md], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${meeting.title}.md`;
+    a.download = meetingMarkdownFilename(meeting);
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportPdf = () => {
+    printMeetingPdf(meeting, { formatDateTime });
   };
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -130,6 +135,13 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
             >
               <Download className="w-3.5 h-3.5" />
               Export .md
+            </button>
+            <button
+              onClick={exportPdf}
+              className="v4-soft-button flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export PDF
             </button>
             <ReadAloudButton
               state={tts.state}
@@ -323,49 +335,4 @@ function formatTimestamp(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function generateMarkdown(meeting: Meeting): string {
-  const lines: string[] = [];
-  lines.push(`# ${meeting.title}\n`);
-  lines.push(`**Date:** ${formatDateTime(meeting.date)}`);
-  lines.push(`**Duration:** ${formatDuration(meeting.duration)}\n`);
-
-  const { summary } = meeting;
-  if (summary.wasSummarized) {
-    lines.push("## Summary\n");
-    if (summary.decisions.length > 0) {
-      lines.push("### Key Decisions");
-      summary.decisions.forEach((d) => lines.push(`- ${d}`));
-      lines.push("");
-    }
-    if (summary.actionItems.length > 0) {
-      lines.push("### Action Items");
-      summary.actionItems.forEach((ai) => {
-        const check = ai.isCompleted ? "x" : " ";
-        const meta = [ai.owner && `@${ai.owner}`, ai.deadline && `due ${ai.deadline}`].filter(Boolean).join(", ");
-        lines.push(`- [${check}] ${ai.task}${meta ? ` (${meta})` : ""}`);
-      });
-      lines.push("");
-    }
-    if (summary.topics.length > 0) {
-      lines.push("### Topics");
-      summary.topics.forEach((t) => lines.push(`- ${t}`));
-      lines.push("");
-    }
-    if (summary.openQuestions.length > 0) {
-      lines.push("### Open Questions");
-      summary.openQuestions.forEach((q) => lines.push(`- ${q}`));
-      lines.push("");
-    }
-  }
-
-  lines.push("## Transcript\n");
-  meeting.transcript.forEach((seg) => {
-    const speaker = seg.speaker ? `**${seg.speaker}:** ` : "";
-    const ts = seg.startTime > 0 ? `[${formatTimestamp(seg.startTime)}] ` : "";
-    lines.push(`${ts}${speaker}${seg.text}`);
-  });
-
-  return lines.join("\n");
 }

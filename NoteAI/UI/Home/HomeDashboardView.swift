@@ -5,6 +5,7 @@ import SwiftUI
 struct HomeDashboardView: View {
     @ObservedObject var meetingManager: MeetingManager
     let onSelectTodo: (UUID) -> Void
+    let onOnboardingAction: (OnboardingChecklistItem) -> Void
 
     private var grouped: (overdue: [TodoItem], today: [TodoItem], upcoming: [TodoItem], noDueDate: [TodoItem], completed: [TodoItem]) {
         var overdue: [TodoItem] = []
@@ -45,6 +46,7 @@ struct HomeDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                onboardingPanel
 
                 if meetingManager.todos.isEmpty {
                     emptyState
@@ -107,6 +109,110 @@ struct HomeDashboardView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 50)
+    }
+
+    private var onboardingPanel: some View {
+        let checklist = meetingManager.onboardingChecklist
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Setup checklist")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("\(checklist.completedCount)/\(checklist.totalCount) complete · \(checklist.requiredReady ? "ready for capture" : "finish required items before the first recording")")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Spacer()
+                Text(checklist.requiredReady ? "Ready" : "Setup needed")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(checklist.requiredReady ? Color(hex: "3BB273") : Color(hex: "E8974F"))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        (checklist.requiredReady ? Color(hex: "3BB273") : Color(hex: "E8974F")).opacity(0.13),
+                        in: Capsule()
+                    )
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 8)], spacing: 8) {
+                ForEach(checklist.items) { item in
+                    onboardingRow(item)
+                }
+            }
+        }
+        .padding(14)
+        .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+        .onAppear {
+            meetingManager.refreshOnboardingChecklistState()
+        }
+    }
+
+    private func onboardingRow(_ item: OnboardingChecklistItem) -> some View {
+        Button {
+            onOnboardingAction(item)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: onboardingIcon(for: item.status))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(onboardingColor(for: item.status))
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(item.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if item.required {
+                            Text("Required")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    Text(item.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(2)
+                    if let actionLabel = item.actionLabel,
+                       item.status != .complete,
+                       item.status != .blocked,
+                       item.status != .unsupported {
+                        Text(actionLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+            .background(Theme.contentBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(item.status == .complete || item.status == .blocked || item.status == .unsupported)
+    }
+
+    private func onboardingIcon(for status: OnboardingItemStatus) -> String {
+        switch status {
+        case .complete: return "checkmark.circle.fill"
+        case .needsAction: return "circle"
+        case .blocked, .unsupported: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func onboardingColor(for status: OnboardingItemStatus) -> Color {
+        switch status {
+        case .complete: return Color(hex: "3BB273")
+        case .needsAction: return Theme.textTertiary
+        case .blocked, .unsupported: return Color(hex: "E8974F")
+        }
     }
 
     @ViewBuilder

@@ -1,17 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  User,
-  Settings as SettingsIcon,
-  FileText,
-  Shield,
-  ListChecks,
   Download,
-  Loader2,
   Eye,
   EyeOff,
+  FileText,
+  ListChecks,
+  Loader2,
+  Mic,
+  MonitorSpeaker,
+  Play,
   Save,
+  Settings as SettingsIcon,
+  Shield,
+  Square,
+  TriangleAlert,
+  User,
 } from "lucide-react";
 import type { LLMProvider, MeetingTemplate, T5TConfig } from "@/lib/types";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
@@ -19,6 +24,13 @@ import { LLM_PROVIDERS, MEETING_TEMPLATES, DEFAULT_T5T_CONFIG } from "@/lib/type
 import { db, getSetting, isSettingConfigured, setSetting, getT5TConfig, saveT5TConfig } from "@/lib/db";
 import { triggerRefresh } from "@/lib/hooks";
 import { TTS_VOICES, type TTSVoice } from "@/lib/tts";
+import { AudioRecorder } from "@/lib/audio";
+import {
+  emptyRecordingDiagnostics,
+  recordingDiagnosticsWarnings,
+  type RecordingDiagnostics,
+  type RecordingSourceDiagnostic,
+} from "@/lib/recording-diagnostics";
 
 type SettingsTab =
   | "general"
@@ -68,8 +80,8 @@ const POPULAR_MODELS: Record<LLMProvider, { id: string; name: string }[]> = {
   ],
 };
 
-export default function Settings() {
-  const [tab, setTab] = useState<SettingsTab>("ai");
+export default function Settings({ initialTab = "ai" }: { initialTab?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [provider, setProvider] = useState<LLMProvider>("openrouter");
   const [model, setModel] = useState("anthropic/claude-sonnet-4");
   const [customModel, setCustomModel] = useState("");
@@ -93,6 +105,10 @@ export default function Settings() {
   const [groqConfigured, setGroqConfigured] = useState(false);
   const [showGroqKey, setShowGroqKey] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     (async () => {
@@ -384,6 +400,9 @@ export default function Settings() {
                   </div>
                 </div>
               </Section>
+              <Section title="Recording Diagnostics">
+                <RecordingDiagnosticsTestPanel />
+              </Section>
             </div>
           )}
 
@@ -631,6 +650,144 @@ export default function Settings() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RecordingDiagnosticsTestPanel() {
+  const recorderRef = useRef<AudioRecorder | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [diagnostics, setDiagnostics] = useState<RecordingDiagnostics>(emptyRecordingDiagnostics);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const warnings = recordingDiagnosticsWarnings(diagnostics);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      recorderRef.current?.stop();
+    };
+  }, []);
+
+  const stop = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRunning(false);
+  };
+
+  const start = async () => {
+    if (running) {
+      stop();
+      return;
+    }
+
+    setError(null);
+    setDiagnostics(emptyRecordingDiagnostics);
+    const recorder = new AudioRecorder();
+    recorderRef.current = recorder;
+    setRunning(true);
+
+    try {
+      await recorder.start(
+        undefined,
+        undefined,
+        true,
+        undefined,
+        setDiagnostics
+      );
+      timerRef.current = setTimeout(stop, 6000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDiagnostics(recorder.diagnosticSnapshot);
+      recorderRef.current = null;
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <RecordingDiagnosticRow
+          label="Microphone"
+          icon={<Mic className="h-4 w-4" />}
+          diagnostic={diagnostics.microphone}
+        />
+        <RecordingDiagnosticRow
+          label="System audio"
+          icon={<MonitorSpeaker className="h-4 w-4" />}
+          diagnostic={diagnostics.systemAudio}
+        />
+      </div>
+
+      {(error || warnings.length > 0) && (
+        <div className="space-y-1 text-xs text-orange-400">
+          {error && (
+            <div className="flex gap-2">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+          {warnings.map((warning) => (
+            <div key={warning} className="flex gap-2">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>{warning}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={start}
+          className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            running
+              ? "bg-danger/20 text-danger hover:bg-danger/30"
+              : "bg-hover text-text-secondary hover:bg-selected"
+          }`}
+        >
+          {running ? <Square className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5" />}
+          {running ? "Stop Test Capture" : "Run Test Capture"}
+        </button>
+        <span className="text-xs text-text-tertiary">
+          {running ? "Checking live browser capture levels..." : "Prompts for mic and tab audio, then discards the test recording."}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RecordingDiagnosticRow({
+  label,
+  icon,
+  diagnostic,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  diagnostic: RecordingSourceDiagnostic;
+}) {
+  const active = diagnostic.status === "capturing";
+  return (
+    <div className="grid grid-cols-[120px_1fr_88px] items-center gap-3 text-sm">
+      <div className="flex items-center gap-2 text-text-secondary">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-border">
+        <div
+          className={`h-full rounded-full transition-[width] ${
+            active ? "bg-green-400" : "bg-text-tertiary"
+          }`}
+          style={{ width: `${Math.max(4, diagnostic.level * 100)}%` }}
+        />
+      </div>
+      <span className={active ? "text-green-400" : "text-text-tertiary"}>
+        {active ? "Capturing" : diagnostic.status === "unavailable" ? "Unavailable" : "Idle"}
+      </span>
     </div>
   );
 }

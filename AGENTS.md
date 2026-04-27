@@ -12,6 +12,22 @@ Before or during work:
 - Find the relevant existing issue, or create one before implementation/test work continues.
 - Move active implementation or test work to `In Progress` or `In Review` instead of leaving it only in chat.
 
+End-to-end Linear item handling:
+- This is a general rule for every Linear item the user asks Codex to tackle; it is not limited to `JPB-24`, functionality test sessions, or any specific project-process issue.
+- When the user asks Codex to tackle any Linear item, treat the request as permission to complete the item end-to-end unless the user explicitly limits scope or asks for planning only.
+- Do not leave a completable item parked in `In Progress` waiting for the user to say "finish the remaining tasks/tests." Continue through implementation, relevant verification/tests, documentation updates, and Linear bookkeeping in the same session when feasible.
+- If the work is completed and verification is satisfactory, move the Linear issue to `Done` without requiring an additional user prompt.
+- If the item cannot be completed, keep it in the appropriate active state, explain the blocker, record completed work and verification results in Linear, and create or link follow-up issues for any deferred work.
+
+Default main/deployment workflow:
+- `main` is the source of truth for completed NoteAI work. Completed and tested work should not remain only on a Codex, feature, or temporary branch.
+- Before marking a Linear issue `Done`, verify the relevant changes are committed, pushed to `main`, and visible on the remote.
+- Run the relevant local checks for the touched modules before pushing. For web changes, include lint, typecheck, regression tests, and build. For Swift/macOS changes, include `swift test` or the appropriate Xcode build/test when available.
+- Push completed work to `main` unless the user explicitly asks for a PR-only flow. If branch protection blocks direct push, open the PR, merge it, and then verify `main`.
+- After `main` updates, confirm GitHub Actions ran for the push and that the Cloudflare deployment workflow completed successfully for web-affecting changes.
+- If tests, push, CI, or Cloudflare deployment fails, keep the Linear issue active, document the failure clearly in Linear and chat, and create or link follow-up issues instead of silently leaving the work on a branch.
+- Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
+
 After work:
 - Update the relevant Linear issue with what changed, affected files/modules, verification commands/results, and remaining follow-ups.
 - Create linked follow-up issues for discovered bugs, deferred risks, or new improvements.
@@ -33,6 +49,15 @@ Delivery gate before `Done`:
 Standing Linear anchor:
 - `JPB-24` records this operating rule.
 - `JPB-26` tracks the current functionality test session if no more specific test issue exists.
+
+## Required Architecture & Security Primitives
+
+All NoteAI improvements and new features managed in Linear must explicitly follow the relevant architecture and security primitives before implementation is treated as complete.
+
+- For improvements, new features, refactors, architecture work, and codebase-shaping follow-ups, use the `improve-codebase-architecture` skill. Frame architecture decisions with its vocabulary: Module, Interface, Implementation, Depth, Seam, Adapter, Leverage, and Locality.
+- For security findings/remediation, hardening, infrastructure, authentication, authorization, secrets, deployment, dependency, and operational security work, use the `security-auditor` skill.
+- For JavaScript/TypeScript secure-by-default coding, explicit security best-practices guidance, or security reports, use the `security-best-practices` skill alongside `security-auditor`.
+- Linear issues for improvements and new features must capture the architecture/security checks performed, verification commands/results, affected modules/files, accepted risks or deferred decisions, and linked follow-up issues for new risks or improvements.
 
 ## Project Overview
 

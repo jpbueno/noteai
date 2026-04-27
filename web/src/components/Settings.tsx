@@ -51,6 +51,7 @@ const TABS: { id: SettingsTab; label: string; icon: React.ComponentType<{ classN
 
 const POPULAR_MODELS: Record<LLMProvider, { id: string; name: string }[]> = {
   openrouter: [
+    { id: "anthropic/claude-opus-4.6", name: "Claude Opus 4.6" },
     { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
     { id: "anthropic/claude-opus-4", name: "Claude Opus 4" },
     { id: "openai/gpt-4o", name: "GPT-4o" },
@@ -60,6 +61,7 @@ const POPULAR_MODELS: Record<LLMProvider, { id: string; name: string }[]> = {
     { id: "deepseek/deepseek-r1", name: "DeepSeek R1" },
   ],
   anthropic: [
+    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
     { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
     { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
     { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },

@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !ProcessInfo.processInfo.isRunningXCTest else { return }
+
         chatManager.meetingManager = meetingManager
         APIKeyStore.migrateLegacyKeysFromUserDefaults()
         requestNotificationPermission()
@@ -92,6 +94,12 @@ extension Notification.Name {
     static let toggleRecording = Notification.Name("toggleRecording")
     static let navigateToNote = Notification.Name("navigateToNote")
     static let toggleChatPanel = Notification.Name("toggleChatPanel")
+}
+
+extension ProcessInfo {
+    var isRunningXCTest: Bool {
+        environment["XCTestConfigurationFilePath"] != nil
+    }
 }
 
 /// Root view that shows either Login or the main app.

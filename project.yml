@@ -54,3 +54,13 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
+
+schemes:
+  NoteAI:
+    build:
+      targets:
+        NoteAI: all
+        NoteAITests: [test]
+    test:
+      targets:
+        - NoteAITests

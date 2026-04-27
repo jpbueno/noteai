@@ -1,0 +1,51 @@
+name: Web CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/web-ci.yml"
+      - "web/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/web-ci.yml"
+      - "web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-build-security:
+    name: Lint, build, and security regression
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint web app
+        run: npm run lint
+
+      - name: Run security regression tests
+        run: node --test security-regression.test.mjs
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build web app
+        run: npm run build

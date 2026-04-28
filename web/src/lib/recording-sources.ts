@@ -28,12 +28,12 @@ export const BROWSER_TAB_RECORDING_SOURCE: RecordingSourceOption = {
 export const TEAMS_DESKTOP_RECORDING_SOURCE: RecordingSourceOption = {
   id: "teams-desktop",
   label: "Teams Desktop",
-  description: "Use the NoteAI macOS helper to diagnose Microsoft Teams desktop capture readiness.",
+  description: "Use the NoteAI macOS helper to capture Microsoft Teams desktop meetings.",
   icon: "teams",
   availability: "requires-helper",
   supportsRecording: false,
   statusLabel: "Helper needed",
-  disabledReason: "Open the NoteAI macOS app to enable Teams Desktop diagnostics.",
+  disabledReason: "Open the NoteAI macOS app to enable Teams Desktop recording.",
 };
 
 export function buildRecordingSourceOptions(
@@ -43,13 +43,22 @@ export function buildRecordingSourceOptions(
 
   if (helperDetection?.state === "connected") {
     const paired = Boolean(helperDetection.status);
+    const captureControl = Boolean(helperDetection.health?.capabilities.captureControl);
+    const recording = helperDetection.status?.captureState === "recording";
     teams = {
       ...TEAMS_DESKTOP_RECORDING_SOURCE,
-      availability: "diagnostics",
-      statusLabel: paired ? "Diagnostics connected" : "Pairing needed",
-      disabledReason: paired
-        ? "Teams Desktop recording is diagnostics-only in this milestone."
-        : "Teams Desktop recording is diagnostics-only until helper pairing and capture control ship.",
+      availability: paired && captureControl ? "available" : "diagnostics",
+      supportsRecording: paired && captureControl,
+      statusLabel: paired && captureControl
+        ? recording ? "Recording" : "Ready"
+        : paired
+          ? "Update helper"
+          : "Pair helper",
+      disabledReason: paired && captureControl
+        ? undefined
+        : paired
+          ? "Reopen or update the NoteAI macOS app to enable Teams Desktop capture control."
+          : "Pair the NoteAI web app with the local helper before recording Teams Desktop.",
     };
   }
 

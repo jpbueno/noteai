@@ -35,10 +35,11 @@ import {
 import { useAICoach } from "@/lib/useAICoach";
 import {
   detectLocalCaptureHelper,
+  openLocalCaptureHelper,
   readLocalCaptureHelperToken,
   type LocalCaptureHelperDetection,
 } from "@/lib/local-helper";
-import { buildRecordingSourceOptions } from "@/lib/recording-sources";
+import { buildRecordingSourceOptions, type RecordingSourceId } from "@/lib/recording-sources";
 
 declare global {
   interface Window {
@@ -377,14 +378,18 @@ export default function Home() {
   }, [todos]);
 
   const guardedStartRecording = useCallback(
-    async (micDeviceId?: string, captureTab = false) => {
-      if (onboardingChecklist.firstRecordingBlocker) {
+    async (
+      micDeviceId?: string,
+      captureTab = false,
+      source: RecordingSourceId = "browser-tab",
+    ) => {
+      if (source !== "teams-desktop" && onboardingChecklist.firstRecordingBlocker) {
         alert(onboardingChecklist.firstRecordingBlocker);
         setSelection({ type: "settings", tab: "ai" });
         return;
       }
 
-      const started = await startRecording(micDeviceId, captureTab);
+      const started = await startRecording(micDeviceId, captureTab, source);
       if (!started) return;
 
       setSelection({ type: "liveTranscript" });
@@ -639,10 +644,13 @@ export default function Home() {
             recordingState={recordingState}
             recordingDuration={duration}
             recordingSources={recordingSources}
-            onStartRecording={(micDeviceId, captureTab) => {
-              void guardedStartRecording(micDeviceId, captureTab);
+            onStartRecording={(micDeviceId, captureTab, source) => {
+              void guardedStartRecording(micDeviceId, captureTab, source);
             }}
             onStopRecording={handleStopRecording}
+            onOpenLocalHelper={() => {
+              openLocalCaptureHelper();
+            }}
             onNewNote={handleNewNote}
             onNewTodo={handleNewTodo}
             onNewT5T={handleNewT5T}

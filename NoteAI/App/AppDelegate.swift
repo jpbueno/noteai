@@ -39,6 +39,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return true
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard urls.contains(where: { $0.scheme == "noteai" && $0.host == "capture-helper" }) else { return }
+        startLocalCaptureHelper()
+        showMainWindow()
+    }
+
     func showMainWindow() {
         if let window = mainWindow {
             window.makeKeyAndOrderFront(nil)
@@ -98,9 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func startLocalCaptureHelper() {
+        guard localCaptureHelperServer == nil else { return }
+
         let router = LocalCaptureHelperRouter(
             statusProvider: LocalCaptureHelperStatusProvider(),
             pairingStore: LocalCaptureHelperPairingStore(),
+            captureController: meetingManager,
             pairingPresenter: localCapturePairingPresenter
         )
         let server = LocalCaptureHelperServer(router: router)

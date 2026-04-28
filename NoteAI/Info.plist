@@ -14,6 +14,17 @@
     <string>0.1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.noteai.app.capture-helper</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>noteai</string>
+            </array>
+        </dict>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>14.2</string>
     <key>LSUIElement</key>

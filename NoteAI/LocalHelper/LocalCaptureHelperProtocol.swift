@@ -74,6 +74,63 @@ struct LocalCaptureHelperStatusResponse: Codable, Equatable {
     var diagnostics: [LocalCaptureHelperDiagnostic]
 }
 
+struct LocalCaptureTranscriptSegment: Codable, Equatable {
+    var id: Int
+    var text: String
+    var startTime: Float
+    var endTime: Float
+    var speaker: String?
+    var confidence: Float
+}
+
+struct LocalCaptureSessionSnapshot: Codable, Equatable {
+    var sessionId: UUID?
+    var state: String
+    var recordingIndicator: String
+    var startedAt: Date?
+    var duration: TimeInterval
+    var transcript: [LocalCaptureTranscriptSegment]
+
+    static let idle = LocalCaptureSessionSnapshot(
+        sessionId: nil,
+        state: "idle",
+        recordingIndicator: "visible-idle",
+        startedAt: nil,
+        duration: 0,
+        transcript: []
+    )
+}
+
+struct LocalCaptureStartRequest: Codable, Equatable {
+    var source: String
+    var title: String?
+    var includeMicrophone: Bool
+    var allowDesktopAudioFallback: Bool
+}
+
+struct LocalCaptureStartResponse: Codable, Equatable {
+    var sessionId: UUID
+    var captureState: String
+    var startedAt: Date
+    var recordingIndicator: String
+}
+
+struct LocalCaptureStopResponse: Codable, Equatable {
+    var sessionId: UUID
+    var captureState: String
+    var startedAt: Date
+    var stoppedAt: Date
+    var duration: TimeInterval
+    var transcript: [LocalCaptureTranscriptSegment]
+}
+
+@MainActor
+protocol LocalCaptureControlling: AnyObject {
+    var snapshot: LocalCaptureSessionSnapshot { get }
+    func startCapture(_ request: LocalCaptureStartRequest) async throws -> LocalCaptureStartResponse
+    func stopCapture() async throws -> LocalCaptureStopResponse
+}
+
 struct LocalCapturePairRequest: Codable, Equatable {
     var origin: String
     var clientName: String

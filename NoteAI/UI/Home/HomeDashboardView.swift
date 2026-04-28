@@ -71,30 +71,30 @@ struct CommandCenterLayout: Equatable {
 
     static func metrics(forWindowWidth windowWidth: CGFloat) -> CommandCenterLayout {
         let width = max(760, windowWidth)
-        let scale = min(1.08, max(0.96, width / 1440))
-        let typeScale = min(1.04, max(0.98, width / 1440))
-        let sidebarWidth = min(284, max(220, width * 0.16))
-        let contentMaxWidth = max(820, width - sidebarWidth - 88)
+        let scale = min(1.0, max(0.88, width / 1600))
+        let typeScale = min(1.0, max(0.96, width / 1700))
+        let sidebarWidth = min(244, max(196, width * 0.13))
+        let contentMaxWidth = max(780, width - sidebarWidth - 80)
 
         return CommandCenterLayout(
             scale: scale,
             sidebarWidth: sidebarWidth,
-            minimumSidebarWidth: max(220, sidebarWidth - 56),
-            maximumSidebarWidth: min(340, sidebarWidth + 72),
+            minimumSidebarWidth: max(196, sidebarWidth - 44),
+            maximumSidebarWidth: min(288, sidebarWidth + 52),
             contentMaxWidth: contentMaxWidth,
-            commandSearchMaxWidth: min(560, max(420, width * 0.34)),
-            controlHeight: min(42, max(38, round(40 * scale))),
-            actionButtonHeight: min(44, max(40, round(42 * scale))),
-            panelPadding: round(20 * scale),
-            dashboardSpacing: round(16 * scale),
-            onboardingMinimumCardWidth: round(230 * scale),
-            metricMinimumCardWidth: round(112 * scale),
-            titleFontSize: min(35, max(33, round(34 * typeScale))),
-            metricValueFontSize: min(26, max(24, round(24 * scale))),
-            sectionTitleFontSize: 16,
-            bodyFontSize: min(14, max(13, round(13.5 * typeScale))),
-            smallFontSize: 12,
-            tinyFontSize: 10
+            commandSearchMaxWidth: min(520, max(360, width * 0.30)),
+            controlHeight: min(35, max(32, round(34 * scale))),
+            actionButtonHeight: min(38, max(34, round(36 * scale))),
+            panelPadding: round(16 * scale),
+            dashboardSpacing: round(14 * scale),
+            onboardingMinimumCardWidth: round(205 * scale),
+            metricMinimumCardWidth: round(96 * scale),
+            titleFontSize: min(28, max(26, round(28 * typeScale))),
+            metricValueFontSize: min(20, max(18, round(20 * typeScale))),
+            sectionTitleFontSize: min(13, max(12, round(13 * typeScale))),
+            bodyFontSize: min(11, max(10, round(11 * typeScale))),
+            smallFontSize: 10,
+            tinyFontSize: 9
         )
     }
 }
@@ -130,8 +130,8 @@ struct HomeDashboardView: View {
                 onboardingPanel
                 taskColumns
             }
-            .padding(.horizontal, round(32 * layout.scale))
-            .padding(.vertical, round(28 * layout.scale))
+            .padding(.horizontal, round(28 * layout.scale))
+            .padding(.vertical, round(22 * layout.scale))
             .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -183,7 +183,7 @@ struct HomeDashboardView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Operational snapshot")
-                            .font(.system(size: layout.sectionTitleFontSize + 3, weight: .bold))
+                            .font(.system(size: layout.sectionTitleFontSize + 2, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                         Text("\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")")
                             .font(.system(size: layout.bodyFontSize))
@@ -325,8 +325,8 @@ struct HomeDashboardView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: round(92 * layout.scale), alignment: .topLeading)
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: max(72, round(82 * layout.scale)), alignment: .topLeading)
             .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))
         }
@@ -399,8 +399,8 @@ struct HomeDashboardView: View {
                         .foregroundStyle(dueLabelColor(for: todo))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))

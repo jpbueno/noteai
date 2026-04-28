@@ -169,7 +169,7 @@ struct MeetingLibraryView: View {
                     withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = false }
                 } label: {
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: round(20 * layout.scale), weight: .medium))
+                        .font(.system(size: layout.sectionTitleFontSize + 2, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: layout.controlHeight, height: layout.controlHeight)
                         .background(Theme.sidebarBG.opacity(0.95), in: RoundedRectangle(cornerRadius: 12))
@@ -234,9 +234,9 @@ struct MeetingLibraryView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.leading, sidebarCollapsed ? round(12 * layout.scale) : round(24 * layout.scale))
-        .padding(.trailing, round(24 * layout.scale))
-        .frame(height: round(62 * layout.scale))
+        .padding(.leading, sidebarCollapsed ? round(10 * layout.scale) : round(18 * layout.scale))
+        .padding(.trailing, round(18 * layout.scale))
+        .frame(height: max(48, round(52 * layout.scale)))
         .background(Theme.contentBG.opacity(0.88))
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -331,11 +331,11 @@ struct MeetingLibraryView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: round(22 * layout.scale)))
+                    .font(.system(size: layout.sectionTitleFontSize + 4))
                     .foregroundStyle(Theme.textSecondary)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("NoteAI")
-                        .font(.system(size: round(18 * layout.scale), weight: .semibold))
+                        .font(.system(size: layout.sectionTitleFontSize + 1, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("v4.0 Command Center")
                         .font(.system(size: layout.tinyFontSize, weight: .medium))
@@ -343,8 +343,8 @@ struct MeetingLibraryView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, round(14 * layout.scale))
-            .frame(height: round(52 * layout.scale))
+            .padding(.horizontal, round(12 * layout.scale))
+            .frame(height: max(42, round(44 * layout.scale)))
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")
@@ -379,8 +379,8 @@ struct MeetingLibraryView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, round(12 * layout.scale))
-                    .padding(.vertical, round(10 * layout.scale))
+                    .padding(.horizontal, round(10 * layout.scale))
+                    .padding(.vertical, round(8 * layout.scale))
                     .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
                 }
@@ -412,8 +412,8 @@ struct MeetingLibraryView: View {
                 .opacity(meetingManager.state == .processing ? 0.55 : 1)
             }
         }
-        .padding(.horizontal, round(12 * layout.scale))
-        .padding(.bottom, round(12 * layout.scale))
+        .padding(.horizontal, round(10 * layout.scale))
+        .padding(.bottom, round(10 * layout.scale))
     }
 
     private func recordingSourceCard(icon: String, title: String, subtitle: String, active: Bool, layout: CommandCenterLayout) -> some View {
@@ -431,10 +431,10 @@ struct MeetingLibraryView: View {
                 .lineLimit(1)
         }
         .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-        .padding(.horizontal, round(10 * layout.scale))
-        .padding(.vertical, round(8 * layout.scale))
+        .padding(.horizontal, round(9 * layout.scale))
+        .padding(.vertical, round(7 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: round(48 * layout.scale))
+        .frame(minHeight: max(38, round(40 * layout.scale)))
         .background(active ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
     }
@@ -460,8 +460,8 @@ struct MeetingLibraryView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, round(12 * layout.scale))
-            .frame(height: max(36, layout.controlHeight - 4))
+            .padding(.horizontal, round(10 * layout.scale))
+            .frame(height: max(32, layout.controlHeight - 2))
             .background(Theme.contentBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
 
@@ -471,8 +471,8 @@ struct MeetingLibraryView: View {
                 }
             }
         }
-        .padding(.horizontal, round(12 * layout.scale))
-        .padding(.vertical, round(12 * layout.scale))
+        .padding(.horizontal, round(10 * layout.scale))
+        .padding(.vertical, round(10 * layout.scale))
     }
 
     private func quickFilterButton(_ filter: CommandCenterQuickFilter, layout: CommandCenterLayout) -> some View {

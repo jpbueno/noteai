@@ -49,9 +49,71 @@ struct CommandCenterSnapshot {
     }
 }
 
+struct CommandCenterLayout: Equatable {
+    let scale: CGFloat
+    let sidebarWidth: CGFloat
+    let minimumSidebarWidth: CGFloat
+    let maximumSidebarWidth: CGFloat
+    let contentMaxWidth: CGFloat
+    let commandSearchMaxWidth: CGFloat
+    let controlHeight: CGFloat
+    let actionButtonHeight: CGFloat
+    let panelPadding: CGFloat
+    let dashboardSpacing: CGFloat
+    let onboardingMinimumCardWidth: CGFloat
+    let metricMinimumCardWidth: CGFloat
+    let titleFontSize: CGFloat
+    let metricValueFontSize: CGFloat
+    let sectionTitleFontSize: CGFloat
+    let bodyFontSize: CGFloat
+    let smallFontSize: CGFloat
+    let tinyFontSize: CGFloat
+
+    static func metrics(forWindowWidth windowWidth: CGFloat) -> CommandCenterLayout {
+        let width = max(760, windowWidth)
+        let scale = min(1.08, max(0.96, width / 1440))
+        let typeScale = min(1.04, max(0.98, width / 1440))
+        let sidebarWidth = min(284, max(220, width * 0.16))
+        let contentMaxWidth = max(820, width - sidebarWidth - 88)
+
+        return CommandCenterLayout(
+            scale: scale,
+            sidebarWidth: sidebarWidth,
+            minimumSidebarWidth: max(220, sidebarWidth - 56),
+            maximumSidebarWidth: min(340, sidebarWidth + 72),
+            contentMaxWidth: contentMaxWidth,
+            commandSearchMaxWidth: min(560, max(420, width * 0.34)),
+            controlHeight: min(42, max(38, round(40 * scale))),
+            actionButtonHeight: min(44, max(40, round(42 * scale))),
+            panelPadding: round(20 * scale),
+            dashboardSpacing: round(16 * scale),
+            onboardingMinimumCardWidth: round(230 * scale),
+            metricMinimumCardWidth: round(112 * scale),
+            titleFontSize: min(35, max(33, round(34 * typeScale))),
+            metricValueFontSize: min(26, max(24, round(24 * scale))),
+            sectionTitleFontSize: 16,
+            bodyFontSize: min(14, max(13, round(13.5 * typeScale))),
+            smallFontSize: 12,
+            tinyFontSize: 10
+        )
+    }
+}
+
+private struct CommandCenterLayoutKey: EnvironmentKey {
+    static let defaultValue = CommandCenterLayout.metrics(forWindowWidth: 1100)
+}
+
+extension EnvironmentValues {
+    var commandCenterLayout: CommandCenterLayout {
+        get { self[CommandCenterLayoutKey.self] }
+        set { self[CommandCenterLayoutKey.self] = newValue }
+    }
+}
+
 /// Home dashboard showing todos grouped by due date. Mirrors
 /// web/src/components/HomeDashboard.tsx.
 struct HomeDashboardView: View {
+    @Environment(\.commandCenterLayout) private var layout
     @ObservedObject var meetingManager: MeetingManager
     let onSelectTodo: (UUID) -> Void
     let onOnboardingAction: (OnboardingChecklistItem) -> Void
@@ -62,15 +124,15 @@ struct HomeDashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: layout.dashboardSpacing + 4) {
                 header
                 snapshotGrid
                 onboardingPanel
                 taskColumns
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 1120, alignment: .leading)
+            .padding(.horizontal, round(32 * layout.scale))
+            .padding(.vertical, round(28 * layout.scale))
+            .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.contentBG)
@@ -80,14 +142,14 @@ struct HomeDashboardView: View {
         HStack(alignment: .center, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Command Center")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                     .foregroundStyle(Theme.textTertiary)
                     .textCase(.uppercase)
                 Text("Today's workspace")
-                    .font(.system(size: 34, weight: .bold))
+                    .font(.system(size: layout.titleFontSize, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("Keep meetings, notes, tasks, and T5T follow-ups moving from one place.")
-                    .font(.system(size: 14))
+                    .font(.system(size: layout.bodyFontSize + 1))
                     .foregroundStyle(Theme.textTertiary)
             }
 
@@ -98,10 +160,10 @@ struct HomeDashboardView: View {
                 onSelectTodo(todo.id)
             } label: {
                 Label("New Task", systemImage: "plus")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: layout.bodyFontSize, weight: .bold))
                     .foregroundStyle(.black)
-                    .padding(.horizontal, 14)
-                    .frame(height: 40)
+                    .padding(.horizontal, round(14 * layout.scale))
+                    .frame(height: layout.actionButtonHeight)
                     .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain)
@@ -112,31 +174,31 @@ struct HomeDashboardView: View {
         let snapshot = snapshot
         return LazyVGrid(
             columns: [
-                GridItem(.flexible(minimum: 360), spacing: 16),
-                GridItem(.flexible(minimum: 280), spacing: 16),
+                GridItem(.flexible(minimum: round(360 * layout.scale)), spacing: layout.dashboardSpacing),
+                GridItem(.flexible(minimum: round(280 * layout.scale)), spacing: layout.dashboardSpacing),
             ],
-            spacing: 16
+            spacing: layout.dashboardSpacing
         ) {
             CommandCenterPanel {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Operational snapshot")
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: layout.sectionTitleFontSize + 3, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                         Text("\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")")
-                            .font(.system(size: 13))
+                            .font(.system(size: layout.bodyFontSize))
                             .foregroundStyle(Theme.textTertiary)
                     }
                     Spacer()
                     Text("v4")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: layout.smallFontSize, weight: .bold))
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Theme.accent.opacity(0.12), in: Capsule())
                 }
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: layout.metricMinimumCardWidth), spacing: 10)], spacing: 10) {
                     MetricTile(icon: "waveform.path.ecg", label: "Focus queue", value: snapshot.focusCount)
                     MetricTile(icon: "checklist", label: "Open tasks", value: snapshot.pendingCount)
                     MetricTile(icon: "checkmark.square", label: "Completed", value: snapshot.completed.count)
@@ -148,7 +210,7 @@ struct HomeDashboardView: View {
             CommandCenterPanel {
                 HStack {
                     Text("Suggested next move")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: layout.sectionTitleFontSize, weight: .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
                     Circle()
@@ -162,11 +224,11 @@ struct HomeDashboardView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(nextTask.title.isEmpty ? "Untitled task" : nextTask.title)
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
                                 .foregroundStyle(Theme.textPrimary)
                                 .lineLimit(2)
                             Text(nextTask.dueDateLabel ?? "No due date")
-                                .font(.system(size: 12))
+                                .font(.system(size: layout.smallFontSize))
                                 .foregroundStyle(Theme.textTertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -178,7 +240,7 @@ struct HomeDashboardView: View {
                     .padding(.top, 10)
                 } else {
                     Text("No pending tasks. The workspace is clear.")
-                        .font(.system(size: 14))
+                        .font(.system(size: layout.bodyFontSize + 1))
                         .foregroundStyle(Theme.textTertiary)
                         .padding(.top, 14)
                 }
@@ -192,15 +254,15 @@ struct HomeDashboardView: View {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Setup checklist")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: layout.sectionTitleFontSize, weight: .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("\(checklist.completedCount)/\(checklist.totalCount) complete\(checklist.requiredReady ? " - ready for capture" : " - finish required items before the first recording")")
-                        .font(.system(size: 12))
+                        .font(.system(size: layout.smallFontSize))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
                 Text(checklist.requiredReady ? "Ready" : "Setup needed")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                     .foregroundStyle(checklist.requiredReady ? Theme.success : Theme.warning)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
@@ -210,7 +272,7 @@ struct HomeDashboardView: View {
                     )
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: layout.onboardingMinimumCardWidth), spacing: 8)], spacing: 8) {
                 ForEach(checklist.items) { item in
                     onboardingRow(item)
                 }
@@ -228,19 +290,19 @@ struct HomeDashboardView: View {
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: onboardingIcon(for: item.status))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: layout.bodyFontSize + 2, weight: .semibold))
                     .foregroundStyle(onboardingColor(for: item.status))
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Text(item.label)
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: layout.bodyFontSize, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
                         if item.required {
                             Text("Required")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
                                 .foregroundStyle(Theme.accent)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
@@ -248,7 +310,7 @@ struct HomeDashboardView: View {
                         }
                     }
                     Text(item.detail)
-                        .font(.system(size: 12))
+                        .font(.system(size: layout.smallFontSize))
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(3)
                     if let actionLabel = item.actionLabel,
@@ -256,7 +318,7 @@ struct HomeDashboardView: View {
                        item.status != .blocked,
                        item.status != .unsupported {
                         Label(actionLabel, systemImage: "gearshape")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                             .foregroundStyle(Theme.accent)
                     }
                 }
@@ -264,7 +326,7 @@ struct HomeDashboardView: View {
                 Spacer(minLength: 0)
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: round(92 * layout.scale), alignment: .topLeading)
             .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))
         }
@@ -276,10 +338,10 @@ struct HomeDashboardView: View {
         let snapshot = snapshot
         return LazyVGrid(
             columns: [
-                GridItem(.flexible(minimum: 320), spacing: 16),
-                GridItem(.flexible(minimum: 320), spacing: 16),
+                GridItem(.flexible(minimum: round(320 * layout.scale)), spacing: layout.dashboardSpacing),
+                GridItem(.flexible(minimum: round(320 * layout.scale)), spacing: layout.dashboardSpacing),
             ],
-            spacing: 16
+            spacing: layout.dashboardSpacing
         ) {
             TaskColumn(title: "Focus Queue", subtitle: "Overdue and due today", tone: .danger) {
                 ForEach(snapshot.overdue + snapshot.today) { todo in
@@ -318,13 +380,13 @@ struct HomeDashboardView: View {
                     meetingManager.toggleTodoCompletion(todo)
                 } label: {
                     Image(systemName: todo.completed ? "checkmark.square.fill" : "square")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: layout.bodyFontSize + 5, weight: .medium))
                         .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
 
                 Text(todo.title.isEmpty ? "Untitled task" : todo.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
                     .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
                     .strikethrough(todo.completed)
                     .lineLimit(1)
@@ -333,7 +395,7 @@ struct HomeDashboardView: View {
 
                 if let label = todo.dueDateLabel {
                     Label(label, systemImage: "calendar")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: layout.tinyFontSize + 1, weight: .medium))
                         .foregroundStyle(dueLabelColor(for: todo))
                 }
             }
@@ -392,13 +454,14 @@ struct HomeDashboardView: View {
 }
 
 private struct CommandCenterPanel<Content: View>: View {
+    @Environment(\.commandCenterLayout) private var layout
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             content
         }
-        .padding(20)
+        .padding(layout.panelPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panelBG, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
@@ -407,6 +470,7 @@ private struct CommandCenterPanel<Content: View>: View {
 }
 
 private struct MetricTile: View {
+    @Environment(\.commandCenterLayout) private var layout
     let icon: String
     let label: String
     let value: Int
@@ -415,18 +479,19 @@ private struct MetricTile: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
                 Text(label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: layout.smallFontSize, weight: .medium))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .foregroundStyle(Theme.textTertiary)
 
             Text("\(value)")
-                .font(.system(size: 26, weight: .bold))
+                .font(.system(size: layout.metricValueFontSize, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
         }
-        .padding(12)
+        .padding(round(12 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
@@ -434,6 +499,8 @@ private struct MetricTile: View {
 }
 
 private struct TaskColumn<Content: View>: View {
+    @Environment(\.commandCenterLayout) private var layout
+
     enum Tone {
         case danger
         case accent
@@ -464,10 +531,10 @@ private struct TaskColumn<Content: View>: View {
                     .frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Text(subtitle)
-                        .font(.system(size: 12))
+                        .font(.system(size: layout.smallFontSize))
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -481,14 +548,15 @@ private struct TaskColumn<Content: View>: View {
 }
 
 private struct EmptyColumn: View {
+    @Environment(\.commandCenterLayout) private var layout
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.system(size: 14))
+            .font(.system(size: layout.bodyFontSize + 1))
             .foregroundStyle(Theme.textTertiary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
+            .padding(.vertical, round(28 * layout.scale))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))

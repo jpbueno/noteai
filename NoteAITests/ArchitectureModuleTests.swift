@@ -88,6 +88,28 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
+    func testCommandCenterLayoutAdaptsWithoutInflatingTypography() {
+        let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
+        let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
+
+        XCTAssertLessThan(compact.scale, wide.scale)
+        XCTAssertLessThan(compact.sidebarWidth, wide.sidebarWidth)
+        XCTAssertLessThan(compact.commandSearchMaxWidth, wide.commandSearchMaxWidth)
+        XCTAssertLessThan(compact.contentMaxWidth, wide.contentMaxWidth)
+        XCTAssertLessThan(compact.onboardingMinimumCardWidth, wide.onboardingMinimumCardWidth)
+
+        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 260)
+        XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1320)
+        XCTAssertLessThanOrEqual(wide.titleFontSize, 35)
+        XCTAssertLessThanOrEqual(wide.metricValueFontSize, 26)
+        XCTAssertLessThanOrEqual(wide.sectionTitleFontSize, 16)
+        XCTAssertLessThanOrEqual(wide.bodyFontSize, 14)
+        XCTAssertLessThanOrEqual(wide.smallFontSize, 12)
+        XCTAssertLessThanOrEqual(wide.tinyFontSize, 10)
+        XCTAssertLessThanOrEqual(wide.controlHeight, 42)
+        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 44)
+    }
+
     func testOAuthCallbackRequiresExpectedState() {
         let valid = "GET /?code=abc123&state=state-1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         let missingState = "GET /?code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"

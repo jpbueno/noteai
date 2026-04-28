@@ -50,7 +50,8 @@ struct MeetingLibraryView: View {
     @State private var settingsWindow: NSWindow?
     @State private var pulseAnimation = false
     @State private var showChatDrawer = false
-    @State private var sidebarWidth: CGFloat = 220
+    @State private var sidebarWidth: CGFloat = 0
+    @State private var sidebarDragStartWidth: CGFloat?
     @State private var sidebarCollapsed = false
     @State private var collapsedSections: Set<SidebarSectionID> = []
     @State private var quickFilter: CommandCenterQuickFilter?
@@ -67,41 +68,54 @@ struct MeetingLibraryView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if !sidebarCollapsed {
-                sidebar
-                    .frame(width: sidebarWidth)
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(width: 1)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                let newWidth = sidebarWidth + value.translation.width
-                                sidebarWidth = max(160, min(400, newWidth))
-                            }
+        GeometryReader { proxy in
+            let layout = CommandCenterLayout.metrics(forWindowWidth: proxy.size.width)
+            let effectiveSidebarWidth = resolvedSidebarWidth(for: layout)
+
+            HStack(spacing: 0) {
+                if !sidebarCollapsed {
+                    sidebar(layout: layout)
+                        .frame(width: effectiveSidebarWidth)
+                    Rectangle()
+                        .fill(Theme.border)
+                        .frame(width: 1)
+                        .contentShape(Rectangle())
+                        .onHover { hovering in
+                            if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                        }
+                        .gesture(
+                            DragGesture(minimumDistance: 1)
+                                .onChanged { value in
+                                    let startWidth = sidebarDragStartWidth ?? effectiveSidebarWidth
+                                    sidebarDragStartWidth = startWidth
+                                    sidebarWidth = min(
+                                        layout.maximumSidebarWidth,
+                                        max(layout.minimumSidebarWidth, startWidth + value.translation.width)
+                                    )
+                                }
+                                .onEnded { _ in
+                                    sidebarDragStartWidth = nil
+                                }
                         )
-            }
-            ZStack {
-                VStack(spacing: 0) {
-                    commandBar
-                    detail
+                }
+                ZStack {
+                    VStack(spacing: 0) {
+                        commandBar(layout: layout)
+                        detail
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if showChatDrawer {
+                    Rectangle().fill(Theme.border).frame(width: 1)
+                    ChatPanelView(chatManager: chatManager, onClose: {
+                        withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = false }
+                    })
+                    .frame(width: min(420, max(340, round(340 * layout.scale))))
+                    .transition(.move(edge: .trailing))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            if showChatDrawer {
-                Rectangle().fill(Theme.border).frame(width: 1)
-                ChatPanelView(chatManager: chatManager, onClose: {
-                    withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = false }
-                })
-                .frame(width: 340)
-                .transition(.move(edge: .trailing))
-            }
+            .environment(\.commandCenterLayout, layout)
         }
         .background(Theme.contentBG)
         .animation(.easeInOut(duration: 0.2), value: showChatDrawer)
@@ -141,18 +155,23 @@ struct MeetingLibraryView: View {
         }
     }
 
+    private func resolvedSidebarWidth(for layout: CommandCenterLayout) -> CGFloat {
+        guard sidebarWidth > 0 else { return layout.sidebarWidth }
+        return min(layout.maximumSidebarWidth, max(layout.minimumSidebarWidth, sidebarWidth))
+    }
+
     // MARK: - Command bar
 
-    private var commandBar: some View {
+    private func commandBar(layout: CommandCenterLayout) -> some View {
         HStack(spacing: 12) {
             if sidebarCollapsed {
                 Button {
                     withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = false }
                 } label: {
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: round(20 * layout.scale), weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 40, height: 40)
+                        .frame(width: layout.controlHeight, height: layout.controlHeight)
                         .background(Theme.sidebarBG.opacity(0.95), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
                 }
@@ -162,20 +181,20 @@ struct MeetingLibraryView: View {
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                 TextField(
                     quickFilter?.commandBarLabel ?? "Command + K  Search meetings, notes, tasks...",
                     text: $meetingManager.searchQuery
                 )
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .font(.system(size: layout.bodyFontSize + 1))
                 .foregroundStyle(Theme.textPrimary)
                 .focused($searchFocused)
             }
-            .frame(minWidth: 320, maxWidth: 560)
-            .frame(height: 40)
-            .padding(.horizontal, 14)
+            .frame(minWidth: min(layout.commandSearchMaxWidth, round(320 * layout.scale)), maxWidth: layout.commandSearchMaxWidth)
+            .frame(height: layout.controlHeight)
+            .padding(.horizontal, round(14 * layout.scale))
             .background(Theme.sidebarBG.opacity(0.70), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
 
@@ -185,10 +204,10 @@ struct MeetingLibraryView: View {
                 createNewNote()
             } label: {
                 Label("New note", systemImage: "plus")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: layout.bodyFontSize, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
-                    .frame(height: 40)
-                    .padding(.horizontal, 12)
+                    .frame(height: layout.controlHeight)
+                    .padding(.horizontal, round(12 * layout.scale))
                     .background(Theme.sidebarBG.opacity(0.70), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
             }
@@ -200,10 +219,10 @@ struct MeetingLibraryView: View {
                 }
             } label: {
                 Label("AI copilot", systemImage: "message")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: layout.bodyFontSize, weight: .semibold))
                     .foregroundStyle(showChatDrawer ? Theme.accent : .black)
-                    .frame(height: 40)
-                    .padding(.horizontal, 12)
+                    .frame(height: layout.controlHeight)
+                    .padding(.horizontal, round(12 * layout.scale))
                     .background(
                         showChatDrawer ? Theme.accent.opacity(0.12) : Theme.accent,
                         in: RoundedRectangle(cornerRadius: 12)
@@ -215,9 +234,9 @@ struct MeetingLibraryView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.leading, sidebarCollapsed ? 12 : 24)
-        .padding(.trailing, 24)
-        .frame(height: 62)
+        .padding(.leading, sidebarCollapsed ? round(12 * layout.scale) : round(24 * layout.scale))
+        .padding(.trailing, round(24 * layout.scale))
+        .frame(height: round(62 * layout.scale))
         .background(Theme.contentBG.opacity(0.88))
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -228,59 +247,59 @@ struct MeetingLibraryView: View {
 
     // MARK: - Sidebar
 
-    private var sidebar: some View {
+    private func sidebar(layout: CommandCenterLayout) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            brandHeader
-            recordingControls
+            brandHeader(layout: layout)
+            recordingControls(layout: layout)
             Divider().foregroundStyle(Theme.border)
-            searchAndFilters
+            searchAndFilters(layout: layout)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    homeSidebarRow
+                    homeSidebarRow(layout: layout)
 
-                    sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", action: createNewT5T) {
+                    sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", action: createNewT5T, layout: layout) {
                         ForEach(meetingManager.t5tReports) { report in
-                            t5tSidebarRow(report: report)
+                            t5tSidebarRow(report: report, layout: layout)
                         }
                         if meetingManager.t5tReports.isEmpty {
-                            emptyHint("No T5T reports yet")
+                            emptyHint("No T5T reports yet", layout: layout)
                         }
                     }
 
-                    sidebarSection(.notes, title: "Notes", icon: "note.text", action: createNewNote) {
+                    sidebarSection(.notes, title: "Notes", icon: "note.text", action: createNewNote, layout: layout) {
                         ForEach(visibleNotes) { note in
-                            noteSidebarRow(note: note)
+                            noteSidebarRow(note: note, layout: layout)
                         }
                         if visibleNotes.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No notes yet")
+                            emptyHint("No notes yet", layout: layout)
                         }
                     }
 
-                    sidebarSection(.todos, title: "Todos", icon: "checkmark.square", action: createNewTodo) {
+                    sidebarSection(.todos, title: "Todos", icon: "checkmark.square", action: createNewTodo, layout: layout) {
                         ForEach(visibleTodos) { todo in
-                            todoSidebarRow(todo: todo)
+                            todoSidebarRow(todo: todo, layout: layout)
                         }
                         if visibleTodos.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No todos yet")
+                            emptyHint("No todos yet", layout: layout)
                         }
                     }
 
-                    sidebarSection(.tasks, title: "Tasks", icon: "checkmark.circle", action: createNewTask) {
+                    sidebarSection(.tasks, title: "Tasks", icon: "checkmark.circle", action: createNewTask, layout: layout) {
                         ForEach(visibleTasks) { task in
-                            taskSidebarRow(task: task)
+                            taskSidebarRow(task: task, layout: layout)
                         }
                         if visibleTasks.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No tasks yet")
+                            emptyHint("No tasks yet", layout: layout)
                         }
                     }
 
-                    sidebarSection(.meetings, title: "Meetings", icon: "waveform", action: nil) {
+                    sidebarSection(.meetings, title: "Meetings", icon: "waveform", action: nil, layout: layout) {
                         ForEach(visibleMeetings) { meeting in
-                            sidebarRow(meeting: meeting)
+                            sidebarRow(meeting: meeting, layout: layout)
                         }
                         if visibleMeetings.isEmpty {
-                            emptyHint(meetingManager.searchQuery.isEmpty ? "No meetings yet" : "No results")
+                            emptyHint(meetingManager.searchQuery.isEmpty ? "No meetings yet" : "No results", layout: layout)
                         }
                     }
                 }
@@ -292,11 +311,11 @@ struct MeetingLibraryView: View {
             Divider().foregroundStyle(Theme.border)
 
             VStack(spacing: 0) {
-                sidebarAction(icon: "gear", label: "Settings") {
+                sidebarAction(icon: "gear", label: "Settings", layout: layout) {
                     openSettings()
                 }
                 if authManager.isAuthenticated && !UserDefaults.standard.bool(forKey: "skippedAuth") {
-                    sidebarAction(icon: "rectangle.portrait.and.arrow.right", label: "Sign Out") {
+                    sidebarAction(icon: "rectangle.portrait.and.arrow.right", label: "Sign Out", layout: layout) {
                         authManager.signOut()
                     }
                 }
@@ -306,33 +325,33 @@ struct MeetingLibraryView: View {
         .background(Theme.sidebarBG)
     }
 
-    private var brandHeader: some View {
+    private func brandHeader(layout: CommandCenterLayout) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = true }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: 22))
+                    .font(.system(size: round(22 * layout.scale)))
                     .foregroundStyle(Theme.textSecondary)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("NoteAI")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: round(18 * layout.scale), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("v4.0 Command Center")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: layout.tinyFontSize, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
             }
-            .padding(.horizontal, 14)
-            .frame(height: 52)
+            .padding(.horizontal, round(14 * layout.scale))
+            .frame(height: round(52 * layout.scale))
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")
     }
 
-    private var recordingControls: some View {
-        VStack(spacing: 8) {
+    private func recordingControls(layout: CommandCenterLayout) -> some View {
+        VStack(spacing: round(8 * layout.scale)) {
             if meetingManager.state == .recording {
                 Button {
                     selection = nil
@@ -343,25 +362,25 @@ struct MeetingLibraryView: View {
                             .frame(width: 8, height: 8)
                             .opacity(pulseAnimation ? 0.4 : 1.0)
                         Text("Recording")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: layout.bodyFontSize, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
                         Spacer()
                         Text(formattedDuration)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Theme.danger)
                         Button {
                             meetingManager.stopRecording()
                         } label: {
                             Image(systemName: "stop.fill")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
                                 .foregroundStyle(.white)
-                                .frame(width: 22, height: 22)
+                                .frame(width: round(22 * layout.scale), height: round(22 * layout.scale))
                                 .background(Theme.danger, in: RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, round(12 * layout.scale))
+                    .padding(.vertical, round(10 * layout.scale))
                     .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
                 }
@@ -370,8 +389,8 @@ struct MeetingLibraryView: View {
                 .onDisappear { pulseAnimation = false }
             } else {
                 HStack(spacing: 6) {
-                    recordingSourceCard(icon: "waveform", title: "System", subtitle: "Native capture", active: true)
-                    recordingSourceCard(icon: "mic", title: "Mic", subtitle: "Ready", active: false)
+                    recordingSourceCard(icon: "waveform", title: "System", subtitle: "Native capture", active: true, layout: layout)
+                    recordingSourceCard(icon: "mic", title: "Mic", subtitle: "Ready", active: false, layout: layout)
                 }
 
                 Button {
@@ -379,10 +398,10 @@ struct MeetingLibraryView: View {
                     selection = nil
                 } label: {
                     Label(recordButtonLabel, systemImage: "record.circle")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: layout.bodyFontSize, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 42)
+                        .frame(height: layout.actionButtonHeight)
                         .background(
                             LinearGradient(colors: [Theme.danger, Color(hex: "FF8A5C")], startPoint: .leading, endPoint: .trailing),
                             in: RoundedRectangle(cornerRadius: 12)
@@ -393,78 +412,79 @@ struct MeetingLibraryView: View {
                 .opacity(meetingManager.state == .processing ? 0.55 : 1)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 12)
+        .padding(.horizontal, round(12 * layout.scale))
+        .padding(.bottom, round(12 * layout.scale))
     }
 
-    private func recordingSourceCard(icon: String, title: String, subtitle: String, active: Bool) -> some View {
+    private func recordingSourceCard(icon: String, title: String, subtitle: String, active: Bool, layout: CommandCenterLayout) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: layout.smallFontSize, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                     .lineLimit(1)
             }
             Text(subtitle)
-                .font(.system(size: 10))
+                .font(.system(size: layout.tinyFontSize))
                 .foregroundStyle(Theme.textTertiary)
                 .lineLimit(1)
         }
         .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, round(10 * layout.scale))
+        .padding(.vertical, round(8 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 48)
+        .frame(minHeight: round(48 * layout.scale))
         .background(active ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
     }
 
-    private var searchAndFilters: some View {
-        VStack(spacing: 8) {
+    private func searchAndFilters(layout: CommandCenterLayout) -> some View {
+        VStack(spacing: round(8 * layout.scale)) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
+                    .font(.system(size: layout.smallFontSize))
                     .foregroundStyle(Theme.textTertiary)
                 TextField("Search workspace...", text: $meetingManager.searchQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .focused($searchFocused)
                 if !meetingManager.searchQuery.isEmpty {
                     Button {
                         meetingManager.searchQuery = ""
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: layout.tinyFontSize, weight: .bold))
                             .foregroundStyle(Theme.textTertiary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
+            .padding(.horizontal, round(12 * layout.scale))
+            .frame(height: max(36, layout.controlHeight - 4))
             .background(Theme.contentBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
 
             HStack(spacing: 6) {
                 ForEach(CommandCenterQuickFilter.allCases, id: \.self) { filter in
-                    quickFilterButton(filter)
+                    quickFilterButton(filter, layout: layout)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.horizontal, round(12 * layout.scale))
+        .padding(.vertical, round(12 * layout.scale))
     }
 
-    private func quickFilterButton(_ filter: CommandCenterQuickFilter) -> some View {
+    private func quickFilterButton(_ filter: CommandCenterQuickFilter, layout: CommandCenterLayout) -> some View {
         Button {
             quickFilter = quickFilter == filter ? nil : filter
         } label: {
             Text(filter.label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
-                .frame(height: 28)
+                .frame(height: max(28, round(28 * layout.scale)))
                 .foregroundStyle(quickFilter == filter ? Theme.accent : Theme.textTertiary)
                 .background(
                     quickFilter == filter ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35),
@@ -481,6 +501,7 @@ struct MeetingLibraryView: View {
         title: String,
         icon: String,
         action: (() -> Void)?,
+        layout: CommandCenterLayout,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -490,11 +511,11 @@ struct MeetingLibraryView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: collapsedSections.contains(id) ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
                         Image(systemName: icon)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: layout.smallFontSize, weight: .medium))
                         Text(title.uppercased())
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                     }
                     .foregroundStyle(Theme.sectionHeader)
                 }
@@ -505,18 +526,18 @@ struct MeetingLibraryView: View {
                 if let action {
                     Button(action: action) {
                         Label("New", systemImage: "plus")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
                             .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, round(7 * layout.scale))
+                            .padding(.vertical, round(4 * layout.scale))
                             .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
-            .padding(.bottom, 5)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.top, round(14 * layout.scale))
+            .padding(.bottom, round(5 * layout.scale))
 
             if !collapsedSections.contains(id) {
                 content()
@@ -532,30 +553,30 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func emptyHint(_ text: String) -> some View {
+    private func emptyHint(_ text: String, layout: CommandCenterLayout) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.system(size: layout.smallFontSize))
             .foregroundStyle(Theme.textTertiary)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 5)
+            .padding(.horizontal, round(18 * layout.scale))
+            .padding(.vertical, round(5 * layout.scale))
     }
 
-    private func t5tSidebarRow(report: T5TReport) -> some View {
+    private func t5tSidebarRow(report: T5TReport, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .t5tReport(report.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(report.status == .draft ? Color.orange : Theme.textTertiary)
                 Text("\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .t5tReport(report.id)
@@ -574,22 +595,22 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func sidebarRow(meeting: Meeting) -> some View {
+    private func sidebarRow(meeting: Meeting, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .meeting(meeting.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textTertiary)
                 Text("\(datePrefix(meeting.date)) \(meeting.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams"))")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .meeting(meeting.id)
@@ -619,22 +640,22 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func noteSidebarRow(note: Note) -> some View {
+    private func noteSidebarRow(note: Note, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .note(note.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "note.text")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textTertiary)
                 Text("\(datePrefix(note.createdDate)) \(note.title)")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .note(note.id)
@@ -658,23 +679,23 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func taskSidebarRow(task: TaskItem) -> some View {
+    private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .task(task.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: task.status == .completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(task.status == .completed ? Theme.success : Theme.textTertiary)
                 Text(task.title.isEmpty ? "New Task" : "\(datePrefix(task.createdDate)) \(task.title)")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(task.status == .completed ? Theme.textTertiary : Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .strikethrough(task.status == .completed)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .task(task.id)
@@ -701,30 +722,30 @@ struct MeetingLibraryView: View {
 
     // MARK: - Home + Todos sidebar
 
-    private var homeSidebarRow: some View {
+    private func homeSidebarRow(layout: CommandCenterLayout) -> some View {
         Button {
             selection = .home
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.grid.2x2")
-                    .font(.system(size: 12))
+                    .font(.system(size: layout.smallFontSize))
                     .foregroundStyle(Theme.textTertiary)
                 Text("Today")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: layout.bodyFontSize, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 let pending = meetingManager.todos.filter { !$0.completed }.count
                 if pending > 0 {
                     Text("\(pending)")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: layout.tinyFontSize, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Theme.hoverBG, in: Capsule())
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .home ? Theme.selectedBG : Color.clear,
@@ -733,7 +754,7 @@ struct MeetingLibraryView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 4)
-        .padding(.top, 4)
+        .padding(.top, round(4 * layout.scale))
     }
 
     private var visibleTodos: [TodoItem] {
@@ -777,16 +798,16 @@ struct MeetingLibraryView: View {
         return meetings
     }
 
-    private func todoSidebarRow(todo: TodoItem) -> some View {
+    private func todoSidebarRow(todo: TodoItem, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .todo(todo.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
                 Text(todo.title.isEmpty ? "Untitled task" : todo.title)
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
                     .strikethrough(todo.completed)
                     .lineLimit(1)
@@ -794,12 +815,12 @@ struct MeetingLibraryView: View {
                 Spacer()
                 if let label = todo.dueDateLabel, !todo.completed {
                     Text(label)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
                         .foregroundStyle(dueLabelColor(for: todo))
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .todo(todo.id) ? Theme.selectedBG : Color.clear,
@@ -829,18 +850,18 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func sidebarAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func sidebarAction(icon: String, label: String, layout: CommandCenterLayout, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textTertiary)
                 Text(label)
-                    .font(.system(size: 13))
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textSecondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)

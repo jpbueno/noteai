@@ -25,6 +25,26 @@ test("recording startup disposes partial recorder when microphone acquisition fa
   assert.equal(stopped, 1);
 });
 
+test("recording startup times out and disposes hung recorder setup", async () => {
+  let stopped = 0;
+  const recorder = {
+    stop() {
+      stopped += 1;
+    },
+  };
+
+  await assert.rejects(
+    startRecorderWithCleanup(
+      recorder,
+      async () => new Promise(() => {}),
+      { timeoutMs: 1 }
+    ),
+    /Recording startup timed out/
+  );
+
+  assert.equal(stopped, 1);
+});
+
 test("recording startup preserves original failure when cleanup also fails", async () => {
   const startError = new Error("Microphone unavailable");
   const recorder = {

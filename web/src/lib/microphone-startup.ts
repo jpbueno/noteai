@@ -140,3 +140,7 @@ export function formatMicrophoneStartupError(err: MicrophoneStartupError): strin
     "Try Start Recording again, or click the lock/tune icon in Chrome's address bar -> Microphone -> Allow."
   );
 }
+
+export function canContinueWithoutMicrophone(err: MicrophoneStartupError, captureTab: boolean): boolean {
+  return captureTab && err.kind !== "permission-denied";
+}

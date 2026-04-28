@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Download,
   Eye,
@@ -11,6 +11,7 @@ import {
   Mic,
   MonitorSpeaker,
   Play,
+  RefreshCw,
   Save,
   Settings as SettingsIcon,
   Shield,
@@ -31,6 +32,18 @@ import {
   type RecordingDiagnostics,
   type RecordingSourceDiagnostic,
 } from "@/lib/recording-diagnostics";
+import {
+  confirmLocalCaptureHelperPairing,
+  createLocalCaptureClientNonce,
+  detectLocalCaptureHelper,
+  formatLocalHelperDiagnosticRows,
+  readLocalCaptureHelperToken,
+  requestLocalCaptureHelperPairing,
+  storeLocalCaptureHelperToken,
+  type LocalCapturePairRequestResponse,
+  type LocalCaptureHelperDetection,
+  type LocalHelperDiagnosticRow,
+} from "@/lib/local-helper";
 
 type SettingsTab =
   | "general"
@@ -403,6 +416,9 @@ export default function Settings({ initialTab = "ai" }: { initialTab?: SettingsT
                   </div>
                 </div>
               </Section>
+              <Section title="Local Helper Diagnostics">
+                <TeamsDesktopHelperDiagnosticsPanel />
+              </Section>
               <Section title="Recording Diagnostics">
                 <RecordingDiagnosticsTestPanel />
               </Section>
@@ -652,6 +668,192 @@ export default function Settings({ initialTab = "ai" }: { initialTab?: SettingsT
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TeamsDesktopHelperDiagnosticsPanel() {
+  const [detection, setDetection] = useState<LocalCaptureHelperDetection | null>(null);
+  const [pairingSession, setPairingSession] = useState<(LocalCapturePairRequestResponse & { clientNonce: string }) | null>(null);
+  const [pairingCode, setPairingCode] = useState("");
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      setDetection(await detectLocalCaptureHelper({ token: readLocalCaptureHelperToken() }));
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  const startPairing = async () => {
+    setPairingBusy(true);
+    setPairingError(null);
+    try {
+      const clientNonce = createLocalCaptureClientNonce();
+      const session = await requestLocalCaptureHelperPairing({ clientNonce });
+      setPairingSession({ ...session, clientNonce });
+      setPairingCode("");
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPairingBusy(false);
+    }
+  };
+
+  const confirmPairing = async () => {
+    if (!pairingSession) return;
+    setPairingBusy(true);
+    setPairingError(null);
+    try {
+      const confirmation = await confirmLocalCaptureHelperPairing({
+        pairingSessionId: pairingSession.pairingSessionId,
+        code: pairingCode,
+        clientNonce: pairingSession.clientNonce,
+      });
+      storeLocalCaptureHelperToken(confirmation.accessToken);
+      setPairingSession(null);
+      setPairingCode("");
+      await refresh();
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPairingBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      await refresh();
+      if (cancelled) return;
+    };
+    void run();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [refresh]);
+
+  const rows = formatLocalHelperDiagnosticRows(
+    detection ?? {
+      state: "unavailable",
+      baseUrl: "",
+      error: "Checking helper...",
+    }
+  );
+  const statusError = detection?.state === "connected" ? detection.error : undefined;
+  const canPair =
+    detection?.state === "connected" &&
+    detection.health?.pairingRequired &&
+    !detection.status;
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        {rows.map((row) => (
+          <LocalHelperDiagnosticRowView key={row.label} row={row} />
+        ))}
+      </div>
+
+      {statusError && (
+        <div className="flex gap-2 text-xs text-orange-400">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+          <span>{statusError}</span>
+        </div>
+      )}
+
+      {pairingError && (
+        <div className="flex gap-2 text-xs text-orange-400">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+          <span>{pairingError}</span>
+        </div>
+      )}
+
+      {canPair && (
+        <div className="space-y-2">
+          {pairingSession ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={pairingSession.codeLength}
+                value={pairingCode}
+                onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, ""))}
+                placeholder={`${pairingSession.codeLength}-digit code`}
+                className="w-32 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => void confirmPairing()}
+                disabled={pairingBusy || pairingCode.length !== pairingSession.codeLength}
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent/80 disabled:opacity-50"
+              >
+                Trust
+              </button>
+              <span className="text-xs text-text-tertiary">
+                Expires {new Date(pairingSession.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void startPairing()}
+              disabled={pairingBusy}
+              className="inline-flex items-center gap-2 rounded-md bg-hover px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-selected disabled:opacity-50"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              Pair Helper
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-md bg-hover px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-selected disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+        <span className="text-xs text-text-tertiary">
+          Teams Desktop recording is disabled until helper capture control ships.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LocalHelperDiagnosticRowView({ row }: { row: LocalHelperDiagnosticRow }) {
+  const toneClass =
+    row.tone === "good"
+      ? "text-green-400"
+      : row.tone === "warning"
+      ? "text-orange-400"
+      : "text-text-tertiary";
+
+  return (
+    <div className="grid grid-cols-[132px_1fr] gap-3 text-sm">
+      <span className="text-text-secondary">{row.label}</span>
+      <div className="min-w-0">
+        <span className={toneClass}>{row.value}</span>
+        {row.detail && (
+          <p className="mt-0.5 truncate text-xs text-text-tertiary" title={row.detail}>
+            {row.detail}
+          </p>
+        )}
       </div>
     </div>
   );

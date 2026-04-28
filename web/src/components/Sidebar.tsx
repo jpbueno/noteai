@@ -11,6 +11,7 @@ import {
   Settings,
   StickyNote,
   AudioWaveform,
+  MonitorSpeaker,
   Plus,
   X,
   LayoutDashboard,
@@ -27,6 +28,7 @@ import type {
 import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
 import type { LibraryQuickFilter } from "@/lib/search";
+import type { RecordingSourceId, RecordingSourceOption } from "@/lib/recording-sources";
 
 type CollapsibleSection = "t5t" | "notes" | "todos" | "meetings";
 
@@ -43,6 +45,7 @@ interface SidebarProps {
   onQuickFilterChange: (filter: LibraryQuickFilter) => void;
   recordingState: RecordingState;
   recordingDuration: number;
+  recordingSources: RecordingSourceOption[];
   onStartRecording: (micDeviceId?: string, captureTab?: boolean) => void;
   onStopRecording: () => void;
   onNewNote: () => void;
@@ -67,6 +70,7 @@ export default function Sidebar({
   onQuickFilterChange,
   recordingState,
   recordingDuration,
+  recordingSources,
   onStartRecording,
   onStopRecording,
   onNewNote,
@@ -83,6 +87,14 @@ export default function Sidebar({
     todos: false,
     meetings: false,
   });
+  const [selectedRecordingSourceId, setSelectedRecordingSourceId] = useState<RecordingSourceId>("browser-tab");
+  const activeRecordingSource =
+    recordingSources.find((source) => source.id === selectedRecordingSourceId) ??
+    recordingSources[0];
+  const recordingDisabled =
+    recordingState === "processing" ||
+    recordingState === "starting" ||
+    !activeRecordingSource?.supportsRecording;
 
   const isSelected = (type: string, id: string) =>
     selection?.type === type && "id" in selection && selection.id === id;
@@ -129,9 +141,38 @@ export default function Sidebar({
           </div>
         ) : (
           <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-1">
+              {recordingSources.map((source) => {
+                const active = selectedRecordingSourceId === source.id;
+                const Icon = source.id === "teams-desktop" ? MonitorSpeaker : Mic;
+                return (
+                  <button
+                    key={source.id}
+                    type="button"
+                    onClick={() => setSelectedRecordingSourceId(source.id)}
+                    title={source.disabledReason || source.statusLabel}
+                    className={`min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                      active
+                        ? "border-accent/45 bg-accent/12 text-text-primary"
+                        : "border-border/70 bg-content/35 text-text-secondary hover:border-accent/30"
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 text-[11px] font-semibold leading-tight">
+                        {source.label}
+                      </span>
+                    </span>
+                    <span className="mt-1 block truncate text-[10px] leading-tight text-text-tertiary">
+                      {source.statusLabel}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             <button
               onClick={() => onStartRecording(undefined, true)}
-              disabled={recordingState === "processing" || recordingState === "starting"}
+              disabled={recordingDisabled}
               className="flex items-center justify-center gap-2 w-full px-3.5 py-3 rounded-xl bg-gradient-to-r from-danger to-[#ff8a5c] text-white shadow-lg shadow-danger/15 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               <Mic className="w-3.5 h-3.5" />
@@ -143,6 +184,11 @@ export default function Sidebar({
                   : "Start Recording"}
               </span>
             </button>
+            {activeRecordingSource?.disabledReason && (
+              <p className="px-1 text-[10px] leading-snug text-text-tertiary">
+                {activeRecordingSource.disabledReason}
+              </p>
+            )}
           </div>
         )}
       </div>

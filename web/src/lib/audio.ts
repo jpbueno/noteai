@@ -14,6 +14,11 @@ import {
   enumerateAudioInputDevices,
   formatMicrophoneStartupError,
 } from "./microphone-startup";
+import {
+  connectMicrophoneToCaptureMix,
+  createCaptureMixGraph,
+  type CaptureMixGraph,
+} from "./audio-mixing";
 
 export type RecordingState = "idle" | "starting" | "recording" | "processing";
 
@@ -138,7 +143,11 @@ export class AudioRecorder {
   private micDeviceId: string | undefined;
   private systemStream: MediaStream | null = null;
   private micSourceNode: MediaStreamAudioSourceNode | null = null;
+  private mixGraph: CaptureMixGraph | null = null;
   private deviceChangeHandler: (() => void) | null = null;
+  private micRecoveryTimerId = 0;
+  private micRecoveryInFlight = false;
+  private micRecoveryAttempts = 0;
   private levelAnalyser: AnalyserNode | null = null;
   private levelCtx: AudioContext | null = null;
   private levelRafId: number = 0;
@@ -335,19 +344,18 @@ export class AudioRecorder {
       this.startLevelMeter(systemStream, "systemAudio");
     }
 
-    // 4. Mix system audio + mic via AudioContext, or use mic only
+    // 4. Mix system audio through a stable AudioContext destination. Even when
+    // the mic is unavailable at startup, this leaves a live place to attach it
+    // later if Chrome/macOS exposes the device during the recording.
     let recordStream: MediaStream;
-    if (systemStream && systemStream.getAudioTracks().length > 0 && micStream) {
+    if (systemStream && systemStream.getAudioTracks().length > 0) {
       const ctx = new AudioContext();
-      const dest = ctx.createMediaStreamDestination();
-      ctx.createMediaStreamSource(systemStream).connect(dest);
-      this.micSourceNode = ctx.createMediaStreamSource(micStream);
-      this.micSourceNode.connect(dest);
+      const graph = createCaptureMixGraph(ctx, { systemStream, microphoneStream: micStream });
       this.audioCtx = ctx;
-      this.mixedStream = dest.stream;
-      recordStream = dest.stream;
-    } else if (systemStream && systemStream.getAudioTracks().length > 0) {
-      recordStream = systemStream;
+      this.mixGraph = graph;
+      this.micSourceNode = graph.microphoneSource;
+      this.mixedStream = graph.recordStream;
+      recordStream = graph.recordStream;
     } else if (micStream) {
       recordStream = micStream;
     } else if (micStartupError) {
@@ -367,6 +375,10 @@ export class AudioRecorder {
     };
     this.mediaRecorder.start(1000);
     this.startTime = Date.now();
+
+    if (!micStream && micStartupError && systemStream) {
+      this.startDeferredMicrophoneRecovery(micStartupError);
+    }
 
     // 6. Live transcription via SpeechRecognition + Whisper polling
     this.startSpeechRecognition();
@@ -643,22 +655,8 @@ export class AudioRecorder {
       );
       this.startLevelMeter(newMicStream, "microphone", this.onLevel || undefined);
 
-      // If we have a mixing AudioContext, swap the mic source node
-      if (this.audioCtx && this.audioCtx.state !== "closed") {
-        if (this.micSourceNode) {
-          this.micSourceNode.disconnect();
-        }
-        this.micSourceNode = this.audioCtx.createMediaStreamSource(newMicStream);
-        // Reconnect to the existing destination
-        const dest = this.audioCtx.createMediaStreamDestination();
-        if (this.systemStream) {
-          this.audioCtx.createMediaStreamSource(this.systemStream).connect(dest);
-        }
-        this.micSourceNode.connect(dest);
-
-        // Replace the mixed stream tracks in the MediaRecorder
-        // MediaRecorder can't swap tracks, but the AudioContext destination
-        // feeds through, so we just needed to reconnect the source nodes
+      if (this.mixGraph && this.audioCtx?.state !== "closed") {
+        this.micSourceNode = connectMicrophoneToCaptureMix(this.mixGraph, newMicStream);
       }
 
       if (this.onTranscript) {
@@ -687,6 +685,9 @@ export class AudioRecorder {
       this.workerTimer.terminate();
       this.workerTimer = null;
     }
+    this.micRecoveryTimerId = 0;
+    this.micRecoveryInFlight = false;
+    this.micRecoveryAttempts = 0;
     if (this.recognition) {
       try { this.recognition.abort(); } catch { /* ignore */ }
       this.recognition = null;
@@ -708,6 +709,7 @@ export class AudioRecorder {
     this.diagnosticLevelContexts = [];
     this.levelAnalyser = null;
     this.micSourceNode = null;
+    this.mixGraph = null;
     this.onTranscript = null;
     this.onLevel = null;
     this.updateDiagnostics((current) =>
@@ -787,6 +789,104 @@ export class AudioRecorder {
     } catch (err) {
       console.warn("[NoteAI] Diagnostic level meter setup failed:", err);
     }
+  }
+
+  private startDeferredMicrophoneRecovery(initialError: MicrophoneStartupError): void {
+    if (!this.workerTimer || initialError.kind === "permission-denied" || this.micRecoveryTimerId) return;
+
+    this.updateDiagnostics((current) =>
+      updateRecordingDiagnosticSource(
+        current,
+        "microphone",
+        "unavailable",
+        `${initialError.message}; retrying while tab audio records`
+      )
+    );
+
+    this.micRecoveryTimerId = this.workerTimer.setInterval(() => {
+      if (this.stopped || this.micStream || this.micRecoveryAttempts >= 12) {
+        this.clearMicrophoneRecoveryTimer();
+        return;
+      }
+      void this.tryRecoverMicrophone();
+    }, 5000);
+
+    void this.tryRecoverMicrophone();
+  }
+
+  private clearMicrophoneRecoveryTimer(): void {
+    if (this.workerTimer && this.micRecoveryTimerId) {
+      this.workerTimer.clearInterval(this.micRecoveryTimerId);
+    }
+    this.micRecoveryTimerId = 0;
+  }
+
+  private async tryRecoverMicrophone(): Promise<void> {
+    if (this.stopped || this.micStream || this.micRecoveryInFlight) return;
+    this.micRecoveryInFlight = true;
+    this.micRecoveryAttempts += 1;
+
+    try {
+      const micResult = await acquireMicrophoneStream(navigator.mediaDevices, {
+        micDeviceId: this.micDeviceId,
+        maxNoDeviceRetries: 0,
+      });
+      this.ensureStartupActive(micResult.stream);
+      this.micStream = micResult.stream;
+      if (this.mixGraph && this.audioCtx?.state !== "closed") {
+        this.micSourceNode = connectMicrophoneToCaptureMix(this.mixGraph, micResult.stream);
+      }
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticPermission(
+          updateRecordingDiagnosticSource(current, "microphone", "capturing"),
+          "microphonePermission",
+          "granted"
+        )
+      );
+      this.startLevelMeter(micResult.stream, "microphone", this.onLevel || undefined);
+      this.clearMicrophoneRecoveryTimer();
+
+      const label = await this.resolveMicrophoneLabel(micResult.stream, micResult.devices);
+      if (this.onTranscript) {
+        this.onTranscript(`[Mic recovered: ${label}]`, true);
+      }
+    } catch (err) {
+      const micError = err instanceof MicrophoneStartupError
+        ? err
+        : new MicrophoneStartupError(
+          "access-failed",
+          err instanceof Error ? err.message : String(err),
+          { cause: err }
+        );
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticSource(
+          updateRecordingDiagnosticPermission(
+            current,
+            "microphonePermission",
+            micError.kind === "permission-denied" ? "denied" : current.microphonePermission
+          ),
+          "microphone",
+          "unavailable",
+          micError.kind === "permission-denied"
+            ? micError.message
+            : `${micError.message}; retrying while tab audio records`
+        )
+      );
+      if (micError.kind === "permission-denied") {
+        this.clearMicrophoneRecoveryTimer();
+      }
+    } finally {
+      this.micRecoveryInFlight = false;
+    }
+  }
+
+  private async resolveMicrophoneLabel(stream: MediaStream, devices: MediaDeviceInfo[] = []): Promise<string> {
+    const activeTrack = stream.getAudioTracks()[0];
+    const settings = activeTrack?.getSettings?.();
+    const allDevices = devices.length > 0 ? devices : await enumerateAudioInputDevices(navigator.mediaDevices).catch(() => []);
+    const match = allDevices.find((device) => device.deviceId === settings?.deviceId);
+    this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";
+    return this.activeMicLabel;
   }
 
   private updateDiagnostics(update: (current: RecordingDiagnostics) => RecordingDiagnostics): void {

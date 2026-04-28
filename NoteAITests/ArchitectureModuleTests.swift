@@ -98,16 +98,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThan(compact.contentMaxWidth, wide.contentMaxWidth)
         XCTAssertLessThan(compact.onboardingMinimumCardWidth, wide.onboardingMinimumCardWidth)
 
-        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 260)
+        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 220)
+        XCTAssertLessThanOrEqual(wide.sidebarWidth, 244)
         XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1320)
-        XCTAssertLessThanOrEqual(wide.titleFontSize, 35)
-        XCTAssertLessThanOrEqual(wide.metricValueFontSize, 26)
-        XCTAssertLessThanOrEqual(wide.sectionTitleFontSize, 16)
-        XCTAssertLessThanOrEqual(wide.bodyFontSize, 14)
-        XCTAssertLessThanOrEqual(wide.smallFontSize, 12)
-        XCTAssertLessThanOrEqual(wide.tinyFontSize, 10)
-        XCTAssertLessThanOrEqual(wide.controlHeight, 42)
-        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 44)
+        XCTAssertLessThanOrEqual(wide.scale, 1)
+        XCTAssertLessThanOrEqual(wide.titleFontSize, 28)
+        XCTAssertLessThanOrEqual(wide.metricValueFontSize, 20)
+        XCTAssertLessThanOrEqual(wide.sectionTitleFontSize, 13)
+        XCTAssertLessThanOrEqual(wide.bodyFontSize, 11)
+        XCTAssertLessThanOrEqual(wide.smallFontSize, 10)
+        XCTAssertLessThanOrEqual(wide.tinyFontSize, 9)
+        XCTAssertLessThanOrEqual(wide.controlHeight, 35)
+        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 38)
     }
 
     func testOAuthCallbackRequiresExpectedState() {

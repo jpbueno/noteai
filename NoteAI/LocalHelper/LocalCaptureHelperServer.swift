@@ -383,14 +383,9 @@ final class LocalCaptureHelperServer {
 
     private func handle(clientFD: Int32) {
         queue.async { [weak self] in
-            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-            let count = recv(clientFD, &buffer, buffer.count, 0)
-            guard let self, count > 0 else {
-                close(clientFD)
-                return
-            }
-            let data = Data(buffer.prefix(count))
-            guard let request = Self.parseRequest(data) else {
+            guard let self,
+                  let data = Self.readRequestData(from: clientFD),
+                  let request = Self.parseRequest(data) else {
                 close(clientFD)
                 return
             }
@@ -401,6 +396,67 @@ final class LocalCaptureHelperServer {
                 close(clientFD)
             }
         }
+    }
+
+    private static func readRequestData(from fd: Int32) -> Data? {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        let maxRequestBytes = 1024 * 1024
+        var emptyPollCount = 0
+
+        while data.count < maxRequestBytes {
+            let count = recv(fd, &buffer, buffer.count, 0)
+            if count > 0 {
+                emptyPollCount = 0
+                data.append(contentsOf: buffer.prefix(count))
+                if hasCompleteRequest(data) {
+                    return data
+                }
+                continue
+            }
+
+            if count == 0 {
+                return data.isEmpty ? nil : data
+            }
+
+            if errno == EINTR {
+                continue
+            }
+
+            if errno == EWOULDBLOCK || errno == EAGAIN {
+                if hasCompleteRequest(data) {
+                    return data
+                }
+                guard emptyPollCount < 100 else { return nil }
+                emptyPollCount += 1
+                usleep(10_000)
+                continue
+            }
+
+            return nil
+        }
+
+        return nil
+    }
+
+    private static func hasCompleteRequest(_ data: Data) -> Bool {
+        let delimiter = Data("\r\n\r\n".utf8)
+        guard let headerRange = data.range(of: delimiter) else { return false }
+
+        let headerData = data[..<headerRange.lowerBound]
+        let headerText = String(decoding: headerData, as: UTF8.self)
+        let contentLength = headerText
+            .components(separatedBy: "\r\n")
+            .compactMap { line -> Int? in
+                guard line.lowercased().hasPrefix("content-length:") else { return nil }
+                let value = line.split(separator: ":", maxSplits: 1).last?
+                    .trimmingCharacters(in: .whitespaces)
+                return value.flatMap(Int.init)
+            }
+            .first ?? 0
+
+        let bodyByteCount = data.distance(from: headerRange.upperBound, to: data.endIndex)
+        return bodyByteCount >= contentLength
     }
 
     private static func sendAll(_ data: Data, to fd: Int32) {

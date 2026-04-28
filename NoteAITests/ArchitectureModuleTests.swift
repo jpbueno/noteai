@@ -88,6 +88,22 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
+    func testCommandCenterLayoutGrowsControlSurfacesWithWindowWidth() {
+        let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
+        let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
+
+        XCTAssertLessThan(compact.scale, wide.scale)
+        XCTAssertLessThan(compact.sidebarWidth, wide.sidebarWidth)
+        XCTAssertLessThan(compact.commandSearchMaxWidth, wide.commandSearchMaxWidth)
+        XCTAssertLessThan(compact.controlHeight, wide.controlHeight)
+        XCTAssertLessThan(compact.onboardingMinimumCardWidth, wide.onboardingMinimumCardWidth)
+
+        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 280)
+        XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1320)
+        XCTAssertGreaterThanOrEqual(wide.bodyFontSize, 15)
+        XCTAssertGreaterThanOrEqual(wide.controlHeight, 48)
+    }
+
     func testOAuthCallbackRequiresExpectedState() {
         let valid = "GET /?code=abc123&state=state-1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         let missingState = "GET /?code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"

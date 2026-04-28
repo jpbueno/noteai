@@ -1,6 +1,6 @@
 import AppKit
+import Darwin
 import Foundation
-import Network
 
 struct LocalCaptureHTTPRouterRequest {
     var method: String
@@ -297,7 +297,8 @@ final class LocalCaptureHelperRouter {
 final class LocalCaptureHelperServer {
     private let router: LocalCaptureHelperRouter
     private let queue = DispatchQueue(label: "com.noteai.local-capture-helper")
-    private var listener: NWListener?
+    private var socketFileDescriptor: Int32 = -1
+    private var acceptSource: DispatchSourceRead?
     private let port: UInt16
 
     init(router: LocalCaptureHelperRouter, port: UInt16 = LocalCaptureHelperProtocol.defaultPort) {
@@ -306,46 +307,110 @@ final class LocalCaptureHelperServer {
     }
 
     func start() throws {
-        guard listener == nil else { return }
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
-            throw LocalCaptureHelperServerError.invalidPort
+        guard socketFileDescriptor == -1 else { return }
+
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw LocalCaptureHelperServerError.socketCreationFailed(errno) }
+
+        var reuse: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            let code = errno
+            close(fd)
+            throw LocalCaptureHelperServerError.socketOptionFailed(code)
         }
 
-        let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-        if let loopback = IPv4Address("127.0.0.1") {
-            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: nwPort)
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
+            close(fd)
+            throw LocalCaptureHelperServerError.invalidLoopbackAddress
         }
 
-        let listener = try NWListener(using: parameters, on: nwPort)
-        listener.newConnectionHandler = { [weak self] connection in
-            self?.handle(connection)
+        let bindResult = withUnsafePointer(to: &address) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                bind(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
         }
-        listener.start(queue: queue)
-        self.listener = listener
+        guard bindResult == 0 else {
+            let code = errno
+            close(fd)
+            throw LocalCaptureHelperServerError.bindFailed(code)
+        }
+
+        guard listen(fd, SOMAXCONN) == 0 else {
+            let code = errno
+            close(fd)
+            throw LocalCaptureHelperServerError.listenFailed(code)
+        }
+
+        let currentFlags = fcntl(fd, F_GETFL, 0)
+        if currentFlags >= 0 {
+            _ = fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK)
+        }
+
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        source.setEventHandler { [weak self] in
+            self?.acceptPendingConnections()
+        }
+        source.setCancelHandler {
+            close(fd)
+        }
+        socketFileDescriptor = fd
+        acceptSource = source
+        source.resume()
     }
 
     func stop() {
-        listener?.cancel()
-        listener = nil
+        acceptSource?.cancel()
+        acceptSource = nil
+        socketFileDescriptor = -1
     }
 
-    private func handle(_ connection: NWConnection) {
-        connection.start(queue: queue)
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, _ in
-            guard let self, let data, let request = Self.parseRequest(data) else {
-                connection.cancel()
+    private func acceptPendingConnections() {
+        while socketFileDescriptor >= 0 {
+            let clientFD = accept(socketFileDescriptor, nil, nil)
+            if clientFD < 0 {
+                if errno == EWOULDBLOCK || errno == EAGAIN {
+                    return
+                }
+                return
+            }
+            handle(clientFD: clientFD)
+        }
+    }
+
+    private func handle(clientFD: Int32) {
+        queue.async { [weak self] in
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            let count = recv(clientFD, &buffer, buffer.count, 0)
+            guard let self, count > 0 else {
+                close(clientFD)
+                return
+            }
+            let data = Data(buffer.prefix(count))
+            guard let request = Self.parseRequest(data) else {
+                close(clientFD)
                 return
             }
 
             Task {
                 let response = await self.router.route(request)
-                connection.send(
-                    content: Self.serialize(response),
-                    completion: .contentProcessed { _ in
-                        connection.cancel()
-                    }
-                )
+                Self.sendAll(Self.serialize(response), to: clientFD)
+                close(clientFD)
+            }
+        }
+    }
+
+    private static func sendAll(_ data: Data, to fd: Int32) {
+        data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var sent = 0
+            while sent < data.count {
+                let result = send(fd, baseAddress.advanced(by: sent), data.count - sent, 0)
+                if result <= 0 { return }
+                sent += result
             }
         }
     }
@@ -412,4 +477,9 @@ final class LocalCaptureHelperServer {
 
 enum LocalCaptureHelperServerError: Error {
     case invalidPort
+    case invalidLoopbackAddress
+    case socketCreationFailed(Int32)
+    case socketOptionFailed(Int32)
+    case bindFailed(Int32)
+    case listenFailed(Int32)
 }

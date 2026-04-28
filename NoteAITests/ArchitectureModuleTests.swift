@@ -88,20 +88,26 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
-    func testCommandCenterLayoutGrowsControlSurfacesWithWindowWidth() {
+    func testCommandCenterLayoutAdaptsWithoutInflatingTypography() {
         let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
         let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
 
         XCTAssertLessThan(compact.scale, wide.scale)
         XCTAssertLessThan(compact.sidebarWidth, wide.sidebarWidth)
         XCTAssertLessThan(compact.commandSearchMaxWidth, wide.commandSearchMaxWidth)
-        XCTAssertLessThan(compact.controlHeight, wide.controlHeight)
+        XCTAssertLessThan(compact.contentMaxWidth, wide.contentMaxWidth)
         XCTAssertLessThan(compact.onboardingMinimumCardWidth, wide.onboardingMinimumCardWidth)
 
-        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 280)
+        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 260)
         XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1320)
-        XCTAssertGreaterThanOrEqual(wide.bodyFontSize, 15)
-        XCTAssertGreaterThanOrEqual(wide.controlHeight, 48)
+        XCTAssertLessThanOrEqual(wide.titleFontSize, 35)
+        XCTAssertLessThanOrEqual(wide.metricValueFontSize, 26)
+        XCTAssertLessThanOrEqual(wide.sectionTitleFontSize, 16)
+        XCTAssertLessThanOrEqual(wide.bodyFontSize, 14)
+        XCTAssertLessThanOrEqual(wide.smallFontSize, 12)
+        XCTAssertLessThanOrEqual(wide.tinyFontSize, 10)
+        XCTAssertLessThanOrEqual(wide.controlHeight, 42)
+        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 44)
     }
 
     func testOAuthCallbackRequiresExpectedState() {

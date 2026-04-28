@@ -63,6 +63,7 @@ struct CommandCenterLayout: Equatable {
     let onboardingMinimumCardWidth: CGFloat
     let metricMinimumCardWidth: CGFloat
     let titleFontSize: CGFloat
+    let metricValueFontSize: CGFloat
     let sectionTitleFontSize: CGFloat
     let bodyFontSize: CGFloat
     let smallFontSize: CGFloat
@@ -70,28 +71,30 @@ struct CommandCenterLayout: Equatable {
 
     static func metrics(forWindowWidth windowWidth: CGFloat) -> CommandCenterLayout {
         let width = max(760, windowWidth)
-        let scale = min(1.28, max(1.0, width / 1320))
-        let sidebarWidth = min(320, max(236, width * 0.17))
-        let contentMaxWidth = max(900, width - sidebarWidth - 80)
+        let scale = min(1.08, max(0.96, width / 1440))
+        let typeScale = min(1.04, max(0.98, width / 1440))
+        let sidebarWidth = min(284, max(220, width * 0.16))
+        let contentMaxWidth = max(820, width - sidebarWidth - 88)
 
         return CommandCenterLayout(
             scale: scale,
             sidebarWidth: sidebarWidth,
             minimumSidebarWidth: max(220, sidebarWidth - 56),
-            maximumSidebarWidth: min(400, sidebarWidth + 96),
+            maximumSidebarWidth: min(340, sidebarWidth + 72),
             contentMaxWidth: contentMaxWidth,
-            commandSearchMaxWidth: min(760, max(480, width * 0.42)),
-            controlHeight: round(40 * scale),
-            actionButtonHeight: round(42 * scale),
+            commandSearchMaxWidth: min(560, max(420, width * 0.34)),
+            controlHeight: min(42, max(38, round(40 * scale))),
+            actionButtonHeight: min(44, max(40, round(42 * scale))),
             panelPadding: round(20 * scale),
             dashboardSpacing: round(16 * scale),
             onboardingMinimumCardWidth: round(230 * scale),
             metricMinimumCardWidth: round(112 * scale),
-            titleFontSize: round(34 * scale),
-            sectionTitleFontSize: round(16 * scale),
-            bodyFontSize: round(13 * scale),
-            smallFontSize: round(12 * scale),
-            tinyFontSize: round(10 * scale)
+            titleFontSize: min(35, max(33, round(34 * typeScale))),
+            metricValueFontSize: min(26, max(24, round(24 * scale))),
+            sectionTitleFontSize: 16,
+            bodyFontSize: min(14, max(13, round(13.5 * typeScale))),
+            smallFontSize: 12,
+            tinyFontSize: 10
         )
     }
 }
@@ -180,7 +183,7 @@ struct HomeDashboardView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Operational snapshot")
-                            .font(.system(size: layout.sectionTitleFontSize + 4, weight: .bold))
+                            .font(.system(size: layout.sectionTitleFontSize + 3, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                         Text("\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")")
                             .font(.system(size: layout.bodyFontSize))
@@ -485,7 +488,7 @@ private struct MetricTile: View {
             .foregroundStyle(Theme.textTertiary)
 
             Text("\(value)")
-                .font(.system(size: round(26 * layout.scale), weight: .bold))
+                .font(.system(size: layout.metricValueFontSize, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
         }
         .padding(round(12 * layout.scale))

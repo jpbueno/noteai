@@ -8,7 +8,7 @@ import {
   type RecordingSource,
 } from "./recording-diagnostics";
 
-export type RecordingState = "idle" | "recording" | "processing";
+export type RecordingState = "idle" | "starting" | "recording" | "processing";
 
 type TranscriptCallback = (text: string, isFinal: boolean) => void;
 type LevelCallback = (level: number) => void;

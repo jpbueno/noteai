@@ -352,14 +352,16 @@ export default function Home() {
   }, [todos]);
 
   const guardedStartRecording = useCallback(
-    (micDeviceId?: string, captureTab = false) => {
+    async (micDeviceId?: string, captureTab = false) => {
       if (onboardingChecklist.firstRecordingBlocker) {
         alert(onboardingChecklist.firstRecordingBlocker);
         setSelection({ type: "settings", tab: "ai" });
         return;
       }
 
-      startRecording(micDeviceId, captureTab);
+      const started = await startRecording(micDeviceId, captureTab);
+      if (!started) return;
+
       setSelection({ type: "liveTranscript" });
     },
     [onboardingChecklist.firstRecordingBlocker, startRecording],
@@ -368,7 +370,7 @@ export default function Home() {
   const handleOnboardingAction = useCallback(
     async (item: OnboardingChecklistItem) => {
       if (item.target === "recording") {
-        guardedStartRecording(undefined, true);
+        void guardedStartRecording(undefined, true);
         return;
       }
 
@@ -452,7 +454,7 @@ export default function Home() {
         if (recordingState === "recording") {
           handleStopRecording();
         } else if (recordingState === "idle") {
-          guardedStartRecording();
+          void guardedStartRecording();
         }
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
@@ -612,7 +614,7 @@ export default function Home() {
             recordingState={recordingState}
             recordingDuration={duration}
             onStartRecording={(micDeviceId, captureTab) => {
-              guardedStartRecording(micDeviceId, captureTab);
+              void guardedStartRecording(micDeviceId, captureTab);
             }}
             onStopRecording={handleStopRecording}
             onNewNote={handleNewNote}

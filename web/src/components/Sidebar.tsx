@@ -131,12 +131,14 @@ export default function Sidebar({
           <div className="space-y-1.5">
             <button
               onClick={() => onStartRecording(undefined, true)}
-              disabled={recordingState === "processing"}
+              disabled={recordingState === "processing" || recordingState === "starting"}
               className="flex items-center justify-center gap-2 w-full px-3.5 py-3 rounded-xl bg-gradient-to-r from-danger to-[#ff8a5c] text-white shadow-lg shadow-danger/15 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               <Mic className="w-3.5 h-3.5" />
               <span className="text-sm font-bold">
-                {recordingState === "processing"
+                {recordingState === "starting"
+                  ? "Starting..."
+                  : recordingState === "processing"
                   ? "Processing..."
                   : "Start Recording"}
               </span>

@@ -7,6 +7,12 @@ import {
   type RecordingDiagnostics,
   type RecordingSource,
 } from "./recording-diagnostics";
+import {
+  MicrophoneStartupError,
+  acquireMicrophoneStream,
+  enumerateAudioInputDevices,
+  formatMicrophoneStartupError,
+} from "./microphone-startup";
 
 export type RecordingState = "idle" | "starting" | "recording" | "processing";
 
@@ -28,20 +34,21 @@ async function whisperTranscribe(blob: Blob, prompt?: string, signal?: AbortSign
   return data.text || "";
 }
 
-export async function getAudioInputDevices(): Promise<{ deviceId: string; label: string }[]> {
-  try {
-    const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    tempStream.getTracks().forEach((t) => t.stop());
-  } catch { /* ignore */ }
-  const devices = await navigator.mediaDevices.enumerateDevices();
+export async function getAudioInputDevices(options: { requestPermission?: boolean } = {}): Promise<{ deviceId: string; label: string }[]> {
+  if (options.requestPermission ?? true) {
+    try {
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach((t) => t.stop());
+    } catch { /* ignore */ }
+  }
+  const devices = await enumerateAudioInputDevices(navigator.mediaDevices);
   return devices
-    .filter((d) => d.kind === "audioinput")
     .map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 6)}` }));
 }
 
 /** Find BlackHole device for system audio loopback capture */
 async function findBlackHoleDevice(): Promise<string | null> {
-  const devices = await getAudioInputDevices();
+  const devices = await getAudioInputDevices({ requestPermission: false });
   const bh = devices.find((d) => d.label.toLowerCase().includes("blackhole"));
   return bh?.deviceId ?? null;
 }
@@ -176,88 +183,41 @@ export class AudioRecorder {
     // 1. Get mic permission first so enumerateDevices() returns labels.
     //    If the requested device is gone (stale ID), fall back to default mic.
     let micStream: MediaStream;
-    const tryGetMic = async (constraints: MediaStreamConstraints): Promise<MediaStream> => {
-      return navigator.mediaDevices.getUserMedia(constraints);
-    };
-
-    // Try multiple approaches to get mic access
-    const attempts: { constraints: MediaStreamConstraints; label: string }[] = [
-      ...(micDeviceId
-        ? [{ constraints: { audio: { deviceId: { exact: micDeviceId } } } as MediaStreamConstraints, label: "requested device" }]
-        : []),
-      { constraints: { audio: true }, label: "default audio" },
-      { constraints: { audio: { echoCancellation: true, noiseSuppression: true } }, label: "with processing" },
-      { constraints: { audio: { sampleRate: 44100 } }, label: "explicit sample rate" },
-    ];
-
-    let lastErr: unknown = null;
-    for (const attempt of attempts) {
-      try {
-        micStream = await tryGetMic(attempt.constraints);
-        this.ensureStartupActive(micStream);
-        this.updateDiagnostics((current) =>
-          updateRecordingDiagnosticPermission(
-            updateRecordingDiagnosticSource(current, "microphone", "capturing"),
-            "microphonePermission",
-            "granted"
-          )
+    let availableMics: MediaDeviceInfo[] = [];
+    try {
+      const micResult = await acquireMicrophoneStream(navigator.mediaDevices, { micDeviceId });
+      micStream = micResult.stream;
+      availableMics = micResult.devices;
+      this.ensureStartupActive(micStream);
+      this.updateDiagnostics((current) =>
+        updateRecordingDiagnosticPermission(
+          updateRecordingDiagnosticSource(current, "microphone", "capturing"),
+          "microphonePermission",
+          "granted"
+        )
+      );
+    } catch (err) {
+      const micError = err instanceof MicrophoneStartupError
+        ? err
+        : new MicrophoneStartupError(
+          "access-failed",
+          err instanceof Error ? err.message : String(err),
+          { cause: err }
         );
-        break;
-      } catch (err) {
-        lastErr = err;
-        // If permission denied, no point retrying with different constraints
-        if (err instanceof DOMException && err.name === "NotAllowedError") break;
-      }
-    }
-
-    if (!micStream!) {
-      const errName = lastErr instanceof DOMException ? lastErr.name : "";
-      const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
       this.updateDiagnostics((current) =>
         updateRecordingDiagnosticSource(
           updateRecordingDiagnosticPermission(
             current,
             "microphonePermission",
-            errName === "NotAllowedError" ? "denied" : current.microphonePermission
+            micError.kind === "permission-denied" ? "denied" : current.microphonePermission
           ),
           "microphone",
           "unavailable",
-          errName || errMsg || "Mic access failed"
+          micError.message
         )
       );
       this.writeDiagnosticsLog("Microphone unavailable");
-
-      if (errName === "NotAllowedError") {
-        throw new Error(
-          "Microphone permission denied.\n\n" +
-          "1. Click the lock/tune icon in Chrome's address bar → Microphone → Allow\n" +
-          "2. macOS: System Settings → Privacy & Security → Microphone → Chrome ON\n" +
-          "3. Reload this page"
-        );
-      }
-
-      // Check devices for diagnostics
-      let mics: MediaDeviceInfo[] = [];
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        mics = devices.filter((d) => d.kind === "audioinput");
-      } catch { /* ignore */ }
-
-      if (mics.length === 0) {
-        throw new Error(
-          "Chrome cannot see any microphones.\n\n" +
-          "Fix: Quit Chrome completely (Cmd+Q), then relaunch it.\n\n" +
-          "If that doesn't work:\n" +
-          "• macOS System Settings → Privacy & Security → Microphone → toggle Chrome OFF then ON\n" +
-          "• Relaunch Chrome"
-        );
-      }
-
-      throw new Error(
-        `Mic access failed: ${errName || errMsg}\n\n` +
-        `${mics.length} mic(s) detected: ${mics.map((m) => m.label || "unnamed").join(", ")}\n\n` +
-        "Try: Quit Chrome (Cmd+Q) and relaunch, or click lock icon → Microphone → Allow."
-      );
+      throw new Error(formatMicrophoneStartupError(micError));
     }
     this.micStream = micStream;
 
@@ -265,7 +225,7 @@ export class AudioRecorder {
     try {
       const activeTrack = micStream.getAudioTracks()[0];
       const settings = activeTrack?.getSettings?.();
-      const allDevices = await navigator.mediaDevices.enumerateDevices();
+      const allDevices = availableMics.length > 0 ? availableMics : await enumerateAudioInputDevices(navigator.mediaDevices);
       this.ensureStartupActive();
       const match = allDevices.find((d) => d.deviceId === settings?.deviceId);
       this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";

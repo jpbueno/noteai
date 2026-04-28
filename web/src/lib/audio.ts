@@ -141,6 +141,13 @@ export class AudioRecorder {
   private diagnostics: RecordingDiagnostics = createRecordingDiagnostics();
   private activeMicLabel: string = "";
 
+  private ensureStartupActive(stream?: MediaStream | null): void {
+    if (!this.stopped) return;
+
+    stream?.getTracks().forEach((track) => track.stop());
+    throw new Error("Recording startup cancelled.");
+  }
+
   /**
    * @param onTranscript - callback for live transcript segments
    * @param micDeviceId - specific mic device ID (or undefined for default)
@@ -187,6 +194,7 @@ export class AudioRecorder {
     for (const attempt of attempts) {
       try {
         micStream = await tryGetMic(attempt.constraints);
+        this.ensureStartupActive(micStream);
         this.updateDiagnostics((current) =>
           updateRecordingDiagnosticPermission(
             updateRecordingDiagnosticSource(current, "microphone", "capturing"),
@@ -258,6 +266,7 @@ export class AudioRecorder {
       const activeTrack = micStream.getAudioTracks()[0];
       const settings = activeTrack?.getSettings?.();
       const allDevices = await navigator.mediaDevices.enumerateDevices();
+      this.ensureStartupActive();
       const match = allDevices.find((d) => d.deviceId === settings?.deviceId);
       this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";
       if (this.onTranscript) {
@@ -265,11 +274,14 @@ export class AudioRecorder {
       }
     } catch { /* ignore */ }
 
+    this.ensureStartupActive();
+
     // Set up level monitoring — always runs so the UI can show audio presence
     this.startLevelMeter(micStream, "microphone", this.onLevel || undefined);
 
     // 2. Try BlackHole for system audio loopback (captures ALL speaker output)
     const blackHoleId = await findBlackHoleDevice();
+    this.ensureStartupActive();
     let systemStream: MediaStream | null = null;
 
     if (blackHoleId) {
@@ -277,6 +289,7 @@ export class AudioRecorder {
         systemStream = await navigator.mediaDevices.getUserMedia({
           audio: { deviceId: { exact: blackHoleId } },
         });
+        this.ensureStartupActive(systemStream);
         this.hasTabAudio = true;
         this.updateDiagnostics((current) =>
           updateRecordingDiagnosticPermission(
@@ -304,6 +317,7 @@ export class AudioRecorder {
           video: true,
           audio: true,
         });
+        this.ensureStartupActive(displayStream);
         displayStream.getVideoTracks().forEach((t) => t.stop());
         if (displayStream.getAudioTracks().length > 0) {
           systemStream = displayStream;

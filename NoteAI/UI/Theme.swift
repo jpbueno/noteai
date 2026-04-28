@@ -1,23 +1,32 @@
 import SwiftUI
 
-/// Notion-accurate design tokens.
+/// NoteAI v4 Command Center design tokens.
 enum Theme {
-    // Notion dark mode colors (from screenshots)
-    static let sidebarBG = Color(hex: "191919")
-    static let contentBG = Color(hex: "1F1F1F")
-    static let hoverBG = Color(hex: "252525")
-    static let selectedBG = Color(hex: "2B2B2B")
-    static let border = Color(hex: "2E2E2E")
+    // Mirrors web/src/app/globals.css.
+    static let sidebarBG = Color(hex: "10161B")
+    static let contentBG = Color(hex: "0B0F12")
+    static let hoverBG = Color(hex: "151D23")
+    static let selectedBG = Color(hex: "1B252D")
+    static let border = Color(hex: "26333D")
+    static let panelBG = Color(hex: "10161B").opacity(0.86)
+    static let rowBG = Color(hex: "0F1519")
+    static let rowBorder = Color(hex: "202D36")
 
     // Text
-    static let textPrimary = Color(hex: "EBEBEB")
-    static let textSecondary = Color(hex: "9B9B9B")
-    static let textTertiary = Color(hex: "5A5A5A")
+    static let textPrimary = Color(hex: "F3F7F9")
+    static let textSecondary = Color(hex: "C4CCD2")
+    static let textTertiary = Color(hex: "84919C")
 
     // Sidebar section headers
-    static let sectionHeader = Color(hex: "7A7A7A")
+    static let sectionHeader = Color(hex: "9BA7AF")
 
-    // Content typography — Notion uses a serif-like large title
+    // Status
+    static let accent = Color(hex: "64D2FF")
+    static let danger = Color(hex: "FF5C66")
+    static let success = Color(hex: "4ADE80")
+    static let warning = Color(hex: "FACC15")
+
+    // Content typography
     static let pageTitleSize: CGFloat = 40
     static let h2Size: CGFloat = 24
     static let h3Size: CGFloat = 20

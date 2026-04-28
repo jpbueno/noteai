@@ -56,6 +56,38 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(summary.wasSummarized)
     }
 
+    func testCommandCenterSnapshotPrioritizesFocusQueueAndNextMove() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let today = calendar.startOfDay(for: Date())
+        let overdueDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: today))
+        let tomorrowDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: today))
+        let oldCompletion = try XCTUnwrap(calendar.date(byAdding: .day, value: -3, to: today))
+        let recentCompletion = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: today))
+
+        let overdue = TodoItem(title: "Escalate roadmap blocker", dueDate: overdueDate)
+        let todayTodo = TodoItem(title: "Prep customer sync", dueDate: today)
+        let upcoming = TodoItem(title: "Draft T5T", dueDate: tomorrowDate)
+        let noDueDate = TodoItem(title: "Clean backlog")
+        let olderDone = TodoItem(title: "Old closed loop", completed: true, modifiedDate: oldCompletion)
+        let recentDone = TodoItem(title: "Recent closed loop", completed: true, modifiedDate: recentCompletion)
+
+        let snapshot = CommandCenterSnapshot(todos: [
+            upcoming,
+            recentDone,
+            noDueDate,
+            todayTodo,
+            olderDone,
+            overdue,
+        ])
+
+        XCTAssertEqual(snapshot.focusCount, 2)
+        XCTAssertEqual(snapshot.pendingCount, 4)
+        XCTAssertEqual(snapshot.completed.count, 2)
+        XCTAssertEqual(snapshot.upcoming.map(\.id), [upcoming.id])
+        XCTAssertEqual(snapshot.nextTask?.id, overdue.id)
+        XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
+    }
+
     func testOAuthCallbackRequiresExpectedState() {
         let valid = "GET /?code=abc123&state=state-1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         let missingState = "GET /?code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MicrophoneStartupError,
   acquireMicrophoneStream,
+  canContinueWithoutMicrophone,
   formatMicrophoneStartupError,
 } from "./src/lib/microphone-startup.ts";
 
@@ -100,4 +101,21 @@ test("no-microphone startup message avoids restart-only guidance", () => {
   assert.match(message, /couldn't see a microphone/i);
   assert.match(message, /try Start Recording again/i);
   assert.doesNotMatch(message, /quit chrome|relaunch chrome|restart chrome/i);
+});
+
+test("tab capture may continue when Chrome temporarily cannot enumerate microphones", () => {
+  const noDevices = new MicrophoneStartupError("no-devices", "No microphones detected");
+  const accessFailed = new MicrophoneStartupError("access-failed", "Mic access failed", {
+    devices: [audioInput()],
+  });
+
+  assert.equal(canContinueWithoutMicrophone(noDevices, true), true);
+  assert.equal(canContinueWithoutMicrophone(accessFailed, true), true);
+  assert.equal(canContinueWithoutMicrophone(noDevices, false), false);
+});
+
+test("tab capture does not continue after explicit microphone permission denial", () => {
+  const denied = new MicrophoneStartupError("permission-denied", "Permission denied");
+
+  assert.equal(canContinueWithoutMicrophone(denied, true), false);
 });

@@ -10,6 +10,7 @@ import {
 import {
   MicrophoneStartupError,
   acquireMicrophoneStream,
+  canContinueWithoutMicrophone,
   enumerateAudioInputDevices,
   formatMicrophoneStartupError,
 } from "./microphone-startup";
@@ -180,10 +181,11 @@ export class AudioRecorder {
     // Worker-based timers that survive background tab throttling
     this.workerTimer = new WorkerTimer();
 
-    // 1. Get mic permission first so enumerateDevices() returns labels.
-    //    If the requested device is gone (stale ID), fall back to default mic.
-    let micStream: MediaStream;
+    // 1. Start with mic capture. If Chrome temporarily loses its mic device
+    //    list after refresh, tab/system audio can still carry the recording.
+    let micStream: MediaStream | null = null;
     let availableMics: MediaDeviceInfo[] = [];
+    let micStartupError: MicrophoneStartupError | null = null;
     try {
       const micResult = await acquireMicrophoneStream(navigator.mediaDevices, { micDeviceId });
       micStream = micResult.stream;
@@ -217,27 +219,34 @@ export class AudioRecorder {
         )
       );
       this.writeDiagnosticsLog("Microphone unavailable");
-      throw new Error(formatMicrophoneStartupError(micError));
+      if (!canContinueWithoutMicrophone(micError, captureTab)) {
+        throw new Error(formatMicrophoneStartupError(micError));
+      }
+      micStartupError = micError;
     }
     this.micStream = micStream;
 
     // Diagnostics: figure out which mic we actually got
-    try {
-      const activeTrack = micStream.getAudioTracks()[0];
-      const settings = activeTrack?.getSettings?.();
-      const allDevices = availableMics.length > 0 ? availableMics : await enumerateAudioInputDevices(navigator.mediaDevices);
-      this.ensureStartupActive();
-      const match = allDevices.find((d) => d.deviceId === settings?.deviceId);
-      this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";
-      if (this.onTranscript) {
-        this.onTranscript(`[Mic active: ${this.activeMicLabel}]`, true);
-      }
-    } catch { /* ignore */ }
+    if (micStream) {
+      try {
+        const activeTrack = micStream.getAudioTracks()[0];
+        const settings = activeTrack?.getSettings?.();
+        const allDevices = availableMics.length > 0 ? availableMics : await enumerateAudioInputDevices(navigator.mediaDevices);
+        this.ensureStartupActive();
+        const match = allDevices.find((d) => d.deviceId === settings?.deviceId);
+        this.activeMicLabel = match?.label || activeTrack?.label || "unknown mic";
+        if (this.onTranscript) {
+          this.onTranscript(`[Mic active: ${this.activeMicLabel}]`, true);
+        }
+      } catch { /* ignore */ }
+    }
 
     this.ensureStartupActive();
 
     // Set up level monitoring — always runs so the UI can show audio presence
-    this.startLevelMeter(micStream, "microphone", this.onLevel || undefined);
+    if (micStream) {
+      this.startLevelMeter(micStream, "microphone", this.onLevel || undefined);
+    }
 
     // 2. Try BlackHole for system audio loopback (captures ALL speaker output)
     const blackHoleId = await findBlackHoleDevice();
@@ -291,7 +300,13 @@ export class AudioRecorder {
             )
           );
           if (this.onTranscript) {
-            this.onTranscript("[Tab audio captured — Whisper transcription active]", true);
+            const prefix = micStartupError
+              ? "[Mic unavailable - recording tab audio only. "
+              : "[";
+            const suffix = micStartupError
+              ? "Whisper transcription active]"
+              : "Tab audio captured — Whisper transcription active]";
+            this.onTranscript(`${prefix}${suffix}`, true);
           }
         } else {
           this.updateDiagnostics((current) =>
@@ -322,7 +337,7 @@ export class AudioRecorder {
 
     // 4. Mix system audio + mic via AudioContext, or use mic only
     let recordStream: MediaStream;
-    if (systemStream && systemStream.getAudioTracks().length > 0) {
+    if (systemStream && systemStream.getAudioTracks().length > 0 && micStream) {
       const ctx = new AudioContext();
       const dest = ctx.createMediaStreamDestination();
       ctx.createMediaStreamSource(systemStream).connect(dest);
@@ -331,8 +346,14 @@ export class AudioRecorder {
       this.audioCtx = ctx;
       this.mixedStream = dest.stream;
       recordStream = dest.stream;
-    } else {
+    } else if (systemStream && systemStream.getAudioTracks().length > 0) {
+      recordStream = systemStream;
+    } else if (micStream) {
       recordStream = micStream;
+    } else if (micStartupError) {
+      throw new Error(formatMicrophoneStartupError(micStartupError));
+    } else {
+      throw new Error("No audio source is available for recording.");
     }
 
     // 5. Single recorder

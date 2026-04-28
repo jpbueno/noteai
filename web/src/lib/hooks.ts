@@ -185,7 +185,6 @@ export function useRecording() {
     } catch (err) {
       console.error("Failed to start recording:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`Recording failed:\n\n${msg}`);
       if (recorderRef.current === recorder) {
         recorderRef.current = null;
       }
@@ -196,6 +195,9 @@ export function useRecording() {
       setCapturingTabAudio(false);
       setMicLevel(0);
       setRecordingDiagnostics(emptyRecordingDiagnostics);
+      globalThis.setTimeout(() => {
+        alert(`Recording failed:\n\n${msg}`);
+      }, 0);
       return false;
     } finally {
       startingRef.current = false;

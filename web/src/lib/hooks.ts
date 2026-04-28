@@ -17,7 +17,7 @@ import { AudioRecorder, type RecordingState } from "./audio";
 import { summarizeTranscript, transcribeAudio } from "./ai";
 import { applyLibraryFilters, type LibraryQuickFilter } from "./search";
 import { emptyRecordingDiagnostics, type RecordingDiagnostics } from "./recording-diagnostics";
-import { disposeRecorder, startRecorderWithCleanup } from "./recording-lifecycle";
+import { disposeRecorder, startOwnedRecorder } from "./recording-lifecycle";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -145,7 +145,7 @@ export function useRecording() {
       interimRef.current = "";
 
       recorder = new AudioRecorder();
-      await startRecorderWithCleanup(recorder, () => recorder!.start((text: string, isFinal: boolean) => {
+      await startOwnedRecorder(recorderRef, recorder, () => recorder!.start((text: string, isFinal: boolean) => {
         if (isFinal) {
           const elapsed = recorder?.elapsed ?? 0;
           setLiveTranscript((prev) => [
@@ -171,7 +171,6 @@ export function useRecording() {
         setRecordingDiagnostics(diagnostics);
       }));
 
-      recorderRef.current = recorder;
       setState("recording");
       setCapturingTabAudio(recorder.capturingTabAudio);
       setRecordingDiagnostics(recorder.diagnosticSnapshot);

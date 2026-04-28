@@ -2,6 +2,10 @@ export interface DisposableRecorder {
   stop: () => unknown;
 }
 
+export interface RecorderOwner<T extends DisposableRecorder> {
+  current: T | null;
+}
+
 export interface StartRecorderOptions {
   timeoutMs?: number;
 }
@@ -52,5 +56,28 @@ export async function startRecorderWithCleanup<T extends DisposableRecorder>(
     if (timeoutId !== undefined) {
       globalThis.clearTimeout(timeoutId);
     }
+  }
+}
+
+export async function startOwnedRecorder<T extends DisposableRecorder>(
+  owner: RecorderOwner<T>,
+  recorder: T,
+  start: () => Promise<void>,
+  options: StartRecorderOptions = {}
+): Promise<T> {
+  owner.current = recorder;
+
+  try {
+    await startRecorderWithCleanup(recorder, start, options);
+    if (owner.current !== recorder) {
+      disposeRecorder(recorder);
+      throw new Error("Recording startup cancelled.");
+    }
+    return recorder;
+  } catch (err) {
+    if (owner.current === recorder) {
+      owner.current = null;
+    }
+    throw err;
   }
 }

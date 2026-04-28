@@ -46,8 +46,9 @@ interface SidebarProps {
   recordingState: RecordingState;
   recordingDuration: number;
   recordingSources: RecordingSourceOption[];
-  onStartRecording: (micDeviceId?: string, captureTab?: boolean) => void;
+  onStartRecording: (micDeviceId?: string, captureTab?: boolean, source?: RecordingSourceId) => void;
   onStopRecording: () => void;
+  onOpenLocalHelper: () => void;
   onNewNote: () => void;
   onNewTodo: () => void;
   onNewT5T: () => void;
@@ -73,6 +74,7 @@ export default function Sidebar({
   recordingSources,
   onStartRecording,
   onStopRecording,
+  onOpenLocalHelper,
   onNewNote,
   onNewTodo,
   onNewT5T,
@@ -90,11 +92,14 @@ export default function Sidebar({
   const [selectedRecordingSourceId, setSelectedRecordingSourceId] = useState<RecordingSourceId>("browser-tab");
   const activeRecordingSource =
     recordingSources.find((source) => source.id === selectedRecordingSourceId) ??
-    recordingSources[0];
+    recordingSources[0]!;
+  const shouldOpenHelper =
+    activeRecordingSource?.id === "teams-desktop" &&
+    activeRecordingSource.availability === "requires-helper";
   const recordingDisabled =
     recordingState === "processing" ||
     recordingState === "starting" ||
-    !activeRecordingSource?.supportsRecording;
+    (!activeRecordingSource?.supportsRecording && !shouldOpenHelper);
 
   const isSelected = (type: string, id: string) =>
     selection?.type === type && "id" in selection && selection.id === id;
@@ -149,7 +154,12 @@ export default function Sidebar({
                   <button
                     key={source.id}
                     type="button"
-                    onClick={() => setSelectedRecordingSourceId(source.id)}
+                    onClick={() => {
+                      setSelectedRecordingSourceId(source.id);
+                      if (source.id === "teams-desktop" && source.availability === "requires-helper") {
+                        onOpenLocalHelper();
+                      }
+                    }}
                     title={source.disabledReason || source.statusLabel}
                     className={`min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors ${
                       active
@@ -171,17 +181,29 @@ export default function Sidebar({
               })}
             </div>
             <button
-              onClick={() => onStartRecording(undefined, true)}
+              onClick={() => {
+                if (shouldOpenHelper) {
+                  onOpenLocalHelper();
+                  return;
+                }
+                onStartRecording(undefined, activeRecordingSource.id === "browser-tab", activeRecordingSource.id);
+              }}
               disabled={recordingDisabled}
               className="flex items-center justify-center gap-2 w-full px-3.5 py-3 rounded-xl bg-gradient-to-r from-danger to-[#ff8a5c] text-white shadow-lg shadow-danger/15 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
-              <Mic className="w-3.5 h-3.5" />
+              {activeRecordingSource.id === "teams-desktop" ? (
+                <MonitorSpeaker className="w-3.5 h-3.5" />
+              ) : (
+                <Mic className="w-3.5 h-3.5" />
+              )}
               <span className="text-sm font-bold">
                 {recordingState === "starting"
                   ? "Starting..."
                   : recordingState === "processing"
                   ? "Processing..."
-                  : "Start Recording"}
+                  : shouldOpenHelper
+                    ? "Open Helper"
+                    : "Start Recording"}
               </span>
             </button>
             {activeRecordingSource?.disabledReason && (

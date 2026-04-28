@@ -829,7 +829,7 @@ function TeamsDesktopHelperDiagnosticsPanel() {
           Refresh
         </button>
         <span className="text-xs text-text-tertiary">
-          Teams Desktop recording is disabled until helper capture control ships.
+          Teams Desktop capture starts from the sidebar once the helper is paired and connected.
         </span>
       </div>
     </div>

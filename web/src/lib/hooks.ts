@@ -18,6 +18,13 @@ import { summarizeTranscript, transcribeAudio } from "./ai";
 import { applyLibraryFilters, type LibraryQuickFilter } from "./search";
 import { emptyRecordingDiagnostics, type RecordingDiagnostics } from "./recording-diagnostics";
 import { disposeRecorder, startOwnedRecorder } from "./recording-lifecycle";
+import {
+  readLocalCaptureHelperToken,
+  startLocalCaptureHelperCapture,
+  stopLocalCaptureHelperCapture,
+  type LocalCaptureStartResponse,
+} from "./local-helper";
+import type { RecordingSourceId } from "./recording-sources";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -102,6 +109,7 @@ export function useSearch(
 
 export function useRecording() {
   const recorderRef = useRef<AudioRecorder | null>(null);
+  const helperSessionRef = useRef<LocalCaptureStartResponse | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startingRef = useRef(false);
   const segmentCounter = useRef(0);
@@ -121,14 +129,25 @@ export function useRecording() {
     }
   }, []);
 
+  const startDurationTicker = useCallback(() => {
+    clearTimer();
+    timerRef.current = setInterval(() => {
+      setDuration((d) => d + 1);
+    }, 1000);
+  }, [clearTimer]);
+
   const disposeActiveRecorder = useCallback(() => {
     disposeRecorder(recorderRef.current);
     recorderRef.current = null;
     startingRef.current = false;
   }, []);
 
-  const startRecording = useCallback(async (micDeviceId?: string, captureTab = false): Promise<boolean> => {
-    if (startingRef.current || recorderRef.current) return false;
+  const startRecording = useCallback(async (
+    micDeviceId?: string,
+    captureTab = false,
+    source: RecordingSourceId = "browser-tab",
+  ): Promise<boolean> => {
+    if (startingRef.current || recorderRef.current || helperSessionRef.current) return false;
 
     let recorder: AudioRecorder | null = null;
     startingRef.current = true;
@@ -143,6 +162,24 @@ export function useRecording() {
       setRecordingDiagnostics(emptyRecordingDiagnostics);
       segmentCounter.current = 0;
       interimRef.current = "";
+
+      if (source === "teams-desktop") {
+        const token = readLocalCaptureHelperToken();
+        if (!token) {
+          throw new Error("Pair the NoteAI local helper before starting Teams Desktop capture.");
+        }
+
+        const session = await startLocalCaptureHelperCapture({
+          token,
+          title: "Teams Desktop",
+        });
+        helperSessionRef.current = session;
+
+        setState("recording");
+        setCapturingTabAudio(true);
+        startDurationTicker();
+        return true;
+      }
 
       recorder = new AudioRecorder();
       await startOwnedRecorder(recorderRef, recorder, () => recorder!.start((text: string, isFinal: boolean) => {
@@ -178,9 +215,7 @@ export function useRecording() {
       setLiveTranscript([]);
       setInterimText("");
 
-      timerRef.current = setInterval(() => {
-        setDuration((d) => d + 1);
-      }, 1000);
+      startDurationTicker();
       return true;
     } catch (err) {
       console.error("Failed to start recording:", err);
@@ -202,10 +237,87 @@ export function useRecording() {
     } finally {
       startingRef.current = false;
     }
-  }, []);
+  }, [startDurationTicker]);
 
   const stopRecording = useCallback(
     async (title?: string): Promise<Meeting | null> => {
+      if (helperSessionRef.current) {
+        const token = readLocalCaptureHelperToken();
+        if (!token) {
+          alert("Pair the NoteAI local helper before stopping Teams Desktop capture.");
+          return null;
+        }
+
+        clearTimer();
+        setState("processing");
+
+        try {
+          const response = await stopLocalCaptureHelperCapture({ token });
+          helperSessionRef.current = null;
+          const recordedDuration = Math.max(duration, Math.round(response.duration || 0));
+          const finalSegments: TranscriptSegment[] = response.transcript.map((segment, index) => ({
+            id: segment.id ?? index,
+            text: segment.text,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            speaker: segment.speaker ?? null,
+            confidence: segment.confidence,
+          }));
+          const finalText = finalSegments.map((s) => s.text).join(" ").trim();
+
+          const meetingTitle = title || `Teams Desktop ${new Date().toLocaleDateString()}`;
+          if (!finalText) {
+            const meeting: Meeting = {
+              id: crypto.randomUUID(),
+              title: meetingTitle,
+              date: new Date().toISOString(),
+              duration: recordedDuration,
+              transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: null, confidence: 0 }],
+              summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
+            };
+            await db.meetings.add(meeting);
+            triggerRefresh();
+            setState("idle");
+            setDuration(0);
+            setCapturingTabAudio(false);
+            setMicLevel(0);
+            setRecordingDiagnostics(emptyRecordingDiagnostics);
+            return meeting;
+          }
+
+          let summary: MeetingSummary;
+          try {
+            summary = await summarizeTranscript(finalText);
+          } catch {
+            summary = { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false };
+          }
+
+          const meeting: Meeting = {
+            id: crypto.randomUUID(),
+            title: meetingTitle,
+            date: new Date().toISOString(),
+            duration: recordedDuration,
+            transcript: finalSegments,
+            summary,
+          };
+
+          await db.meetings.add(meeting);
+          triggerRefresh();
+          setState("idle");
+          setDuration(0);
+          setCapturingTabAudio(false);
+          setMicLevel(0);
+          setRecordingDiagnostics(emptyRecordingDiagnostics);
+          return meeting;
+        } catch (err) {
+          console.error("Failed to stop Teams Desktop recording:", err);
+          setState("recording");
+          startDurationTicker();
+          alert(`Stopping Teams Desktop capture failed:\n\n${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        }
+      }
+
       if (!recorderRef.current) return null;
 
       clearTimer();
@@ -301,13 +413,18 @@ export function useRecording() {
       setRecordingDiagnostics(emptyRecordingDiagnostics);
       return meeting;
     },
-    [clearTimer, duration, liveTranscript]
+    [clearTimer, duration, liveTranscript, startDurationTicker]
   );
 
   useEffect(() => {
     const cleanup = () => {
       clearTimer();
       disposeActiveRecorder();
+      const token = readLocalCaptureHelperToken();
+      if (helperSessionRef.current && token) {
+        void stopLocalCaptureHelperCapture({ token, timeoutMs: 1_000 }).catch(() => {});
+        helperSessionRef.current = null;
+      }
     };
 
     window.addEventListener("pagehide", cleanup);

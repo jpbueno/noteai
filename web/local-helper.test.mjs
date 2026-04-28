@@ -8,6 +8,8 @@ import {
   formatLocalHelperDiagnosticRows,
   getLocalCaptureHelperStatus,
   requestLocalCaptureHelperPairing,
+  startLocalCaptureHelperCapture,
+  stopLocalCaptureHelperCapture,
 } from "./src/lib/local-helper.ts";
 import {
   TEAMS_DESKTOP_RECORDING_SOURCE,
@@ -162,6 +164,65 @@ test("pairing request and confirmation bind the helper token to the web origin",
   });
 });
 
+test("capture start posts an origin-bound Teams Desktop request to the helper", async () => {
+  const calls = [];
+  const started = await startLocalCaptureHelperCapture({
+    token: "paired-token",
+    title: "Weekly Sync",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        json: async () => ({
+          sessionId: "11111111-1111-1111-1111-111111111111",
+          captureState: "recording",
+          startedAt: "2026-04-28T16:00:00Z",
+          recordingIndicator: "visible-recording",
+        }),
+      };
+    },
+  });
+
+  assert.equal(calls[0].url, `${LOCAL_CAPTURE_HELPER_BASE_URL}/v1/capture/start`);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer paired-token");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    source: "teamsDesktop",
+    title: "Weekly Sync",
+    includeMicrophone: true,
+    allowDesktopAudioFallback: true,
+  });
+  assert.equal(started.captureState, "recording");
+});
+
+test("capture stop returns helper transcript segments for web persistence", async () => {
+  const calls = [];
+  const stopped = await stopLocalCaptureHelperCapture({
+    token: "paired-token",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        json: async () => ({
+          sessionId: "11111111-1111-1111-1111-111111111111",
+          captureState: "stopped",
+          startedAt: "2026-04-28T16:00:00Z",
+          stoppedAt: "2026-04-28T16:10:00Z",
+          duration: 600,
+          transcript: [
+            { id: 1, text: "Hello from Teams.", startTime: 0, endTime: 3, speaker: null, confidence: 0.9 },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(calls[0].url, `${LOCAL_CAPTURE_HELPER_BASE_URL}/v1/capture/stop`);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer paired-token");
+  assert.equal(stopped.transcript[0].text, "Hello from Teams.");
+});
+
 test("diagnostic rows include connection, pairing, permissions, and Teams state", () => {
   const rows = formatLocalHelperDiagnosticRows({
     state: "connected",
@@ -182,16 +243,24 @@ test("diagnostic rows include connection, pairing, permissions, and Teams state"
   assert.equal(rows.find((row) => row.label === "Screen Recording").tone, "warning");
 });
 
-test("Teams Desktop source is visible but not recordable during diagnostics milestone", () => {
+test("Teams Desktop source records when paired helper advertises capture control", () => {
   assert.equal(TEAMS_DESKTOP_RECORDING_SOURCE.id, "teams-desktop");
 
   const options = buildRecordingSourceOptions({
     state: "connected",
-    health: healthResponse,
+    health: {
+      ...healthResponse,
+      capabilities: {
+        ...healthResponse.capabilities,
+        captureControl: true,
+      },
+    },
+    status: statusResponse,
   });
 
   const teams = options.find((option) => option.id === "teams-desktop");
   assert.equal(teams.label, "Teams Desktop");
-  assert.equal(teams.supportsRecording, false);
-  assert.match(teams.disabledReason, /diagnostics/i);
+  assert.equal(teams.supportsRecording, true);
+  assert.equal(teams.statusLabel, "Ready");
+  assert.equal(teams.disabledReason, undefined);
 });

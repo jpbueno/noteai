@@ -51,6 +51,7 @@ final class LocalCapturePairingPresenter: LocalCapturePairingPresenting {
 final class LocalCaptureHelperRouter {
     private let statusProvider: LocalCaptureHelperStatusProvider
     private let pairingStore: LocalCaptureHelperPairingStore
+    private let captureController: LocalCaptureControlling?
     private weak var pairingPresenter: LocalCapturePairingPresenting?
     private let allowedOrigins: Set<String>
     private let decoder = JSONDecoder()
@@ -63,11 +64,13 @@ final class LocalCaptureHelperRouter {
     init(
         statusProvider: LocalCaptureHelperStatusProvider = LocalCaptureHelperStatusProvider(),
         pairingStore: LocalCaptureHelperPairingStore = LocalCaptureHelperPairingStore(),
+        captureController: LocalCaptureControlling? = nil,
         pairingPresenter: LocalCapturePairingPresenting? = nil,
         allowedOrigins: [String] = LocalCaptureHelperRouter.defaultAllowedOrigins
     ) {
         self.statusProvider = statusProvider
         self.pairingStore = pairingStore
+        self.captureController = captureController
         self.pairingPresenter = pairingPresenter
         self.allowedOrigins = Set(allowedOrigins)
     }
@@ -102,7 +105,9 @@ final class LocalCaptureHelperRouter {
 
         switch (request.method.uppercased(), request.path) {
         case ("GET", "/v1/health"):
-            return json(statusProvider.health(), statusCode: 200, origin: origin)
+            var health = statusProvider.health()
+            health.capabilities.captureControl = captureController != nil
+            return json(health, statusCode: 200, origin: origin)
         case ("POST", "/v1/pair/request"):
             return pairRequest(request, origin: origin)
         case ("POST", "/v1/pair/confirm"):
@@ -111,9 +116,22 @@ final class LocalCaptureHelperRouter {
             guard let origin, isAuthorized(request: request, origin: origin) else {
                 return jsonError("pairing_required", "Pair NoteAI Web with the local helper before reading diagnostics.", statusCode: 401, origin: origin)
             }
-            return await json(statusProvider.status(), statusCode: 200, origin: origin)
-        case ("POST", "/v1/capture/start"), ("POST", "/v1/capture/stop"):
-            return jsonError("capture_control_disabled", "Teams Desktop capture control is not enabled in this milestone.", statusCode: 409, origin: origin)
+            var status = await statusProvider.status()
+            if let snapshot = await captureController?.snapshot {
+                status.captureState = snapshot.state
+                status.recordingIndicator = snapshot.recordingIndicator
+            }
+            return json(status, statusCode: 200, origin: origin)
+        case ("POST", "/v1/capture/start"):
+            guard let origin, isAuthorized(request: request, origin: origin) else {
+                return jsonError("pairing_required", "Pair NoteAI Web with the local helper before starting capture.", statusCode: 401, origin: origin)
+            }
+            return await captureStart(request, origin: origin)
+        case ("POST", "/v1/capture/stop"):
+            guard let origin, isAuthorized(request: request, origin: origin) else {
+                return jsonError("pairing_required", "Pair NoteAI Web with the local helper before stopping capture.", statusCode: 401, origin: origin)
+            }
+            return await captureStop(origin: origin)
         default:
             return jsonError("not_found", "No local helper route matches this request.", statusCode: 404, origin: origin)
         }
@@ -176,6 +194,39 @@ final class LocalCaptureHelperRouter {
             return json(response, statusCode: 200, origin: requestOrigin)
         } catch {
             return jsonError("pairing_failed", error.localizedDescription, statusCode: 401, origin: requestOrigin)
+        }
+    }
+
+    private func captureStart(
+        _ request: LocalCaptureHTTPRouterRequest,
+        origin: String
+    ) async -> LocalCaptureHTTPRouterResponse {
+        guard let captureController else {
+            return jsonError("capture_control_disabled", "Teams Desktop capture control is not enabled.", statusCode: 409, origin: origin)
+        }
+        guard let payload = try? decoder.decode(LocalCaptureStartRequest.self, from: request.body),
+              payload.source == "teamsDesktop" else {
+            return jsonError("invalid_capture_request", "Capture start request is invalid.", statusCode: 400, origin: origin)
+        }
+
+        do {
+            let response = try await captureController.startCapture(payload)
+            return json(response, statusCode: 200, origin: origin)
+        } catch {
+            return jsonError("capture_start_failed", error.localizedDescription, statusCode: 409, origin: origin)
+        }
+    }
+
+    private func captureStop(origin: String) async -> LocalCaptureHTTPRouterResponse {
+        guard let captureController else {
+            return jsonError("capture_control_disabled", "Teams Desktop capture control is not enabled.", statusCode: 409, origin: origin)
+        }
+
+        do {
+            let response = try await captureController.stopCapture()
+            return json(response, statusCode: 200, origin: origin)
+        } catch {
+            return jsonError("capture_stop_failed", error.localizedDescription, statusCode: 409, origin: origin)
         }
     }
 

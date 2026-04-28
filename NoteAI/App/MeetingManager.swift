@@ -101,6 +101,7 @@ final class MeetingManager: ObservableObject {
     private let notificationManager = NotificationDelivery()
 
     private var currentMeetingStart: Date?
+    private var localHelperSessionId: UUID?
     private var recordingTimer: Timer?
     private var coachTimer: Timer?
     private var coachAnalyzingInFlight = false
@@ -234,7 +235,8 @@ final class MeetingManager: ObservableObject {
             } catch {
                 print("[MeetingManager] Failed to start audio capture: \(error)")
                 lastError = "Audio capture failed: \(error.localizedDescription). Check Screen Recording and Microphone permissions in System Settings > Privacy & Security."
-                recordingTimer?.invalidate()
+                stopDurationTimer()
+                stopCoachLoop()
                 state = .idle
             }
         }
@@ -904,6 +906,167 @@ final class MeetingManager: ObservableObject {
         // Start monitoring if previously enabled
         if autoDetectEnabled {
             meetingDetector.startMonitoring()
+        }
+    }
+}
+
+extension MeetingManager: LocalCaptureControlling {
+    var snapshot: LocalCaptureSessionSnapshot {
+        guard let sessionId = localHelperSessionId,
+              let startedAt = currentMeetingStart,
+              state == .recording else {
+            return .idle
+        }
+
+        return LocalCaptureSessionSnapshot(
+            sessionId: sessionId,
+            state: "recording",
+            recordingIndicator: "visible-recording",
+            startedAt: startedAt,
+            duration: Date().timeIntervalSince(startedAt),
+            transcript: currentTranscript.map(LocalCaptureTranscriptSegment.init(segment:))
+        )
+    }
+
+    func startCapture(_ request: LocalCaptureStartRequest) async throws -> LocalCaptureStartResponse {
+        try await startLocalHelperCapture(request)
+    }
+
+    func stopCapture() async throws -> LocalCaptureStopResponse {
+        try await stopLocalHelperCapture()
+    }
+
+    private func startLocalHelperCapture(_ request: LocalCaptureStartRequest) async throws -> LocalCaptureStartResponse {
+        guard request.source == "teamsDesktop" else {
+            throw LocalHelperCaptureError.unsupportedSource
+        }
+        guard state == .idle else {
+            throw LocalHelperCaptureError.alreadyRecording
+        }
+
+        lastError = nil
+        let sessionId = UUID()
+        let startedAt = Date()
+        localHelperSessionId = sessionId
+        state = .recording
+        currentTranscript = []
+        currentMeetingStart = startedAt
+        recordingDuration = 0
+        resetCoachStateForRecording()
+        startCoachLoopIfEnabled()
+        startDurationTimer()
+
+        await transcriptionEngine.reset()
+        await transcriptionEngine.warmup()
+
+        do {
+            try await audioCaptureManager.startCapture()
+            print("[MeetingManager] Local helper capture started successfully")
+        } catch {
+            print("[MeetingManager] Local helper capture failed: \(error)")
+            lastError = "Audio capture failed: \(error.localizedDescription). Check Screen Recording and Microphone permissions in System Settings > Privacy & Security."
+            audioCaptureManager.stopCapture()
+            stopDurationTimer()
+            stopCoachLoop()
+            localHelperSessionId = nil
+            currentMeetingStart = nil
+            recordingDuration = 0
+            state = .idle
+            throw LocalHelperCaptureError.startFailed(error.localizedDescription)
+        }
+
+        return LocalCaptureStartResponse(
+            sessionId: sessionId,
+            captureState: "recording",
+            startedAt: startedAt,
+            recordingIndicator: "visible-recording"
+        )
+    }
+
+    private func stopLocalHelperCapture() async throws -> LocalCaptureStopResponse {
+        guard state == .recording,
+              let sessionId = localHelperSessionId,
+              let startedAt = currentMeetingStart else {
+            throw LocalHelperCaptureError.notRecording
+        }
+
+        stopDurationTimer()
+        stopCoachLoop()
+        audioCaptureManager.stopCapture()
+        await transcriptionEngine.reset()
+
+        let stoppedAt = Date()
+        let duration = stoppedAt.timeIntervalSince(startedAt)
+        let transcript = currentTranscript.map(LocalCaptureTranscriptSegment.init(segment:))
+
+        localHelperSessionId = nil
+        currentMeetingStart = nil
+        recordingDuration = duration
+        state = .idle
+
+        return LocalCaptureStopResponse(
+            sessionId: sessionId,
+            captureState: "stopped",
+            startedAt: startedAt,
+            stoppedAt: stoppedAt,
+            duration: duration,
+            transcript: transcript
+        )
+    }
+
+    private func resetCoachStateForRecording() {
+        coachInsights = []
+        coachAnalyzing = false
+        coachAnalyzingInFlight = false
+        coachLastAnalyzedSegmentCount = 0
+        coachLastAnalyzedTime = nil
+    }
+
+    private func startDurationTimer() {
+        stopDurationTimer()
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.currentMeetingStart else { return }
+                self.recordingDuration = Date().timeIntervalSince(start)
+            }
+        }
+    }
+
+    private func stopDurationTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+    }
+}
+
+private extension LocalCaptureTranscriptSegment {
+    init(segment: TranscriptSegment) {
+        self.init(
+            id: segment.id,
+            text: segment.text,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            speaker: segment.speaker,
+            confidence: segment.confidence
+        )
+    }
+}
+
+private enum LocalHelperCaptureError: LocalizedError {
+    case unsupportedSource
+    case alreadyRecording
+    case notRecording
+    case startFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedSource:
+            return "Only Teams Desktop capture can be started by the local helper."
+        case .alreadyRecording:
+            return "NoteAI is already recording."
+        case .notRecording:
+            return "NoteAI is not recording a Teams Desktop session."
+        case .startFailed(let reason):
+            return reason
         }
     }
 }

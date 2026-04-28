@@ -100,6 +100,28 @@ final class LocalCaptureHelperTests: XCTestCase {
         XCTAssertFalse(response.bodyText.contains("microphone"))
     }
 
+    func testServerServesHealthOnLoopbackSocket() async throws {
+        let router = LocalCaptureHelperRouter(
+            statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),
+            pairingStore: LocalCaptureHelperPairingStore(trustedClientStore: InMemoryTrustedClientStore()),
+            allowedOrigins: ["http://localhost:3000"]
+        )
+        let server = LocalCaptureHelperServer(router: router, port: 47491)
+        try server.start()
+        defer { server.stop() }
+
+        let url = URL(string: "http://127.0.0.1:47491/v1/health")!
+        var request = URLRequest(url: url)
+        request.setValue("127.0.0.1:47491", forHTTPHeaderField: "Host")
+        request.setValue("http://localhost:3000", forHTTPHeaderField: "Origin")
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let body = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(body.contains("\"status\":\"ready\""))
+        XCTAssertTrue(body.contains("\"captureControl\":false"))
+    }
+
     func testStatusRequiresPairedBearerToken() async throws {
         let router = LocalCaptureHelperRouter(
             statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),

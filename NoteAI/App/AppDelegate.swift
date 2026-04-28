@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let chatManager = ChatManager()
     let ttsService = TextToSpeechService()
     private var mainWindow: NSWindow?
+    private var localCaptureHelperServer: LocalCaptureHelperServer?
+    private let localCapturePairingPresenter = LocalCapturePairingPresenter()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !ProcessInfo.processInfo.isRunningXCTest else { return }
@@ -23,7 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         NSApplication.shared.setActivationPolicy(.regular)
         showMainWindow()
+        startLocalCaptureHelper()
 
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        localCaptureHelperServer?.stop()
+        localCaptureHelperServer = nil
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -86,6 +94,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 15 {
                 NotificationCenter.default.post(name: .toggleRecording, object: nil)
             }
+        }
+    }
+
+    private func startLocalCaptureHelper() {
+        let router = LocalCaptureHelperRouter(
+            statusProvider: LocalCaptureHelperStatusProvider(),
+            pairingStore: LocalCaptureHelperPairingStore(),
+            pairingPresenter: localCapturePairingPresenter
+        )
+        let server = LocalCaptureHelperServer(router: router)
+        do {
+            try server.start()
+            localCaptureHelperServer = server
+            print("[LocalCaptureHelper] Listening on 127.0.0.1:\(LocalCaptureHelperProtocol.defaultPort)")
+        } catch {
+            print("[LocalCaptureHelper] Failed to start: \(error)")
         }
     }
 }

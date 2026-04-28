@@ -33,6 +33,12 @@ import {
   triggerRefresh,
 } from "@/lib/hooks";
 import { useAICoach } from "@/lib/useAICoach";
+import {
+  detectLocalCaptureHelper,
+  readLocalCaptureHelperToken,
+  type LocalCaptureHelperDetection,
+} from "@/lib/local-helper";
+import { buildRecordingSourceOptions } from "@/lib/recording-sources";
 
 declare global {
   interface Window {
@@ -157,6 +163,7 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(220);
   const [isSidebarDragging, setIsSidebarDragging] = useState(false);
   const [quickFilter, setQuickFilter] = useState<LibraryQuickFilter>("all");
+  const [localHelperDetection, setLocalHelperDetection] = useState<LocalCaptureHelperDetection | null>(null);
   const [onboardingProvider, setOnboardingProvider] = useState<LLMProvider>("openrouter");
   const [providerKeyConfigured, setProviderKeyConfigured] = useState(false);
   const [transcriptionKeyConfigured, setTranscriptionKeyConfigured] = useState(false);
@@ -176,6 +183,7 @@ export default function Home() {
 
   const { query, setQuery, filteredMeetings, filteredNotes, filteredTodos } =
     useSearch(meetings, notes, todos, quickFilter);
+  const recordingSources = buildRecordingSourceOptions(localHelperDetection);
 
   // One-time migration: clean up any remaining old TaskItems
   const migrationDone = useRef(false);
@@ -249,6 +257,23 @@ export default function Home() {
       };
     }
   }, [applyOnboardingState, loadOnboardingState, selection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshLocalHelper = async () => {
+      const detection = await detectLocalCaptureHelper({ token: readLocalCaptureHelperToken() });
+      if (!cancelled) setLocalHelperDetection(detection);
+    };
+    void refreshLocalHelper();
+    const interval = setInterval(() => {
+      void refreshLocalHelper();
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -613,6 +638,7 @@ export default function Home() {
             onQuickFilterChange={setQuickFilter}
             recordingState={recordingState}
             recordingDuration={duration}
+            recordingSources={recordingSources}
             onStartRecording={(micDeviceId, captureTab) => {
               void guardedStartRecording(micDeviceId, captureTab);
             }}

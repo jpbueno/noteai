@@ -17,6 +17,7 @@ import { AudioRecorder, type RecordingState } from "./audio";
 import { summarizeTranscript, transcribeAudio } from "./ai";
 import { applyLibraryFilters, type LibraryQuickFilter } from "./search";
 import { emptyRecordingDiagnostics, type RecordingDiagnostics } from "./recording-diagnostics";
+import { disposeRecorder, startRecorderWithCleanup } from "./recording-lifecycle";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -102,6 +103,7 @@ export function useSearch(
 export function useRecording() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startingRef = useRef(false);
   const segmentCounter = useRef(0);
   const interimRef = useRef("");
   const [state, setState] = useState<RecordingState>("idle");
@@ -112,15 +114,40 @@ export function useRecording() {
   const [micLevel, setMicLevel] = useState(0);
   const [recordingDiagnostics, setRecordingDiagnostics] = useState<RecordingDiagnostics>(emptyRecordingDiagnostics);
 
-  const startRecording = useCallback(async (micDeviceId?: string, captureTab = false) => {
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const disposeActiveRecorder = useCallback(() => {
+    disposeRecorder(recorderRef.current);
+    recorderRef.current = null;
+    startingRef.current = false;
+  }, []);
+
+  const startRecording = useCallback(async (micDeviceId?: string, captureTab = false): Promise<boolean> => {
+    if (startingRef.current || recorderRef.current) return false;
+
+    let recorder: AudioRecorder | null = null;
+    startingRef.current = true;
+
     try {
+      setState("starting");
+      setDuration(0);
+      setLiveTranscript([]);
+      setInterimText("");
+      setCapturingTabAudio(false);
+      setMicLevel(0);
+      setRecordingDiagnostics(emptyRecordingDiagnostics);
       segmentCounter.current = 0;
       interimRef.current = "";
 
-      const recorder = new AudioRecorder();
-      await recorder.start((text: string, isFinal: boolean) => {
+      recorder = new AudioRecorder();
+      await startRecorderWithCleanup(recorder, () => recorder!.start((text: string, isFinal: boolean) => {
         if (isFinal) {
-          const elapsed = recorder.elapsed;
+          const elapsed = recorder?.elapsed ?? 0;
           setLiveTranscript((prev) => [
             ...prev,
             {
@@ -142,7 +169,7 @@ export function useRecording() {
         setMicLevel(level);
       }, (diagnostics) => {
         setRecordingDiagnostics(diagnostics);
-      });
+      }));
 
       recorderRef.current = recorder;
       setState("recording");
@@ -155,11 +182,24 @@ export function useRecording() {
       timerRef.current = setInterval(() => {
         setDuration((d) => d + 1);
       }, 1000);
+      return true;
     } catch (err) {
       console.error("Failed to start recording:", err);
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Recording failed:\n\n${msg}`);
+      if (recorderRef.current === recorder) {
+        recorderRef.current = null;
+      }
+      setState("idle");
+      setDuration(0);
+      setLiveTranscript([]);
+      setInterimText("");
+      setCapturingTabAudio(false);
+      setMicLevel(0);
       setRecordingDiagnostics(emptyRecordingDiagnostics);
+      return false;
+    } finally {
+      startingRef.current = false;
     }
   }, []);
 
@@ -167,10 +207,7 @@ export function useRecording() {
     async (title?: string): Promise<Meeting | null> => {
       if (!recorderRef.current) return null;
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      clearTimer();
 
       setState("processing");
       const hadTabAudio = recorderRef.current.capturingTabAudio;
@@ -232,6 +269,8 @@ export function useRecording() {
         triggerRefresh();
         setState("idle");
         setDuration(0);
+        setCapturingTabAudio(false);
+        setMicLevel(0);
         setRecordingDiagnostics(emptyRecordingDiagnostics);
         return meeting;
       }
@@ -256,17 +295,29 @@ export function useRecording() {
       triggerRefresh();
       setState("idle");
       setDuration(0);
+      setCapturingTabAudio(false);
+      setMicLevel(0);
       setRecordingDiagnostics(emptyRecordingDiagnostics);
       return meeting;
     },
-    [duration, liveTranscript]
+    [clearTimer, duration, liveTranscript]
   );
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+    const cleanup = () => {
+      clearTimer();
+      disposeActiveRecorder();
     };
-  }, []);
+
+    window.addEventListener("pagehide", cleanup);
+    window.addEventListener("beforeunload", cleanup);
+
+    return () => {
+      window.removeEventListener("pagehide", cleanup);
+      window.removeEventListener("beforeunload", cleanup);
+      cleanup();
+    };
+  }, [clearTimer, disposeActiveRecorder]);
 
   return { state, duration, liveTranscript, interimText, capturingTabAudio, micLevel, recordingDiagnostics, startRecording, stopRecording };
 }

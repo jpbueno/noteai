@@ -34,8 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         localCaptureHelperServer = nil
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        meetingManager.refreshOnboardingChecklistState()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showMainWindow() }
+        meetingManager.refreshOnboardingChecklistState()
         return true
     }
 

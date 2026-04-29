@@ -314,9 +314,8 @@ struct HomeDashboardView: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(3)
                     if let actionLabel = item.actionLabel,
-                       item.status != .complete,
-                       item.status != .blocked,
-                       item.status != .unsupported {
+                       item.actionTarget != nil,
+                       item.status != .complete {
                         Label(actionLabel, systemImage: "gearshape")
                             .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                             .foregroundStyle(Theme.accent)
@@ -331,7 +330,7 @@ struct HomeDashboardView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .disabled(item.status == .complete || item.status == .blocked || item.status == .unsupported)
+        .disabled(item.status == .complete || item.actionTarget == nil)
     }
 
     private var taskColumns: some View {

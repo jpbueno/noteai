@@ -300,6 +300,7 @@ final class LocalCaptureHelperServer {
     private var socketFileDescriptor: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private let port: UInt16
+    private(set) var listeningPort: UInt16?
 
     init(router: LocalCaptureHelperRouter, port: UInt16 = LocalCaptureHelperProtocol.defaultPort) {
         self.router = router
@@ -339,6 +340,8 @@ final class LocalCaptureHelperServer {
             throw LocalCaptureHelperServerError.bindFailed(code)
         }
 
+        let listeningPort = try Self.boundPort(for: fd)
+
         guard listen(fd, SOMAXCONN) == 0 else {
             let code = errno
             close(fd)
@@ -358,6 +361,7 @@ final class LocalCaptureHelperServer {
             close(fd)
         }
         socketFileDescriptor = fd
+        self.listeningPort = listeningPort
         acceptSource = source
         source.resume()
     }
@@ -366,6 +370,7 @@ final class LocalCaptureHelperServer {
         acceptSource?.cancel()
         acceptSource = nil
         socketFileDescriptor = -1
+        listeningPort = nil
     }
 
     private func acceptPendingConnections() {
@@ -471,6 +476,20 @@ final class LocalCaptureHelperServer {
         }
     }
 
+    private static func boundPort(for fd: Int32) throws -> UInt16 {
+        var address = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let result = withUnsafeMutablePointer(to: &address) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                getsockname(fd, sockaddrPointer, &length)
+            }
+        }
+        guard result == 0 else {
+            throw LocalCaptureHelperServerError.boundPortLookupFailed(errno)
+        }
+        return UInt16(bigEndian: address.sin_port)
+    }
+
     private static func parseRequest(_ data: Data) -> LocalCaptureHTTPRouterRequest? {
         guard let raw = String(data: data, encoding: .utf8),
               let headerEnd = raw.range(of: "\r\n\r\n") else {
@@ -537,5 +556,6 @@ enum LocalCaptureHelperServerError: Error {
     case socketCreationFailed(Int32)
     case socketOptionFailed(Int32)
     case bindFailed(Int32)
+    case boundPortLookupFailed(Int32)
     case listenFailed(Int32)
 }

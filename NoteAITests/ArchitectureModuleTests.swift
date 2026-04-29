@@ -121,4 +121,19 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertNil(OAuthCallbackParser.authorizationCode(from: missingState, expectedState: "state-1"))
         XCTAssertNil(OAuthCallbackParser.authorizationCode(from: wrongState, expectedState: "state-1"))
     }
+
+    func testReadAloudTextResolverPrefersSelectedText() {
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { " selected sentence " },
+            "selected sentence"
+        )
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { "   \n" },
+            "Read the whole note"
+        )
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { nil },
+            "Read the whole note"
+        )
+    }
 }

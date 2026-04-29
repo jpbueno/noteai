@@ -2,7 +2,7 @@ import XCTest
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
-    func testLibraryOperationsFilterAcrossMeetingsNotesAndTasks() {
+    func testLibraryOperationsFilterAcrossMeetingsAndNotes() {
         let meeting = Meeting(
             id: UUID(),
             title: "Roadmap Sync",
@@ -12,18 +12,14 @@ final class ArchitectureModuleTests: XCTestCase {
             summary: MeetingSummary(decisions: ["Ship preview"], topics: ["Inference"])
         )
         let note = Note(title: "Customer Notes", content: "Blackwell rollout", tags: ["account"])
-        let task = TaskItem(title: "Draft follow-up", rawInput: "Send Grace notes", tags: ["email"])
-
         let result = LibraryOperations.filter(
             meetings: [meeting],
             notes: [note],
-            tasks: [task],
             query: "grace"
         )
 
         XCTAssertEqual(result.meetings.map(\.id), [meeting.id])
         XCTAssertEqual(result.notes.count, 0)
-        XCTAssertEqual(result.tasks.map(\.id), [task.id])
     }
 
     func testMeetingCaptureWorkflowFormatsTranscriptAndFallbackSummary() {
@@ -84,7 +80,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.pendingCount, 4)
         XCTAssertEqual(snapshot.completed.count, 2)
         XCTAssertEqual(snapshot.upcoming.map(\.id), [upcoming.id])
-        XCTAssertEqual(snapshot.nextTask?.id, overdue.id)
+        XCTAssertEqual(snapshot.nextTodo?.id, overdue.id)
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 

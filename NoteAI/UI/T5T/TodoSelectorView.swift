@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Todo checkbox picker for T5T composer. Mirrors TaskSelectorView but for
-/// the lightweight TodoItem model (the primary T5T input in the web app).
+/// Todo checkbox picker for T5T composer. Uses the lightweight TodoItem model
+/// as the primary T5T input in the web app.
 struct TodoSelectorView: View {
     let todos: [TodoItem]
     @Binding var selectedIDs: Set<UUID>
@@ -69,7 +69,7 @@ struct TodoSelectorView: View {
                 Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12))
                     .foregroundStyle(todo.completed ? Color.green : Theme.textTertiary)
-                Text(todo.title.isEmpty ? "Untitled task" : todo.title)
+                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textPrimary)
                     .strikethrough(todo.completed)

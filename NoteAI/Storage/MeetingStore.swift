@@ -250,51 +250,6 @@ final class MeetingStore {
         }
     }
 
-    // MARK: - Tasks
-
-    func saveTask(_ task: TaskItem) throws {
-        let jsonData = try JSONEncoder().encode(task)
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT OR REPLACE INTO tasks (id, title, created_date, modified_date, status, json_data)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    task.id.uuidString,
-                    task.title,
-                    task.createdDate.timeIntervalSince1970,
-                    task.modifiedDate.timeIntervalSince1970,
-                    task.status.rawValue,
-                    String(data: jsonData, encoding: .utf8)
-                ]
-            )
-        }
-    }
-
-    func fetchAllTasks() throws -> [TaskItem] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM tasks ORDER BY created_date DESC"
-            )
-            return rows.compactMap { row -> TaskItem? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(TaskItem.self, from: data)
-            }
-        }
-    }
-
-    func deleteTask(id: UUID) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM tasks WHERE id = ?",
-                arguments: [id.uuidString]
-            )
-        }
-    }
-
     // MARK: - Todos
 
     func saveTodo(_ todo: TodoItem) throws {
@@ -376,16 +331,6 @@ final class MeetingStore {
                     title TEXT NOT NULL,
                     created_date REAL NOT NULL,
                     modified_date REAL NOT NULL,
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    created_date REAL NOT NULL,
-                    modified_date REAL NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
                     json_data TEXT NOT NULL
                 )
                 """)

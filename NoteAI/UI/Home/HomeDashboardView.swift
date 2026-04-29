@@ -15,7 +15,7 @@ struct CommandCenterSnapshot {
         overdue.count + today.count
     }
 
-    var nextTask: TodoItem? {
+    var nextTodo: TodoItem? {
         overdue.first ?? today.first ?? upcoming.first ?? noDueDate.first
     }
 
@@ -128,7 +128,7 @@ struct HomeDashboardView: View {
                 header
                 snapshotGrid
                 onboardingPanel
-                taskColumns
+                todoColumns
             }
             .padding(.horizontal, round(28 * layout.scale))
             .padding(.vertical, round(22 * layout.scale))
@@ -148,7 +148,7 @@ struct HomeDashboardView: View {
                 Text("Today's workspace")
                     .font(.system(size: layout.titleFontSize, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
-                Text("Keep meetings, notes, tasks, and T5T follow-ups moving from one place.")
+                Text("Keep meetings, notes, todos, and T5T follow-ups moving from one place.")
                     .font(.system(size: layout.bodyFontSize + 1))
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -159,7 +159,7 @@ struct HomeDashboardView: View {
                 let todo = meetingManager.createTodo()
                 onSelectTodo(todo.id)
             } label: {
-                Label("New Task", systemImage: "plus")
+                Label("New Todo", systemImage: "plus")
                     .font(.system(size: layout.bodyFontSize, weight: .bold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, round(14 * layout.scale))
@@ -200,7 +200,7 @@ struct HomeDashboardView: View {
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: layout.metricMinimumCardWidth), spacing: 10)], spacing: 10) {
                     MetricTile(icon: "waveform.path.ecg", label: "Focus queue", value: snapshot.focusCount)
-                    MetricTile(icon: "checklist", label: "Open tasks", value: snapshot.pendingCount)
+                    MetricTile(icon: "checklist", label: "Open todos", value: snapshot.pendingCount)
                     MetricTile(icon: "checkmark.square", label: "Completed", value: snapshot.completed.count)
                     MetricTile(icon: "clock", label: "Upcoming", value: snapshot.upcoming.count)
                 }
@@ -218,16 +218,16 @@ struct HomeDashboardView: View {
                         .frame(width: 10, height: 10)
                 }
 
-                if let nextTask = snapshot.nextTask {
+                if let nextTodo = snapshot.nextTodo {
                     Button {
-                        onSelectTodo(nextTask.id)
+                        onSelectTodo(nextTodo.id)
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(nextTask.title.isEmpty ? "Untitled task" : nextTask.title)
+                            Text(nextTodo.title.isEmpty ? "Untitled todo" : nextTodo.title)
                                 .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
                                 .foregroundStyle(Theme.textPrimary)
                                 .lineLimit(2)
-                            Text(nextTask.dueDateLabel ?? "No due date")
+                            Text(nextTodo.dueDateLabel ?? "No due date")
                                 .font(.system(size: layout.smallFontSize))
                                 .foregroundStyle(Theme.textTertiary)
                         }
@@ -239,7 +239,7 @@ struct HomeDashboardView: View {
                     .buttonStyle(.plain)
                     .padding(.top, 10)
                 } else {
-                    Text("No pending tasks. The workspace is clear.")
+                    Text("No pending todos. The workspace is clear.")
                         .font(.system(size: layout.bodyFontSize + 1))
                         .foregroundStyle(Theme.textTertiary)
                         .padding(.top, 14)
@@ -334,7 +334,7 @@ struct HomeDashboardView: View {
         .disabled(item.status == .complete || item.status == .blocked || item.status == .unsupported)
     }
 
-    private var taskColumns: some View {
+    private var todoColumns: some View {
         let snapshot = snapshot
         return LazyVGrid(
             columns: [
@@ -343,35 +343,35 @@ struct HomeDashboardView: View {
             ],
             spacing: layout.dashboardSpacing
         ) {
-            TaskColumn(title: "Focus Queue", subtitle: "Overdue and due today", tone: .danger) {
+            TodoColumn(title: "Focus Queue", subtitle: "Overdue and due today", tone: .danger) {
                 ForEach(snapshot.overdue + snapshot.today) { todo in
-                    commandCenterTaskRow(todo)
+                    commandCenterTodoRow(todo)
                 }
                 if snapshot.focusCount == 0 {
-                    EmptyColumn(text: "No urgent tasks")
+                    EmptyColumn(text: "No urgent todos")
                 }
             }
 
-            TaskColumn(title: "Upcoming", subtitle: "Next work to prepare", tone: .accent) {
+            TodoColumn(title: "Upcoming", subtitle: "Next work to prepare", tone: .accent) {
                 ForEach(Array((snapshot.upcoming.prefix(8) + snapshot.noDueDate.prefix(4)))) { todo in
-                    commandCenterTaskRow(todo)
+                    commandCenterTodoRow(todo)
                 }
                 if snapshot.upcoming.isEmpty && snapshot.noDueDate.isEmpty {
-                    EmptyColumn(text: "No upcoming tasks")
+                    EmptyColumn(text: "No upcoming todos")
                 }
             }
 
             if !snapshot.completed.isEmpty {
-                TaskColumn(title: "Recently Completed", subtitle: "Latest closed loops", tone: .done) {
+                TodoColumn(title: "Recently Completed", subtitle: "Latest closed loops", tone: .done) {
                     ForEach(Array(snapshot.completed.prefix(6))) { todo in
-                        commandCenterTaskRow(todo)
+                        commandCenterTodoRow(todo)
                     }
                 }
             }
         }
     }
 
-    private func commandCenterTaskRow(_ todo: TodoItem) -> some View {
+    private func commandCenterTodoRow(_ todo: TodoItem) -> some View {
         Button {
             onSelectTodo(todo.id)
         } label: {
@@ -385,7 +385,7 @@ struct HomeDashboardView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text(todo.title.isEmpty ? "Untitled task" : todo.title)
+                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
                     .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
                     .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
                     .strikethrough(todo.completed)
@@ -498,7 +498,7 @@ private struct MetricTile: View {
     }
 }
 
-private struct TaskColumn<Content: View>: View {
+private struct TodoColumn<Content: View>: View {
     @Environment(\.commandCenterLayout) private var layout
 
     enum Tone {

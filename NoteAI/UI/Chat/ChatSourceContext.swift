@@ -3,7 +3,6 @@ import Foundation
 enum ChatSourceKind: String {
     case meeting
     case note
-    case task
     case t5t
 }
 
@@ -35,14 +34,12 @@ enum ChatSourceContext {
     static func build(
         meetings: [Meeting],
         notes: [Note],
-        tasks: [TaskItem],
         t5tReports: [T5TReport],
         maxPerType: Int = defaultMaxPerType
     ) -> String {
         var entries: [SourceEntry] = []
         entries += meetings.prefix(maxPerType).enumerated().map { meetingEntry($0.element, index: $0.offset + 1) }
         entries += notes.prefix(maxPerType).enumerated().map { noteEntry($0.element, index: $0.offset + 1) }
-        entries += tasks.prefix(maxPerType).enumerated().map { taskEntry($0.element, index: $0.offset + 1) }
         entries += t5tReports.prefix(maxPerType).enumerated().map { t5tEntry($0.element, index: $0.offset + 1) }
 
         let sourceBlock = entries.isEmpty
@@ -50,7 +47,7 @@ enum ChatSourceContext {
             : entries.map(formatEntry).joined(separator: "\n")
 
         return """
-        You are NoteAI, an intelligent meeting assistant. Use the NoteAI workspace sources below when answering questions about meetings, notes, tasks, or T5T reports.
+        You are NoteAI, an intelligent meeting assistant. Use the NoteAI workspace sources below when answering questions about meetings, notes, or T5T reports.
 
         Rules:
         - If you use a source, cite it with a markdown link using the provided label and noteai:// URL, for example [M1: Roadmap Sync](noteai://meeting/11111111-1111-1111-1111-111111111111).
@@ -99,17 +96,6 @@ enum ChatSourceContext {
         )
     }
 
-    private static func taskEntry(_ task: TaskItem, index: Int) -> SourceEntry {
-        let status = task.status == .completed ? "completed" : "open"
-        return SourceEntry(
-            prefix: "T\(index)",
-            kind: .task,
-            title: task.title.isEmpty ? "Untitled task" : task.title,
-            id: task.id,
-            text: truncate("Status: \(status). \(task.description.isEmpty ? task.rawInput : task.description)")
-        )
-    }
-
     private static func t5tEntry(_ report: T5TReport, index: Int) -> SourceEntry {
         let sectionText = [
             report.sections.insights.map { "Insight: \($0.headline). \($0.explanation)" },
@@ -136,7 +122,6 @@ enum ChatSourceContext {
         switch kind {
         case .meeting: return "Meeting"
         case .note: return "Note"
-        case .task: return "Task"
         case .t5t: return "T5T"
         }
     }

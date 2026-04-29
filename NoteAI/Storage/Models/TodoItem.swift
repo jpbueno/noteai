@@ -1,8 +1,7 @@
 import Foundation
 
 /// Lightweight todo item with an optional due date — mirrors the web TodoItem
-/// shape (web/src/lib/types.ts). Separate from TaskItem so dashboards can sort
-/// by due date without the heavier "rawInput / tags / source" metadata.
+/// shape (web/src/lib/types.ts).
 struct TodoItem: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String

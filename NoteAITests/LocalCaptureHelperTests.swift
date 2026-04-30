@@ -106,15 +106,18 @@ final class LocalCaptureHelperTests: XCTestCase {
             pairingStore: LocalCaptureHelperPairingStore(trustedClientStore: InMemoryTrustedClientStore()),
             allowedOrigins: ["http://localhost:3000"]
         )
-        let server = LocalCaptureHelperServer(router: router, port: 47491)
+        let server = LocalCaptureHelperServer(router: router, port: 0)
         try server.start()
         defer { server.stop() }
+        let port = try XCTUnwrap(server.listeningPort)
 
-        let url = URL(string: "http://127.0.0.1:47491/v1/health")!
+        let url = URL(string: "http://127.0.0.1:\(port)/v1/health")!
         var request = URLRequest(url: url)
-        request.setValue("127.0.0.1:47491", forHTTPHeaderField: "Host")
+        request.setValue("127.0.0.1:\(port)", forHTTPHeaderField: "Host")
         request.setValue("http://localhost:3000", forHTTPHeaderField: "Origin")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
 
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         let body = String(decoding: data, as: UTF8.self)

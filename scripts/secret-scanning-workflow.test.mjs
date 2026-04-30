@@ -14,7 +14,7 @@ test("secret scan workflow covers pull requests, scheduled history scans, and ba
   assert.match(workflow, /gitleaks\/gitleaks:v8\./);
   assert.match(workflow, /--baseline-path\s+\.gitleaks\.baseline\.json/);
   assert.match(workflow, /--report-format\s+sarif/);
-  assert.match(workflow, /upload-artifact@v4/);
+  assert.match(workflow, /upload-artifact@v6/);
 });
 
 test("security docs explain rotation and branch protection expectations", () => {

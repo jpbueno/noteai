@@ -1002,15 +1002,7 @@ struct MeetingLibraryView: View {
     }
 
     private func openNotificationSettings() {
-        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.noteai.app"
-        let paths = [
-            "com.apple.Notifications-Settings.extension?id=\(bundleIdentifier)",
-            "com.apple.preference.notifications",
-        ]
-
-        for path in paths where openSystemSettings(path: path) {
-            return
-        }
+        openSystemSettings(path: "com.apple.preference.notifications")
     }
 
     @discardableResult

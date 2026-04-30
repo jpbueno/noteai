@@ -1,4 +1,32 @@
+import AppKit
 import SwiftUI
+
+enum ReadAloudTextResolver {
+    static func textToRead(fallback: String, selectedText: () -> String? = currentSelectedText) -> String {
+        normalized(selectedText()) ?? fallback
+    }
+
+    static func selectedText(in text: String, range: NSRange) -> String? {
+        let nsText = text as NSString
+        guard range.length > 0, NSMaxRange(range) <= nsText.length else { return nil }
+        return normalized(nsText.substring(with: range))
+    }
+
+    private static func normalized(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func currentSelectedText() -> String? {
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           let selected = selectedText(in: textView.string, range: textView.selectedRange()) {
+            return selected
+        }
+
+        return RichMarkdownEditor.selectedText()
+    }
+}
 
 /// Floating playback bar shown when TTS is active. Shows play/pause, stop, progress, and voice name.
 struct TTSPlayerView: View {
@@ -81,7 +109,7 @@ struct ReadAloudButton: View {
             if tts.state != .idle {
                 tts.stop()
             } else {
-                tts.speak(text)
+                tts.speak(ReadAloudTextResolver.textToRead(fallback: text))
             }
         } label: {
             Label(
@@ -91,6 +119,7 @@ struct ReadAloudButton: View {
             .font(.system(size: 12))
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .foregroundStyle(tts.state != .idle ? Color.orange : Theme.textSecondary)
     }
 }

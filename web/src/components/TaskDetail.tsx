@@ -23,6 +23,7 @@ import { chatWithAI } from "@/lib/ai";
 import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
 import { mdToHtml, htmlToMd, htmlToPlainText } from "@/lib/content-utils";
+import { readSelectedTextForReadAloud } from "@/lib/read-aloud-selection";
 
 function parseTaskJSON(raw: string): { title: string; description: string } {
   const cleaned = raw
@@ -82,6 +83,7 @@ export default function TaskDetail({ task }: TaskDetailProps) {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const prevIdRef = useRef(task.id);
+  const readAloudRootRef = useRef<HTMLDivElement>(null);
 
   const editor = useEditor({
     extensions: [
@@ -217,7 +219,7 @@ ${truncated}`;
   };
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={readAloudRootRef} className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-12 py-10">
         {/* Status + Title */}
         <div className="flex items-start gap-3 mb-3">
@@ -326,8 +328,12 @@ ${truncated}`;
               state={tts.state}
               onSpeak={() => {
                 if (editor) {
+                  const selectedText = readSelectedTextForReadAloud({
+                    root: readAloudRootRef.current,
+                    editor,
+                  });
                   const plain = htmlToPlainText(editor.getHTML());
-                  tts.speak(`${title}. ${plain}`);
+                  tts.speak(selectedText ?? `${title}. ${plain}`);
                 }
               }}
               onStop={tts.stop}

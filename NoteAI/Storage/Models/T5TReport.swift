@@ -8,7 +8,6 @@ struct T5TReport: Identifiable, Codable {
     var periodEnd: Date
     var meetingIDs: [UUID]
     var noteIDs: [UUID] = []
-    var taskIDs: [UUID] = []
     var todoIDs: [UUID] = []
     var sections: T5TSections
     var status: Status
@@ -18,10 +17,10 @@ struct T5TReport: Identifiable, Codable {
         case finalized
     }
 
-    // Make `todoIDs` decode-safe for reports saved before this field existed.
+    // Make optional source fields decode-safe for reports saved before they existed.
     enum CodingKeys: String, CodingKey {
         case id, title, createdDate, periodStart, periodEnd
-        case meetingIDs, noteIDs, taskIDs, todoIDs
+        case meetingIDs, noteIDs, todoIDs
         case sections, status
     }
 
@@ -33,7 +32,6 @@ struct T5TReport: Identifiable, Codable {
         periodEnd: Date,
         meetingIDs: [UUID],
         noteIDs: [UUID] = [],
-        taskIDs: [UUID] = [],
         todoIDs: [UUID] = [],
         sections: T5TSections,
         status: Status
@@ -45,7 +43,6 @@ struct T5TReport: Identifiable, Codable {
         self.periodEnd = periodEnd
         self.meetingIDs = meetingIDs
         self.noteIDs = noteIDs
-        self.taskIDs = taskIDs
         self.todoIDs = todoIDs
         self.sections = sections
         self.status = status
@@ -60,7 +57,6 @@ struct T5TReport: Identifiable, Codable {
         periodEnd = try c.decode(Date.self, forKey: .periodEnd)
         meetingIDs = try c.decode([UUID].self, forKey: .meetingIDs)
         noteIDs = (try? c.decode([UUID].self, forKey: .noteIDs)) ?? []
-        taskIDs = (try? c.decode([UUID].self, forKey: .taskIDs)) ?? []
         todoIDs = (try? c.decode([UUID].self, forKey: .todoIDs)) ?? []
         sections = try c.decode(T5TSections.self, forKey: .sections)
         status = try c.decode(Status.self, forKey: .status)
@@ -136,4 +132,3 @@ struct T5TConfig: Codable, Equatable {
 
     static let empty = T5TConfig(vertical: "", region: "", jobFunction: "", subjectLine: "")
 }
-

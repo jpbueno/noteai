@@ -3,19 +3,17 @@ import Foundation
 struct LibraryFilterResult {
     let meetings: [Meeting]
     let notes: [Note]
-    let tasks: [TaskItem]
 }
 
 enum LibraryOperations {
     static func filter(
         meetings: [Meeting],
         notes: [Note],
-        tasks: [TaskItem],
         query rawQuery: String
     ) -> LibraryFilterResult {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else {
-            return LibraryFilterResult(meetings: meetings, notes: notes, tasks: tasks)
+            return LibraryFilterResult(meetings: meetings, notes: notes)
         }
 
         return LibraryFilterResult(
@@ -30,22 +28,12 @@ enum LibraryOperations {
                 note.title.lowercased().contains(query) ||
                 note.content.lowercased().contains(query) ||
                 note.tags.contains { $0.lowercased().contains(query) }
-            },
-            tasks: tasks.filter { task in
-                task.title.lowercased().contains(query) ||
-                task.rawInput.lowercased().contains(query) ||
-                task.description.lowercased().contains(query) ||
-                task.tags.contains { $0.lowercased().contains(query) }
             }
         )
     }
 
     static func notesInRange(_ notes: [Note], start: Date, end: Date) -> [Note] {
         notes.filter { $0.modifiedDate >= start && $0.modifiedDate <= end }
-    }
-
-    static func tasksInRange(_ tasks: [TaskItem], start: Date, end: Date) -> [TaskItem] {
-        tasks.filter { $0.createdDate >= start && $0.createdDate <= end }
     }
 
     static func meetingsInRange(_ meetings: [Meeting], start: Date, end: Date) -> [Meeting] {
@@ -62,4 +50,3 @@ enum LibraryOperations {
         return "Top 5 Things – \(vertical.isEmpty ? "Inference Ops" : vertical) | \(region.isEmpty ? "NALA" : region) | \(jobFunction.isEmpty ? "SA" : jobFunction)"
     }
 }
-

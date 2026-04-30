@@ -113,25 +113,10 @@ final class SummarizationEngine {
         return try await client.chat(messages: messages, model: model)
     }
 
-    // MARK: - Task Summarization
-
-    /// Uses AI to distill pasted text (email, Slack convo, etc.) into a single-sentence task accomplishment.
-    func summarizeTaskInput(text: String) async throws -> String {
-        let client = try buildClient()
-        let model = selectedModelID()
-        let prompt = """
-        Summarize the following into a single sentence describing what was accomplished or what task was completed. Write it in first person, action-oriented, using a newspaper-headline style (e.g., "Enabled Crusoe to Onboard and Benchmark Nemotron"). Be specific about names, projects, tools, and outcomes. Do NOT include quotes or prefixes — just the sentence.
-
-        INPUT:
-        \(text.prefix(4000))
-        """
-        return try await client.complete(prompt: prompt, model: model)
-    }
-
     // MARK: - T5T Generation
 
     /// Generates a T5T (Top 5 Things) report from multiple meetings in a reporting period.
-    func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], todos: [TodoItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
+    func generateT5T(meetings: [Meeting], notes: [Note] = [], todos: [TodoItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
         let client = try buildClient()
         let model = selectedModelID()
 
@@ -163,21 +148,6 @@ final class SummarizationEngine {
             noteBlocks.append(block)
         }
         let notesText = noteBlocks.isEmpty ? "" : "\n\nNOTES:\n" + noteBlocks.joined(separator: "\n\n---\n\n")
-
-        // Build task blocks
-        var taskBlocks: [String] = []
-        for task in tasks {
-            var block = "TASK: \(task.title)"
-            if !task.tags.isEmpty {
-                block += " [\(task.tags.joined(separator: ", "))]"
-            }
-            block += " (status: \(task.status.rawValue))"
-            if !task.rawInput.isEmpty {
-                block += "\nContext: \(String(task.rawInput.prefix(500)))"
-            }
-            taskBlocks.append(block)
-        }
-        let tasksText = taskBlocks.isEmpty ? "" : "\n\nTASKS COMPLETED:\n" + taskBlocks.joined(separator: "\n")
 
         // Build todo blocks — these are the primary source for T5T per the web app
         var todoBlocks: [String] = []
@@ -230,7 +200,6 @@ final class SummarizationEngine {
         MEETING SUMMARIES:
         \(meetingsText)
         \(notesText)
-        \(tasksText)
         \(todosText)
 
         OUTPUT: Valid JSON only, with this exact structure:

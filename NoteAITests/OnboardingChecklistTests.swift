@@ -2,6 +2,27 @@ import XCTest
 @testable import NoteAI
 
 final class OnboardingChecklistTests: XCTestCase {
+    private func item(
+        _ id: OnboardingItemID,
+        in checklist: OnboardingChecklist,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> OnboardingChecklistItem {
+        guard let item = checklist.items.filter({ $0.id == id }).first else {
+            XCTFail("Expected checklist item \(id)", file: file, line: line)
+            return OnboardingChecklistItem(
+                id: id,
+                label: "",
+                detail: "",
+                actionLabel: nil,
+                actionTarget: nil,
+                status: .unsupported,
+                required: false
+            )
+        }
+        return item
+    }
+
     func testRequiredSetupIsIncompleteUntilPermissionsAndProviderAreReady() {
         let checklist = OnboardingChecklist.build(
             provider: .nvidia,
@@ -74,5 +95,72 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(checklist.completedCount, 7)
         XCTAssertEqual(checklist.items.first { $0.id == .firstRecording }?.status, .complete)
         XCTAssertNil(checklist.firstRecordingBlocker)
+    }
+
+    func testPermissionRowsExposeDirectPromptOrRecoveryActions() {
+        let unknownChecklist = OnboardingChecklist.build(
+            provider: .openRouter,
+            providerKeyConfigured: true,
+            microphonePermission: .unknown,
+            screenRecordingPermission: .unknown,
+            notificationPermission: .unknown,
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        XCTAssertEqual(item(.microphone, in: unknownChecklist).actionTarget, .requestMicrophonePermission)
+        XCTAssertEqual(item(.microphone, in: unknownChecklist).actionLabel, "Request access")
+        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionTarget, .openScreenRecordingPrivacySettings)
+        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionLabel, "Open Screen Recording")
+        XCTAssertEqual(item(.notifications, in: unknownChecklist).actionTarget, .requestNotificationPermission)
+        XCTAssertEqual(item(.notifications, in: unknownChecklist).actionLabel, "Request access")
+
+        let deniedChecklist = OnboardingChecklist.build(
+            provider: .openRouter,
+            providerKeyConfigured: true,
+            microphonePermission: .denied,
+            screenRecordingPermission: .denied,
+            notificationPermission: .denied,
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        XCTAssertEqual(item(.microphone, in: deniedChecklist).status, .blocked)
+        XCTAssertEqual(item(.microphone, in: deniedChecklist).actionTarget, .openMicrophonePrivacySettings)
+        XCTAssertEqual(item(.microphone, in: deniedChecklist).actionLabel, "Open Microphone")
+        XCTAssertEqual(item(.screenRecording, in: deniedChecklist).actionTarget, .openScreenRecordingPrivacySettings)
+        XCTAssertEqual(item(.notifications, in: deniedChecklist).actionTarget, .openNotificationSettings)
+        XCTAssertEqual(item(.notifications, in: deniedChecklist).actionLabel, "Open Notifications")
+    }
+
+    func testUnsupportedPermissionRowsDoNotExposeActions() {
+        let checklist = OnboardingChecklist.build(
+            provider: .openRouter,
+            providerKeyConfigured: true,
+            microphonePermission: .unsupported("No microphone"),
+            screenRecordingPermission: .unsupported("Requires macOS 14.2 or later"),
+            notificationPermission: .unsupported("Notifications unavailable"),
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        XCTAssertNil(item(.microphone, in: checklist).actionTarget)
+        XCTAssertNil(item(.screenRecording, in: checklist).actionTarget)
+        XCTAssertNil(item(.notifications, in: checklist).actionTarget)
+    }
+
+    func testScreenRecordingRecoveryExplainsRelaunchRequirement() {
+        let checklist = OnboardingChecklist.build(
+            provider: .openRouter,
+            providerKeyConfigured: true,
+            microphonePermission: .granted,
+            screenRecordingPermission: .denied,
+            notificationPermission: .granted,
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        XCTAssertTrue(item(.screenRecording, in: checklist).detail.contains("quit and reopen NoteAI"))
+        XCTAssertEqual(item(.screenRecording, in: checklist).actionTarget, .openScreenRecordingPrivacySettings)
     }
 }

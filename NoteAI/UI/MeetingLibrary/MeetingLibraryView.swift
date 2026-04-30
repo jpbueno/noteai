@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -1033,10 +1034,17 @@ struct MeetingLibraryView: View {
         switch item.actionTarget {
         case .startRecording:
             meetingManager.startRecording()
+        case .requestMicrophonePermission:
+            requestMicrophonePermissionForOnboarding()
+        case .openMicrophonePrivacySettings:
+            openSystemSettings(path: "com.apple.preference.security?Privacy_Microphone")
+        case .openScreenRecordingPrivacySettings:
+            openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture")
+        case .requestNotificationPermission:
+            meetingManager.requestNotificationPermissionForOnboarding()
+        case .openNotificationSettings:
+            openNotificationSettings()
         case .openGeneralSettings:
-            if item.id == .notifications {
-                meetingManager.requestNotificationPermissionForOnboarding()
-            }
             openSettings(initialTab: .general)
         case .openAISettings:
             openSettings(initialTab: .ai)
@@ -1044,10 +1052,16 @@ struct MeetingLibraryView: View {
             openSettings(initialTab: .account)
         case .openPrivacySettings:
             openSettings(initialTab: .privacy)
-        case .openSystemPrivacySettings:
-            openSystemPrivacySettings()
         case .none:
             break
+        }
+    }
+
+    private func requestMicrophonePermissionForOnboarding() {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            Task { @MainActor in
+                meetingManager.refreshOnboardingChecklistState()
+            }
         }
     }
 
@@ -1071,11 +1085,24 @@ struct MeetingLibraryView: View {
         settingsWindow = window
     }
 
-    private func openSystemPrivacySettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-        if let url {
-            NSWorkspace.shared.open(url)
+    private func openNotificationSettings() {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.noteai.app"
+        let paths = [
+            "com.apple.Notifications-Settings.extension?id=\(bundleIdentifier)",
+            "com.apple.preference.notifications",
+        ]
+
+        for path in paths where openSystemSettings(path: path) {
+            return
         }
+    }
+
+    @discardableResult
+    private func openSystemSettings(path: String) -> Bool {
+        guard let url = URL(string: "x-apple.systempreferences:\(path)") else {
+            return false
+        }
+        return NSWorkspace.shared.open(url)
     }
 
     private func exportMeeting(_ meeting: Meeting) {

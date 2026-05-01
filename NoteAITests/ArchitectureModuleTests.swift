@@ -113,7 +113,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
-    func testCommandCenterLayoutAdaptsWithoutInflatingTypography() {
+    func testCommandCenterLayoutUsesLinearReadableTypographyScale() {
         let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
         let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
 
@@ -123,18 +123,24 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThan(compact.contentMaxWidth, wide.contentMaxWidth)
         XCTAssertLessThan(compact.onboardingMinimumCardWidth, wide.onboardingMinimumCardWidth)
 
-        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 220)
-        XCTAssertLessThanOrEqual(wide.sidebarWidth, 244)
-        XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1320)
+        XCTAssertGreaterThanOrEqual(wide.sidebarWidth, 260)
+        XCTAssertLessThanOrEqual(wide.sidebarWidth, 280)
+        XCTAssertGreaterThanOrEqual(wide.maximumSidebarWidth, 320)
+        XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1300)
         XCTAssertLessThanOrEqual(wide.scale, 1)
-        XCTAssertLessThanOrEqual(wide.titleFontSize, 28)
-        XCTAssertLessThanOrEqual(wide.metricValueFontSize, 20)
-        XCTAssertLessThanOrEqual(wide.sectionTitleFontSize, 13)
-        XCTAssertLessThanOrEqual(wide.bodyFontSize, 11)
-        XCTAssertLessThanOrEqual(wide.smallFontSize, 10)
-        XCTAssertLessThanOrEqual(wide.tinyFontSize, 9)
-        XCTAssertLessThanOrEqual(wide.controlHeight, 35)
-        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 38)
+        XCTAssertGreaterThanOrEqual(wide.titleFontSize, 32)
+        XCTAssertGreaterThanOrEqual(wide.metricValueFontSize, 24)
+        XCTAssertGreaterThanOrEqual(wide.sectionTitleFontSize, 16)
+        XCTAssertEqual(wide.bodyFontSize, 14)
+        XCTAssertEqual(wide.smallFontSize, 12)
+        XCTAssertEqual(wide.tinyFontSize, 11)
+
+        XCTAssertGreaterThanOrEqual(compact.bodyFontSize, 13)
+        XCTAssertGreaterThanOrEqual(compact.smallFontSize, 12)
+        XCTAssertGreaterThanOrEqual(compact.tinyFontSize, 11)
+
+        XCTAssertLessThanOrEqual(wide.controlHeight, 39)
+        XCTAssertLessThanOrEqual(wide.actionButtonHeight, 42)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

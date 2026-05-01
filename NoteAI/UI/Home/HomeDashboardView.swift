@@ -74,28 +74,28 @@ struct CommandCenterLayout: Equatable {
         let width = max(760, windowWidth)
         let scale = min(1.0, max(0.88, width / 1600))
         let typeScale = min(1.0, max(0.96, width / 1700))
-        let sidebarWidth = min(244, max(196, width * 0.13))
+        let sidebarWidth = min(280, max(228, width * 0.155))
         let contentMaxWidth = max(780, width - sidebarWidth - 80)
 
         return CommandCenterLayout(
             scale: scale,
             sidebarWidth: sidebarWidth,
-            minimumSidebarWidth: max(196, sidebarWidth - 44),
-            maximumSidebarWidth: min(288, sidebarWidth + 52),
+            minimumSidebarWidth: max(218, sidebarWidth - 44),
+            maximumSidebarWidth: min(320, sidebarWidth + 60),
             contentMaxWidth: contentMaxWidth,
             commandSearchMaxWidth: min(520, max(360, width * 0.30)),
-            controlHeight: min(35, max(32, round(34 * scale))),
-            actionButtonHeight: min(38, max(34, round(36 * scale))),
+            controlHeight: min(39, max(36, round(38 * scale))),
+            actionButtonHeight: min(42, max(38, round(41 * scale))),
             panelPadding: round(16 * scale),
             dashboardSpacing: round(14 * scale),
-            onboardingMinimumCardWidth: round(205 * scale),
-            metricMinimumCardWidth: round(96 * scale),
-            titleFontSize: min(28, max(26, round(28 * typeScale))),
-            metricValueFontSize: min(20, max(18, round(20 * typeScale))),
-            sectionTitleFontSize: min(13, max(12, round(13 * typeScale))),
-            bodyFontSize: min(11, max(10, round(11 * typeScale))),
-            smallFontSize: 10,
-            tinyFontSize: 9
+            onboardingMinimumCardWidth: round(236 * scale),
+            metricMinimumCardWidth: round(112 * scale),
+            titleFontSize: min(32, max(31, round(32 * typeScale))),
+            metricValueFontSize: min(24, max(23, round(24 * typeScale))),
+            sectionTitleFontSize: min(16, max(15, round(16 * typeScale))),
+            bodyFontSize: min(14, max(13, round(14 * typeScale))),
+            smallFontSize: 12,
+            tinyFontSize: 11
         )
     }
 }

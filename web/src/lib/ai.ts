@@ -1,4 +1,4 @@
-import type { LLMProvider, MeetingTemplate, MeetingSummary, CoachInsight, CoachInsightType } from "./types";
+import { chunkBlobForTranscription, type LLMProvider, type MeetingTemplate, type MeetingSummary, type CoachInsight, type CoachInsightType } from "./types";
 import { getSetting } from "./db";
 
 const CLIENT_CHAT_TIMEOUT_MS = 75_000;
@@ -136,9 +136,13 @@ export async function chatWithAI(
 
 export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
+  const plan = chunkBlobForTranscription(audioBlob, { maxBytes: 24 * 1024 * 1024 });
+  if (plan.skipped) {
+    throw new Error("Recording is too large for one transcription request; preserved live transcript instead.");
+  }
 
   const formData = new FormData();
-  formData.append("file", audioBlob, "recording.webm");
+  formData.append("file", plan.chunks[0], "recording.webm");
   formData.append("model", "whisper-1");
   formData.append("provider", provider);
 

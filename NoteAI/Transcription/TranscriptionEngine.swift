@@ -2,8 +2,52 @@ import AVFoundation
 import Accelerate
 import WhisperKit
 
+struct TranscriptionAudioWindow {
+    let startFrame: Int
+    let frameCount: Int
+    let startTime: Float
+    let duration: Float
+}
+
+enum TranscriptionWindowPlanner {
+    static func windows(frameLength: Int, sampleRate: Double, maxDuration: Double) -> [TranscriptionAudioWindow] {
+        guard frameLength > 0, sampleRate > 0, maxDuration > 0 else { return [] }
+
+        let maxFrames = max(1, Int((sampleRate * maxDuration).rounded(.down)))
+        var windows: [TranscriptionAudioWindow] = []
+        var startFrame = 0
+
+        while startFrame < frameLength {
+            let frameCount = min(maxFrames, frameLength - startFrame)
+            windows.append(TranscriptionAudioWindow(
+                startFrame: startFrame,
+                frameCount: frameCount,
+                startTime: Float(Double(startFrame) / sampleRate),
+                duration: Float(Double(frameCount) / sampleRate)
+            ))
+            startFrame += frameCount
+        }
+
+        return windows
+    }
+
+    static func warningSegment(id: Int, startTime: Float, endTime: Float, reason: String) -> TranscriptSegment {
+        TranscriptSegment(
+            id: id,
+            text: "[Transcript may be incomplete: \(reason)]",
+            startTime: startTime,
+            endTime: endTime,
+            speaker: "System",
+            confidence: 0
+        )
+    }
+}
+
 /// On-device transcription using WhisperKit (CoreML-optimized Whisper on Apple Neural Engine).
 actor TranscriptionEngine {
+    private static let maxTranscriptionWindowDuration: Double = 30
+    private static let maxChunkAttempts = 2
+
     private var whisperKit: WhisperKit?
     private var isInitialized = false
     private var initFailed = false
@@ -153,76 +197,37 @@ actor TranscriptionEngine {
             return []
         }
 
-        // Feed previous context so Whisper maintains consistent spelling
-        // of names, acronyms, and technical terms across chunks
-        let promptTokens: [Int]?
-        if !previousContext.isEmpty, let tokenizer = whisper.tokenizer {
-            let contextTokens = tokenizer.encode(text: previousContext)
-            promptTokens = Array(contextTokens.suffix(100))
-        } else {
-            promptTokens = nil
-        }
-
-        let options = DecodingOptions(
-            language: "en",
-            temperature: 0.0,
-            temperatureIncrementOnFallback: 0.2,
-            temperatureFallbackCount: 2,
-            topK: 5,
-            usePrefillPrompt: true,
-            usePrefillCache: true,
-            skipSpecialTokens: true,
-            wordTimestamps: false,
-            promptTokens: promptTokens,
-            suppressBlank: true,
-            compressionRatioThreshold: 2.8,     // More permissive — technical speech can be repetitive
-            logProbThreshold: -2.0,             // Very permissive — keep borderline speech
-            firstTokenLogProbThreshold: -2.5,   // Don't discard chunks starting quietly
-            noSpeechThreshold: 0.3,             // Lower = more permissive speech detection
-            chunkingStrategy: .vad
+        let bufferDuration = Float(audioBuffer.frameLength) / Float(audioBuffer.format.sampleRate)
+        let windows = TranscriptionWindowPlanner.windows(
+            frameLength: audioArray.count,
+            sampleRate: audioBuffer.format.sampleRate,
+            maxDuration: Self.maxTranscriptionWindowDuration
         )
 
-        log("calling whisper.transcribe, samples=\(audioArray.count), energy=\(energy)")
-        let results: [TranscriptionResult]
-        do {
-            results = try await whisper.transcribe(audioArray: audioArray, decodeOptions: options)
-            log("transcribe returned \(results.count) results, segments=\(results.flatMap(\.segments).count)")
-        } catch {
-            log("transcribe FAILED: \(error)")
-            throw error
-        }
-
-        let bufferDuration = Float(audioBuffer.frameLength) / Float(audioBuffer.format.sampleRate)
-
-        // Convert to our segment model
         var segments: [TranscriptSegment] = []
-        for result in results {
-            for segment in result.segments {
-                let cleaned = Self.cleanText(segment.text)
+        for window in windows {
+            let start = window.startFrame
+            let end = start + window.frameCount
+            let windowSamples = Array(audioArray[start..<end])
+            let windowBaseTime = elapsedTime + window.startTime
 
-                // Skip empty segments
-                guard !cleaned.isEmpty,
-                      !cleaned.allSatisfy({ $0.isWhitespace || $0.isPunctuation }) else {
-                    continue
-                }
-
+            do {
+                let windowSegments = try await transcribeWindow(
+                    whisper: whisper,
+                    samples: windowSamples,
+                    baseTime: windowBaseTime
+                )
+                segments.append(contentsOf: windowSegments)
+            } catch {
+                log("window transcribe FAILED start=\(window.startTime)s duration=\(window.duration)s: \(error)")
                 segmentIndex += 1
-                segments.append(TranscriptSegment(
+                segments.append(TranscriptionWindowPlanner.warningSegment(
                     id: segmentIndex,
-                    text: cleaned,
-                    startTime: elapsedTime + segment.start,
-                    endTime: elapsedTime + segment.end,
-                    speaker: nil,
-                    confidence: Float(segment.avgLogprob)
+                    startTime: windowBaseTime,
+                    endTime: windowBaseTime + window.duration,
+                    reason: "Whisper chunk failed; partial transcript preserved"
                 ))
             }
-        }
-
-        // Update rolling context for next chunk — last ~100 chars gives Whisper
-        // enough to maintain spelling consistency without overwhelming the prompt
-        let allText = segments.map(\.text).joined(separator: " ")
-        if !allText.isEmpty {
-            previousContext = String(allText.suffix(200))
         }
 
         elapsedTime += bufferDuration
@@ -241,6 +246,91 @@ actor TranscriptionEngine {
     }
 
     // MARK: - Private
+
+    private func transcribeWindow(whisper: WhisperKit, samples: [Float], baseTime: Float) async throws -> [TranscriptSegment] {
+        var lastError: Error?
+
+        for attempt in 1...Self.maxChunkAttempts {
+            do {
+                log("calling whisper.transcribe window attempt=\(attempt), samples=\(samples.count)")
+                let results = try await whisper.transcribe(
+                    audioArray: samples,
+                    decodeOptions: decodingOptions(for: whisper, attempt: attempt)
+                )
+                log("window transcribe returned \(results.count) results, segments=\(results.flatMap(\.segments).count)")
+                return convertResults(results, baseTime: baseTime)
+            } catch {
+                lastError = error
+                log("window transcribe attempt \(attempt) FAILED: \(error)")
+            }
+        }
+
+        throw lastError ?? NSError(domain: "NoteAI.Transcription", code: -1)
+    }
+
+    private func decodingOptions(for whisper: WhisperKit, attempt: Int) -> DecodingOptions {
+        let promptTokens: [Int]?
+        if !previousContext.isEmpty, let tokenizer = whisper.tokenizer {
+            let contextTokens = tokenizer.encode(text: previousContext)
+            promptTokens = Array(contextTokens.suffix(100))
+        } else {
+            promptTokens = nil
+        }
+
+        return DecodingOptions(
+            language: "en",
+            temperature: attempt == 1 ? 0.0 : 0.2,
+            temperatureIncrementOnFallback: 0.2,
+            temperatureFallbackCount: attempt == 1 ? 2 : 3,
+            topK: attempt == 1 ? 5 : 8,
+            usePrefillPrompt: true,
+            usePrefillCache: true,
+            skipSpecialTokens: true,
+            wordTimestamps: false,
+            promptTokens: promptTokens,
+            suppressBlank: true,
+            compressionRatioThreshold: attempt == 1 ? 2.8 : 3.2,
+            logProbThreshold: attempt == 1 ? -2.0 : -2.5,
+            firstTokenLogProbThreshold: attempt == 1 ? -2.5 : -3.0,
+            noSpeechThreshold: attempt == 1 ? 0.3 : 0.45,
+            chunkingStrategy: .vad
+        )
+    }
+
+    private func convertResults(_ results: [TranscriptionResult], baseTime: Float) -> [TranscriptSegment] {
+        var segments: [TranscriptSegment] = []
+
+        for result in results {
+            for segment in result.segments {
+                let cleaned = Self.cleanText(segment.text)
+
+                guard !cleaned.isEmpty,
+                      !cleaned.allSatisfy({ $0.isWhitespace || $0.isPunctuation }) else {
+                    continue
+                }
+
+                segmentIndex += 1
+                segments.append(TranscriptSegment(
+                    id: segmentIndex,
+                    text: cleaned,
+                    startTime: baseTime + segment.start,
+                    endTime: baseTime + segment.end,
+                    speaker: nil,
+                    confidence: Float(segment.avgLogprob)
+                ))
+            }
+        }
+
+        let allText = segments
+            .filter { $0.speaker != "System" }
+            .map(\.text)
+            .joined(separator: " ")
+        if !allText.isEmpty {
+            previousContext = String(allText.suffix(200))
+        }
+
+        return segments
+    }
 
     private func getOrInitWhisper() async throws -> WhisperKit {
         if let whisperKit {

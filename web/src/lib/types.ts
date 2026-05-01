@@ -18,6 +18,35 @@ export interface TranscriptSegment {
   confidence: number;
 }
 
+export function buildIncompleteTranscriptWarning(options: {
+  id: number;
+  message: string;
+  startTime: number;
+  endTime: number;
+}): TranscriptSegment {
+  return {
+    id: options.id,
+    text: `[Transcript may be incomplete: ${options.message}]`,
+    startTime: options.startTime,
+    endTime: options.endTime,
+    speaker: "System",
+    confidence: 0,
+  };
+}
+
+export function shouldAcceptFinalWhisperTranscript(text: string, preservedTextLength: number): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.length >= preservedTextLength;
+}
+
+export function chunkBlobForTranscription(blob: Blob, options: { maxBytes: number }): { chunks: Blob[]; skipped: boolean } {
+  if (blob.size > options.maxBytes) {
+    return { chunks: [], skipped: true };
+  }
+
+  return { chunks: [blob], skipped: false };
+}
+
 export interface ActionItem {
   id: string;
   task: string;

@@ -83,7 +83,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', dailyLogIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft')`,
   `CREATE TABLE IF NOT EXISTS dailyLogs (id TEXT PRIMARY KEY, date TEXT NOT NULL, sections TEXT NOT NULL DEFAULT '[]', linkedMeetingIDs TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS chatMessages (id TEXT PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', timestamp TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, dueDate TEXT, sourceMeetingID TEXT, sourceActionItemID TEXT, owner TEXT, createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
 ];
 
@@ -94,6 +94,9 @@ const MIGRATIONS = [
   "ALTER TABLE t5tReports ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE todos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE todos ADD COLUMN dueDate TEXT",
+  "ALTER TABLE todos ADD COLUMN sourceMeetingID TEXT",
+  "ALTER TABLE todos ADD COLUMN sourceActionItemID TEXT",
+  "ALTER TABLE todos ADD COLUMN owner TEXT",
   "ALTER TABLE dailyLogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE t5tReports ADD COLUMN dailyLogIDs TEXT NOT NULL DEFAULT '[]'",
 ];
@@ -159,7 +162,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections", "status", "pinned"],
   dailyLogs: ["id", "date", "sections", "linkedMeetingIDs", "createdDate", "modifiedDate", "pinned"],
   chatMessages: ["id", "role", "content", "timestamp"],
-  todos: ["id", "title", "description", "completed", "dueDate", "createdDate", "modifiedDate", "pinned"],
+  todos: ["id", "title", "description", "completed", "dueDate", "sourceMeetingID", "sourceActionItemID", "owner", "createdDate", "modifiedDate", "pinned"],
   settings: ["key", "value"],
 };
 

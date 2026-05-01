@@ -1,5 +1,9 @@
-import type { T5TConfig } from "./types";
-import { DEFAULT_T5T_CONFIG } from "./types";
+import type { Meeting, T5TConfig, TodoItem } from "./types";
+import {
+  buildLinkedTodoSyncPlanForMeetingActions,
+  DEFAULT_T5T_CONFIG,
+  ensureMeetingSummaryMetadata,
+} from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>;
@@ -18,16 +22,69 @@ async function api(path: string, options?: RequestInit) {
   return data;
 }
 
+function normalizeMeetingRow(data: Row): Row {
+  if (!data.summary || typeof data.summary !== "object") return data;
+  return {
+    ...data,
+    summary: ensureMeetingSummaryMetadata(data.summary as Meeting["summary"]),
+  };
+}
+
+async function saveRows(path: string, data: Row | Row[]): Promise<unknown> {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+async function syncLinkedTodosForMeeting(data: Row): Promise<void> {
+  if (!data.id || !data.summary || typeof data.summary !== "object") return;
+  const meeting = {
+    ...data,
+    id: String(data.id),
+    title: typeof data.title === "string" ? data.title : "Meeting",
+    date: typeof data.date === "string" ? data.date : new Date().toISOString(),
+    duration: typeof data.duration === "number" ? data.duration : 0,
+    transcript: Array.isArray(data.transcript) ? data.transcript : [],
+    summary: ensureMeetingSummaryMetadata(data.summary as Meeting["summary"]),
+  } as Meeting;
+  const existingTodos = (await api("/api/data/todos")) as TodoItem[];
+  const syncPlan = buildLinkedTodoSyncPlanForMeetingActions(meeting, existingTodos);
+  for (const todo of syncPlan.upserts) {
+    await saveRows("/api/data/todos", todo as unknown as Row);
+  }
+  for (const todo of syncPlan.unlinks) {
+    await saveRows("/api/data/todos", todo as unknown as Row);
+  }
+}
+
+async function saveMeeting(data: Row): Promise<unknown> {
+  const normalized = normalizeMeetingRow(data);
+  const result = await saveRows("/api/data/meetings", normalized);
+  await syncLinkedTodosForMeeting(normalized);
+  return result;
+}
+
+async function saveMeetings(rows: Row[]): Promise<unknown> {
+  const normalized = rows.map(normalizeMeetingRow);
+  const result = await saveRows("/api/data/meetings", normalized);
+  for (const meeting of normalized) {
+    await syncLinkedTodosForMeeting(meeting);
+  }
+  return result;
+}
+
 export const db = {
   meetings: {
     async toArray() { return api("/api/data/meetings"); },
     async get(id: string) { return api(`/api/data/meetings?id=${id}`); },
-    async add(data: Row) { return api("/api/data/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); },
-    async put(data: Row) { return api("/api/data/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); },
-    async update(id: string, changes: Row) { return api("/api/data/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...changes }) }); },
+    async add(data: Row) { return saveMeeting(data); },
+    async put(data: Row) { return saveMeeting(data); },
+    async update(id: string, changes: Row) { return saveMeeting({ id, ...changes }); },
     async delete(id: string) { return api(`/api/data/meetings?id=${id}`, { method: "DELETE" }); },
     async clear() { return api("/api/data/meetings?confirm=true", { method: "DELETE" }); },
-    async bulkPut(rows: Row[]) { return api("/api/data/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) }); },
+    async bulkPut(rows: Row[]) { return saveMeetings(rows); },
   },
   notes: {
     async toArray() { return api("/api/data/notes"); },
@@ -78,12 +135,12 @@ export const db = {
   todos: {
     async toArray() { return api("/api/data/todos"); },
     async get(id: string) { return api(`/api/data/todos?id=${id}`); },
-    async add(data: Row) { return api("/api/data/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); },
-    async put(data: Row) { return api("/api/data/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); },
-    async update(id: string, changes: Row) { return api("/api/data/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...changes }) }); },
+    async add(data: Row) { return saveRows("/api/data/todos", data); },
+    async put(data: Row) { return saveRows("/api/data/todos", data); },
+    async update(id: string, changes: Row) { return saveRows("/api/data/todos", { id, ...changes }); },
     async delete(id: string) { return api(`/api/data/todos?id=${id}`, { method: "DELETE" }); },
     async clear() { return api("/api/data/todos?confirm=true", { method: "DELETE" }); },
-    async bulkPut(rows: Row[]) { return api("/api/data/todos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) }); },
+    async bulkPut(rows: Row[]) { return saveRows("/api/data/todos", rows); },
   },
 };
 

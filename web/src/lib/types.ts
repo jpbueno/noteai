@@ -55,12 +55,30 @@ export interface ActionItem {
   isCompleted: boolean;
 }
 
+export type SummarySectionKey = "decisions" | "actionItems" | "topics" | "openQuestions";
+export type SummaryEditState = "generated" | "userEdited";
+
+export interface SummarySectionMetadata {
+  state: SummaryEditState;
+  modifiedAt: string;
+}
+
+export type SummarySectionMetadataMap = Record<SummarySectionKey, SummarySectionMetadata>;
+
+export const SUMMARY_SECTION_KEYS: SummarySectionKey[] = [
+  "decisions",
+  "actionItems",
+  "topics",
+  "openQuestions",
+];
+
 export interface MeetingSummary {
   decisions: string[];
   actionItems: ActionItem[];
   topics: string[];
   openQuestions: string[];
   wasSummarized: boolean;
+  sectionMetadata?: SummarySectionMetadataMap;
 }
 
 export interface Meeting {
@@ -106,7 +124,309 @@ export interface TodoItem {
   dueDate: string | null;
   createdDate: string;
   modifiedDate: string;
+  sourceMeetingID?: string | null;
+  sourceActionItemID?: string | null;
+  owner?: string | null;
   pinned?: number;
+}
+
+type TimestampProvider = () => string;
+
+function defaultTimestamp(): string {
+  return new Date().toISOString();
+}
+
+function cleanJsonContent(content: string): string {
+  return content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+}
+
+function parseSummaryJson(content: string): unknown {
+  return JSON.parse(cleanJsonContent(content));
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
+function readNullableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeKeyPart(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export function normalizeActionItemKey(input: {
+  task: string;
+  owner?: string | null;
+  deadline?: string | null;
+}): string {
+  return [
+    normalizeKeyPart(input.task),
+    normalizeKeyPart(input.owner),
+    normalizeKeyPart(input.deadline),
+  ].join("|");
+}
+
+export function actionItemIdFromFields(input: {
+  task: string;
+  owner?: string | null;
+  deadline?: string | null;
+}): string {
+  return `action-${stableHash(normalizeActionItemKey(input))}`;
+}
+
+export function normalizeActionItems(value: unknown): ActionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const task = readNullableString(record.task);
+    if (!task) return [];
+    const owner = readNullableString(record.owner);
+    const deadline = readNullableString(record.deadline);
+    return [{
+      id: actionItemIdFromFields({ task, owner, deadline }),
+      task,
+      owner,
+      deadline,
+      isCompleted: record.isCompleted === true,
+    }];
+  });
+}
+
+export function defaultSummarySectionMetadata(
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): SummarySectionMetadataMap {
+  const modifiedAt = timestampProvider();
+  return {
+    decisions: { state: "generated", modifiedAt },
+    actionItems: { state: "generated", modifiedAt },
+    topics: { state: "generated", modifiedAt },
+    openQuestions: { state: "generated", modifiedAt },
+  };
+}
+
+export function ensureMeetingSummaryMetadata(
+  summary: MeetingSummary,
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): MeetingSummary {
+  const fallback = defaultSummarySectionMetadata(timestampProvider);
+  const existing = summary.sectionMetadata;
+  return {
+    decisions: readStringArray(summary.decisions),
+    actionItems: normalizeActionItems(summary.actionItems),
+    topics: readStringArray(summary.topics),
+    openQuestions: readStringArray(summary.openQuestions),
+    wasSummarized: summary.wasSummarized,
+    sectionMetadata: {
+      decisions: existing?.decisions ?? fallback.decisions,
+      actionItems: existing?.actionItems ?? fallback.actionItems,
+      topics: existing?.topics ?? fallback.topics,
+      openQuestions: existing?.openQuestions ?? fallback.openQuestions,
+    },
+  };
+}
+
+export function markSummarySectionState(
+  summary: MeetingSummary,
+  section: SummarySectionKey,
+  state: SummaryEditState,
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): MeetingSummary {
+  const normalized = ensureMeetingSummaryMetadata(summary, timestampProvider);
+  const sectionMetadata = normalized.sectionMetadata ?? defaultSummarySectionMetadata(timestampProvider);
+  return {
+    ...normalized,
+    sectionMetadata: {
+      ...sectionMetadata,
+      [section]: { state, modifiedAt: timestampProvider() },
+    },
+  };
+}
+
+export function markSummarySectionUserEdited(
+  summary: MeetingSummary,
+  section: SummarySectionKey,
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): MeetingSummary {
+  return markSummarySectionState(summary, section, "userEdited", timestampProvider);
+}
+
+export function parseMeetingSummaryContent(
+  content: string,
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): MeetingSummary {
+  try {
+    const parsed = parseSummaryJson(content) as Record<string, unknown>;
+    return ensureMeetingSummaryMetadata(
+      {
+        decisions: readStringArray(parsed.decisions),
+        actionItems: normalizeActionItems(parsed.actionItems),
+        topics: readStringArray(parsed.topics),
+        openQuestions: readStringArray(parsed.openQuestions),
+        wasSummarized: true,
+      },
+      timestampProvider,
+    );
+  } catch {
+    return ensureMeetingSummaryMetadata(
+      {
+        decisions: [],
+        actionItems: [],
+        topics: [],
+        openQuestions: [],
+        wasSummarized: false,
+      },
+      timestampProvider,
+    );
+  }
+}
+
+export function mergeRegeneratedSummarySection(
+  current: MeetingSummary,
+  section: SummarySectionKey,
+  content: string,
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): MeetingSummary {
+  const normalized = ensureMeetingSummaryMetadata(current, timestampProvider);
+  const parsed = parseSummaryJson(content) as Record<string, unknown> | unknown[];
+  const value = Array.isArray(parsed) ? parsed : parsed[section];
+  const nextSection =
+    section === "actionItems" ? normalizeActionItems(value) : readStringArray(value);
+
+  return markSummarySectionState(
+    {
+      ...normalized,
+      [section]: nextSection,
+      wasSummarized: true,
+    },
+    section,
+    "generated",
+    timestampProvider,
+  );
+}
+
+export function linkedTodoIdForAction(meetingID: string, sourceActionItemID: string): string {
+  return `todo-${stableHash(`${meetingID}|${sourceActionItemID}`)}`;
+}
+
+function actionLinkedTodoDescription(meeting: Pick<Meeting, "title">, action: ActionItem): string {
+  const parts = [`Action item from meeting "${meeting.title}".`];
+  if (action.owner) parts.push(`Owner: ${action.owner}.`);
+  if (action.deadline) parts.push(`Deadline: ${action.deadline}.`);
+  return parts.join("\n");
+}
+
+function todoMatchesAction(todo: TodoItem, meetingID: string, action: ActionItem): boolean {
+  if (todo.sourceMeetingID !== meetingID) return false;
+  if (todo.sourceActionItemID === action.id) return true;
+  if (todo.sourceActionItemID) return false;
+  return normalizeActionItemKey({
+    task: todo.title,
+    owner: todo.owner ?? null,
+    deadline: todo.dueDate,
+  }) === normalizeActionItemKey(action);
+}
+
+export interface LinkedTodoSyncPlan {
+  upserts: TodoItem[];
+  unlinks: TodoItem[];
+}
+
+function buildTodoForAction(
+  meeting: Meeting,
+  action: ActionItem,
+  existing: TodoItem | undefined,
+  modifiedAt: string,
+): TodoItem {
+  return {
+    ...(existing ?? {}),
+    id: existing?.id ?? linkedTodoIdForAction(meeting.id, action.id),
+    title: action.task,
+    description: actionLinkedTodoDescription(meeting, action),
+    completed: action.isCompleted ? 1 : 0,
+    dueDate: action.deadline,
+    createdDate: existing?.createdDate ?? modifiedAt,
+    modifiedDate: modifiedAt,
+    sourceMeetingID: meeting.id,
+    sourceActionItemID: action.id,
+    owner: action.owner,
+    pinned: existing?.pinned ?? 0,
+  };
+}
+
+export function buildLinkedTodoSyncPlanForMeetingActions(
+  meeting: Meeting,
+  existingTodos: TodoItem[],
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): LinkedTodoSyncPlan {
+  const now = timestampProvider();
+  const meetingTodos = existingTodos.filter((todo) => todo.sourceMeetingID === meeting.id);
+
+  if (!meeting.summary.wasSummarized) {
+    return {
+      upserts: [],
+      unlinks: meetingTodos.map((todo) => ({
+        ...todo,
+        sourceMeetingID: null,
+        sourceActionItemID: null,
+        modifiedDate: now,
+      })),
+    };
+  }
+
+  const actions = normalizeActionItems(meeting.summary.actionItems);
+  const usedTodoIDs = new Set<string>();
+  const matchedTodos = actions.map((action) => {
+    const exact = meetingTodos.find((todo) => !usedTodoIDs.has(todo.id) && todoMatchesAction(todo, meeting.id, action));
+    if (exact) usedTodoIDs.add(exact.id);
+    return exact;
+  });
+
+  const upserts = actions.map((action, index) => {
+    const existing = matchedTodos[index] ?? meetingTodos.find((todo) => !usedTodoIDs.has(todo.id));
+    if (existing) usedTodoIDs.add(existing.id);
+    return buildTodoForAction(meeting, action, existing, now);
+  });
+
+  return {
+    upserts,
+    unlinks: meetingTodos
+      .filter((todo) => !usedTodoIDs.has(todo.id))
+      .map((todo) => ({
+        ...todo,
+        sourceMeetingID: null,
+        sourceActionItemID: null,
+        modifiedDate: now,
+      })),
+  };
+}
+
+export function buildLinkedTodosForMeetingActions(
+  meeting: Meeting,
+  existingTodos: TodoItem[],
+  timestampProvider: TimestampProvider = defaultTimestamp,
+): TodoItem[] {
+  return buildLinkedTodoSyncPlanForMeetingActions(meeting, existingTodos, timestampProvider).upserts;
 }
 
 // ===== Daily Logs =====

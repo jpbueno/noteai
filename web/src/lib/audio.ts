@@ -19,6 +19,7 @@ import {
   createCaptureMixGraph,
   type CaptureMixGraph,
 } from "./audio-mixing";
+import { buildIncompleteTranscriptWarning } from "./types";
 
 export type RecordingState = "idle" | "starting" | "recording" | "processing";
 
@@ -29,6 +30,12 @@ type DiagnosticsCallback = (diagnostics: RecordingDiagnostics) => void;
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SpeechRecognitionInstance = any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
+const WHISPER_WINDOW_MS = 20_000;
+const WHISPER_FETCH_TIMEOUT_MS = 45_000;
+const WHISPER_MAX_FAILURES = 3;
+const WHISPER_WINDOW_ATTEMPTS = 2;
 
 async function whisperTranscribe(blob: Blob, prompt?: string, signal?: AbortSignal): Promise<string> {
   const formData = new FormData();
@@ -123,6 +130,8 @@ export class AudioRecorder {
   private tabStream: MediaStream | null = null;
   private micStream: MediaStream | null = null;
   private mixedStream: MediaStream | null = null;
+  private whisperWindowRecorder: MediaRecorder | null = null;
+  private pendingWhisperWindows: Blob[] = [];
   private audioCtx: AudioContext | null = null;
   private recognition: SpeechRecognitionInstance = null;
   private workerTimer: WorkerTimer | null = null;
@@ -133,12 +142,12 @@ export class AudioRecorder {
   private recognitionRunning = false;
   private stopped = false;
   private hasTabAudio = false;
-  private whisperBusy = false;
-  private lastWhisperChunkCount = 0;
   private lastWhisperText = "";
   private whisperOversizeNotified = false;
   private whisperDisabled = false;
   private whisperFailureCount = 0;
+  private whisperWindowBusy = false;
+  private whisperWarningSegmentId = 0;
   private lastResultTime = 0;
   private micDeviceId: string | undefined;
   private systemStream: MediaStream | null = null;
@@ -181,9 +190,10 @@ export class AudioRecorder {
     this.chunks = [];
     this.stopped = false;
     this.hasTabAudio = false;
-    this.whisperBusy = false;
-    this.lastWhisperChunkCount = 0;
     this.lastWhisperText = "";
+    this.pendingWhisperWindows = [];
+    this.whisperWindowBusy = false;
+    this.whisperWarningSegmentId = 0;
     this.onTranscript = onTranscript || null;
     this.micDeviceId = micDeviceId;
 
@@ -395,7 +405,7 @@ export class AudioRecorder {
     }, 3000);
 
     // Whisper polling for better accuracy (Worker-based timer)
-    this.startWhisperPolling();
+    this.startWhisperPolling(recordStream, mimeType);
 
     // 7. Listen for audio device changes (AirPods connect/disconnect, etc.)
     // When the user switches devices, reconnect mic to follow the new device
@@ -406,152 +416,138 @@ export class AudioRecorder {
 
   // --- Whisper polling ---
 
-  private startWhisperPolling(): void {
+  private startWhisperPolling(recordStream: MediaStream, mimeType: string): void {
     // Only poll Whisper when we have system/tab audio (both speakers).
     // With mic-only, SpeechRecognition is sufficient and Whisper would
     // just produce duplicates.
     if (!this.hasTabAudio) return;
 
-    // First poll after 10s, then every 15s
+    // Use short standalone MediaRecorder windows instead of ever-growing blobs.
+    // Each stopped window has its own WebM headers, so long meetings stay under
+    // proxy limits and earlier transcript segments remain preserved if one
+    // window fails.
+    this.startWhisperWindow(recordStream, mimeType);
     setTimeout(() => {
-      if (!this.stopped) this.sendToWhisper();
-    }, 10000);
+      if (!this.stopped) this.rotateWhisperWindow(recordStream, mimeType);
+    }, WHISPER_WINDOW_MS);
     if (this.workerTimer) {
       this.whisperId = this.workerTimer.setInterval(() => {
-        if (!this.stopped) this.sendToWhisper();
-      }, 15000);
+        if (!this.stopped) this.rotateWhisperWindow(recordStream, mimeType);
+      }, WHISPER_WINDOW_MS);
     }
   }
 
-  private async sendToWhisper(): Promise<void> {
-    if (this.whisperBusy || this.chunks.length === 0) return;
-    if (this.chunks.length <= this.lastWhisperChunkCount) return;
-
-    this.whisperBusy = true;
-    this.lastWhisperChunkCount = this.chunks.length;
-
-    // Hard timeout so a hung upstream can't deadlock future polls. Without this,
-    // a single stuck fetch freezes all subsequent transcription — and since
-    // SpeechRecognition finals are dropped while Whisper is active, the UI
-    // stops updating entirely.
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), 45000);
+  private startWhisperWindow(recordStream: MediaStream, mimeType: string): void {
+    if (this.stopped || this.whisperDisabled) return;
+    if (this.whisperWindowRecorder && this.whisperWindowRecorder.state !== "inactive") return;
 
     try {
-      // Always send the full recording from chunk 0 — webm container headers live
-      // in the first chunk and later chunks are not valid standalone files.
-      // The deduplication logic below strips already-transcribed text.
-      const blob = new Blob(this.chunks, { type: "audio/webm" });
-
-      // Whisper API file size limit is 25 MB. For long recordings we eventually
-      // exceed this. When we do, skip this poll — SpeechRecognition still runs
-      // in the background for fresh content.
-      const WHISPER_MAX_BYTES = 24 * 1024 * 1024; // 24 MB safety margin
-      if (blob.size > WHISPER_MAX_BYTES) {
-        console.warn(`[NoteAI] Whisper blob too large (${(blob.size / 1024 / 1024).toFixed(1)} MB) — disabling Whisper polling`);
-        this.whisperDisabled = true; // Let SpeechRecognition emit finals from now on
-        if (this.onTranscript && !this.whisperOversizeNotified) {
-          this.whisperOversizeNotified = true;
-          this.onTranscript("[Recording long — switched to mic-only transcription for remainder]", true);
+      const windowChunks: Blob[] = [];
+      const recorder = new MediaRecorder(recordStream, { mimeType });
+      this.whisperWindowRecorder = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) windowChunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        if (windowChunks.length > 0) {
+          this.pendingWhisperWindows.push(new Blob(windowChunks, { type: mimeType }));
+          void this.drainWhisperWindows();
         }
-        return;
-      }
-
-      // Use last transcription as prompt context to maintain coherence
-      const promptContext = this.lastWhisperText.slice(-150) || undefined;
-
-      const text = await whisperTranscribe(blob, promptContext, controller.signal);
-      console.log(`[NoteAI] Whisper poll OK — ${text.length} chars returned`);
-      this.whisperFailureCount = 0;
-
-      if (text && this.onTranscript) {
-        // Whisper returns the FULL cumulative transcript each poll.
-        // Extract only the NEW text appended since last call.
-        const newTail = this.extractNewTranscriptTail(text.trim());
-        this.lastWhisperText = text.trim();
-
-        if (newTail) {
-          this.onTranscript(newTail, true);
-        }
-      }
+      };
+      recorder.start(1000);
     } catch (err) {
-      this.whisperFailureCount++;
-      console.warn(`[NoteAI] Whisper poll failed (${this.whisperFailureCount}):`, err);
-
-      // After repeated failures, assume Whisper is unreachable and let
-      // SpeechRecognition take over finals for the rest of the recording.
-      // Better to lose remote audio than lose everything.
-      if (this.whisperFailureCount >= 3) {
-        this.whisperDisabled = true;
-        if (this.onTranscript && !this.whisperOversizeNotified) {
-          this.whisperOversizeNotified = true;
-          this.onTranscript("[Whisper unavailable — switched to mic-only transcription for remainder]", true);
-        }
-      }
-    } finally {
-      clearTimeout(timeoutHandle);
-      // CRITICAL: always reset this flag, otherwise future polls deadlock
-      this.whisperBusy = false;
+      this.handleWhisperWindowFailure(err);
     }
   }
 
-  /**
-   * Given a fresh cumulative Whisper transcript, return only the portion that
-   * was NOT already present in lastWhisperText. Whisper always returns the full
-   * cumulative text, so we need to find the overlap and emit only new content.
-   *
-   * Strategy: find a tail of the old transcript (progressively shorter) within
-   * the new transcript using substring search on a normalized form. Once found,
-   * everything after it in the new text is the "new tail" to emit.
-   *
-   * If no tail match is found (Whisper heavily re-interpreted), fall back to
-   * emitting the last N words, where N is the word-count delta.
-   *
-   * Returns the new tail in original casing, or '' if there's genuinely nothing new.
-   */
-  private extractNewTranscriptTail(fullText: string): string {
-    if (!this.lastWhisperText.trim()) return fullText;
+  private rotateWhisperWindow(recordStream: MediaStream, mimeType: string): void {
+    if (this.stopped || this.whisperDisabled) return;
 
-    const norm = (s: string) =>
-      s.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+    const recorder = this.whisperWindowRecorder;
+    if (!recorder || recorder.state === "inactive") {
+      this.startWhisperWindow(recordStream, mimeType);
+      return;
+    }
 
-    const oldN = norm(this.lastWhisperText);
-    const newN = norm(fullText);
+    try {
+      recorder.requestData();
+      recorder.stop();
+    } catch (err) {
+      this.handleWhisperWindowFailure(err);
+    } finally {
+      this.whisperWindowRecorder = null;
+      setTimeout(() => this.startWhisperWindow(recordStream, mimeType), 0);
+    }
+  }
 
-    // Nothing new — new transcript is shorter/equal to old in normalized form
-    if (!newN || newN.length <= oldN.length) return "";
+  private async drainWhisperWindows(): Promise<void> {
+    if (this.whisperWindowBusy) return;
+    const blob = this.pendingWhisperWindows.shift();
+    if (!blob) return;
 
-    const oldNormWords = oldN.split(" ").filter(Boolean);
-    const newOrigWords = fullText.split(/\s+/).filter(Boolean);
+    this.whisperWindowBusy = true;
+    try {
+      if (blob.size > WHISPER_MAX_BYTES) {
+        throw new Error(`Whisper window exceeded ${(WHISPER_MAX_BYTES / 1024 / 1024).toFixed(0)} MB`);
+      }
 
-    // Try progressively shorter tails of old text to find in new text.
-    // Start long so we get precise matches; fall back to shorter if needed.
-    for (let tailN = Math.min(20, oldNormWords.length); tailN >= 3; tailN -= 2) {
-      const tailPhrase = oldNormWords.slice(-tailN).join(" ");
-      if (!tailPhrase) continue;
-      const idx = newN.lastIndexOf(tailPhrase);
-      if (idx !== -1) {
-        // Count normalized words up to and including the found tail
-        const endCharPos = idx + tailPhrase.length;
-        const prefixWordCount = newN
-          .slice(0, endCharPos)
-          .split(" ")
-          .filter(Boolean).length;
-        return newOrigWords.slice(prefixWordCount).join(" ").trim();
+      const text = await this.transcribeWhisperWindow(blob);
+      this.whisperFailureCount = 0;
+      if (text && this.onTranscript) {
+        this.lastWhisperText = `${this.lastWhisperText} ${text}`.trim();
+        this.onTranscript(text, true);
+      }
+    } catch (err) {
+      this.handleWhisperWindowFailure(err);
+    } finally {
+      this.whisperWindowBusy = false;
+      if (this.pendingWhisperWindows.length > 0) {
+        void this.drainWhisperWindows();
+      }
+    }
+  }
+
+  private async transcribeWhisperWindow(blob: Blob): Promise<string> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= WHISPER_WINDOW_ATTEMPTS; attempt++) {
+      const controller = new AbortController();
+      const timeoutHandle = setTimeout(() => controller.abort(), WHISPER_FETCH_TIMEOUT_MS);
+      try {
+        const promptContext = this.lastWhisperText.slice(-150) || undefined;
+        return (await whisperTranscribe(blob, promptContext, controller.signal)).trim();
+      } catch (err) {
+        lastError = err;
+        console.warn(`[NoteAI] Whisper window attempt ${attempt} failed:`, err);
+      } finally {
+        clearTimeout(timeoutHandle);
       }
     }
 
-    // Fallback: substring match failed (Whisper heavily re-worded earlier content).
-    // Emit the last N words where N = word-count delta between new and old.
-    // This may double-emit a few words but avoids losing new content entirely.
-    const oldWordCount = oldNormWords.length;
-    const newWordCount = newOrigWords.length;
-    const delta = newWordCount - oldWordCount;
-    if (delta > 0 && delta < newWordCount) {
-      return newOrigWords.slice(-delta).join(" ").trim();
+    throw lastError instanceof Error ? lastError : new Error("Whisper window failed");
+  }
+
+  private handleWhisperWindowFailure(err: unknown): void {
+    this.whisperFailureCount++;
+    console.warn(`[NoteAI] Whisper window failed (${this.whisperFailureCount}):`, err);
+
+    if (this.onTranscript) {
+      const warning = buildIncompleteTranscriptWarning({
+        id: this.whisperWarningSegmentId++,
+        message: "Whisper chunk failed; live transcript preserved",
+        startTime: this.elapsed,
+        endTime: this.elapsed,
+      });
+      this.onTranscript(warning.text, true);
     }
 
-    return "";
+    if (this.whisperFailureCount >= WHISPER_MAX_FAILURES) {
+      this.whisperDisabled = true;
+      if (this.onTranscript && !this.whisperOversizeNotified) {
+        this.whisperOversizeNotified = true;
+        this.onTranscript("[Whisper unavailable — switched to mic-only transcription for remainder]", true);
+      }
+    }
   }
 
   // --- SpeechRecognition (always active) ---
@@ -696,6 +692,13 @@ export class AudioRecorder {
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
     }
+    if (this.whisperWindowRecorder && this.whisperWindowRecorder.state !== "inactive") {
+      try {
+        this.whisperWindowRecorder.stop();
+      } catch { /* ignore */ }
+    }
+    this.whisperWindowRecorder = null;
+    this.pendingWhisperWindows = [];
     if (this.tabStream) { this.tabStream.getTracks().forEach((t) => t.stop()); this.tabStream = null; }
     if (this.micStream) { this.micStream.getTracks().forEach((t) => t.stop()); this.micStream = null; }
     if (this.mixedStream) { this.mixedStream.getTracks().forEach((t) => t.stop()); this.mixedStream = null; }

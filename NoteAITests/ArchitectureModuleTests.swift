@@ -37,6 +37,35 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(fallback.wasSummarized)
     }
 
+    func testTranscriptionWindowPlannerSplitsLongBuffersIntoBoundedWindows() {
+        let windows = TranscriptionWindowPlanner.windows(
+            frameLength: 75 * 16_000,
+            sampleRate: 16_000,
+            maxDuration: 30
+        )
+
+        XCTAssertEqual(windows.map(\.startFrame), [0, 480_000, 960_000])
+        XCTAssertEqual(windows.map(\.frameCount), [480_000, 480_000, 240_000])
+        XCTAssertEqual(windows.map(\.startTime), [0, 30, 60])
+        XCTAssertTrue(windows.allSatisfy { $0.duration <= 30 })
+    }
+
+    func testTranscriptionWarningSegmentPreservesSharedTranscriptShape() {
+        let warning = TranscriptionWindowPlanner.warningSegment(
+            id: 4,
+            startTime: 30,
+            endTime: 45,
+            reason: "Whisper chunk failed"
+        )
+
+        XCTAssertEqual(warning.id, 4)
+        XCTAssertEqual(warning.text, "[Transcript may be incomplete: Whisper chunk failed]")
+        XCTAssertEqual(warning.startTime, 30)
+        XCTAssertEqual(warning.endTime, 45)
+        XCTAssertEqual(warning.speaker, "System")
+        XCTAssertEqual(warning.confidence, 0)
+    }
+
     func testAITasksExtractJSONFromMarkdownFence() throws {
         let raw = """
         Sure:

@@ -21,6 +21,7 @@ import {
   type OnboardingChecklistItem,
   type OnboardingPermission,
 } from "@/lib/onboarding";
+import { recordingSetupBlocker } from "@/lib/ai-preflight";
 import type { LibraryQuickFilter } from "@/lib/search";
 import {
   useMeetings,
@@ -383,8 +384,17 @@ export default function Home() {
       captureTab = false,
       source: RecordingSourceId = "browser-tab",
     ) => {
-      if (source !== "teams-desktop" && onboardingChecklist.firstRecordingBlocker) {
-        alert(onboardingChecklist.firstRecordingBlocker);
+      const latestOnboardingState = await loadOnboardingState();
+      applyOnboardingState(latestOnboardingState);
+      const blocker = recordingSetupBlocker({
+        provider: latestOnboardingState.provider,
+        providerKeyConfigured: latestOnboardingState.providerConfigured,
+        transcriptionKeyConfigured: latestOnboardingState.transcriptionConfigured,
+        microphoneStatus: onboardingChecklist.items.find((item) => item.id === "microphone")?.status ?? "needs-action",
+      });
+
+      if (blocker) {
+        alert(blocker.message);
         setSelection({ type: "settings", tab: "ai" });
         return;
       }
@@ -394,7 +404,7 @@ export default function Home() {
 
       setSelection({ type: "liveTranscript" });
     },
-    [onboardingChecklist.firstRecordingBlocker, startRecording],
+    [applyOnboardingState, loadOnboardingState, onboardingChecklist.items, startRecording],
   );
 
   const handleOnboardingAction = useCallback(
@@ -725,6 +735,7 @@ export default function Home() {
               todos={todos}
               t5tReports={t5tReports}
               onClose={() => setShowChat(false)}
+              onOpenAISettings={() => setSelection({ type: "settings", tab: "ai" })}
               onNavigate={(nextSelection) => {
                 setSelection(nextSelection);
                 setShowChat(false);

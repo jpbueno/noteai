@@ -5,8 +5,11 @@ import {
   LOCAL_CAPTURE_HELPER_BASE_URL,
   confirmLocalCaptureHelperPairing,
   detectLocalCaptureHelper,
+  describeLocalCaptureHelperRecovery,
   formatLocalHelperDiagnosticRows,
+  formatLocalHelperRecoveryMessage,
   getLocalCaptureHelperStatus,
+  readLocalCaptureHelperEvents,
   requestLocalCaptureHelperPairing,
   startLocalCaptureHelperCapture,
   stopLocalCaptureHelperCapture,
@@ -223,6 +226,36 @@ test("capture stop returns helper transcript segments for web persistence", asyn
   assert.equal(stopped.transcript[0].text, "Hello from Teams.");
 });
 
+test("event stream reader sends bearer auth and parses bounded SSE snapshots", async () => {
+  const calls = [];
+  const events = await readLocalCaptureHelperEvents({
+    token: "paired-token",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => [
+          "id: 1",
+          "event: capture.snapshot",
+          "retry: 5000",
+          'data: {"type":"capture.snapshot","protocolVersion":"2026-04-28","emittedAt":"2026-04-28T16:00:00Z","snapshot":{"sessionId":"11111111-1111-1111-1111-111111111111","state":"recording","recordingIndicator":"visible-recording","startedAt":"2026-04-28T16:00:00Z","duration":7,"transcript":[{"id":1,"text":"Snapshot from Teams.","startTime":0,"endTime":3,"speaker":"JP","confidence":0.92}]},"transcriptRevision":1,"audioStreaming":"unsupported"}',
+          "",
+        ].join("\n"),
+      };
+    },
+  });
+
+  assert.equal(calls[0].url, `${LOCAL_CAPTURE_HELPER_BASE_URL}/v1/events`);
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.Accept, "text/event-stream");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer paired-token");
+  assert.equal(events[0].event, "capture.snapshot");
+  assert.equal(events[0].data.transcriptRevision, 1);
+  assert.equal(events[0].data.audioStreaming, "unsupported");
+  assert.equal(events[0].data.snapshot.transcript[0].text, "Snapshot from Teams.");
+});
+
 test("diagnostic rows include connection, pairing, permissions, and Teams state", () => {
   const rows = formatLocalHelperDiagnosticRows({
     state: "connected",
@@ -233,6 +266,7 @@ test("diagnostic rows include connection, pairing, permissions, and Teams state"
   assert.deepEqual(rows.map((row) => row.label), [
     "Helper",
     "Pairing",
+    "Capture",
     "Microphone",
     "Screen Recording",
     "Teams",
@@ -240,7 +274,137 @@ test("diagnostic rows include connection, pairing, permissions, and Teams state"
     "Teams audio",
   ]);
   assert.equal(rows.find((row) => row.label === "Teams").tone, "good");
+  assert.equal(rows.find((row) => row.label === "Capture").value, "Idle");
+  assert.equal(rows.find((row) => row.label === "Capture").detail, "Recording indicator: visible idle");
   assert.equal(rows.find((row) => row.label === "Screen Recording").tone, "warning");
+});
+
+test("recovery state asks the user to launch the helper when loopback is unavailable", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "unavailable",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    error: "connection refused",
+  });
+
+  assert.equal(recovery.code, "launch-helper");
+  assert.equal(recovery.actionLabel, "Open NoteAI Helper");
+  assert.equal(recovery.tone, "warning");
+  assert.match(recovery.detail, /Launch NoteAI/i);
+});
+
+test("recovery state asks for pairing when health is connected but status is locked", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "connected",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    health: healthResponse,
+  });
+
+  assert.equal(recovery.code, "pairing-required");
+  assert.equal(recovery.actionLabel, "Pair Helper");
+  assert.equal(recovery.canPair, true);
+});
+
+test("recovery state marks unauthorized status as a stale token to clear and re-pair", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "connected",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    health: healthResponse,
+    error: "Local helper status returned HTTP 401.",
+    statusErrorStatus: 401,
+  });
+
+  assert.equal(recovery.code, "stale-token");
+  assert.equal(recovery.shouldClearStoredToken, true);
+  assert.equal(recovery.actionLabel, "Pair Helper");
+  assert.match(recovery.detail, /previous helper trust/i);
+});
+
+test("recovery state highlights blocked macOS permissions before capture", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "connected",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    health: {
+      ...healthResponse,
+      pairingRequired: false,
+      capabilities: { ...healthResponse.capabilities, captureControl: true },
+    },
+    status: statusResponse,
+  });
+
+  assert.equal(recovery.code, "permission-denied");
+  assert.equal(recovery.tone, "warning");
+  assert.match(recovery.detail, /Screen Recording is disabled/i);
+});
+
+test("recovery state shows helper busy when capture is already recording", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "connected",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    health: {
+      ...healthResponse,
+      pairingRequired: false,
+      capabilities: { ...healthResponse.capabilities, captureControl: true },
+    },
+    status: {
+      ...statusResponse,
+      captureState: "recording",
+      recordingIndicator: "visible-recording",
+      permissions: {
+        ...statusResponse.permissions,
+        screenRecording: { status: "granted" },
+      },
+      sources: {
+        ...statusResponse.sources,
+        teamsAudio: { status: "capturing", adapter: "processTap", level: 0.4 },
+      },
+    },
+  });
+
+  assert.equal(recovery.code, "helper-busy");
+  assert.equal(recovery.tone, "good");
+  assert.match(recovery.detail, /already recording/i);
+});
+
+test("recovery state shows connected ready when paired and idle", () => {
+  const recovery = describeLocalCaptureHelperRecovery({
+    state: "connected",
+    baseUrl: LOCAL_CAPTURE_HELPER_BASE_URL,
+    health: {
+      ...healthResponse,
+      pairingRequired: false,
+      capabilities: { ...healthResponse.capabilities, captureControl: true },
+    },
+    status: {
+      ...statusResponse,
+      permissions: {
+        ...statusResponse.permissions,
+        screenRecording: { status: "granted" },
+      },
+      sources: {
+        ...statusResponse.sources,
+        desktopAudioFallback: { status: "available", adapter: "screenCaptureKit", level: 0 },
+      },
+    },
+  });
+
+  assert.equal(recovery.code, "ready");
+  assert.equal(recovery.tone, "good");
+  assert.equal(recovery.actionLabel, undefined);
+});
+
+test("recording errors are formatted with helper recovery actions", () => {
+  assert.match(
+    formatLocalHelperRecoveryMessage(new Error("Local helper capture start returned HTTP 401."), "start"),
+    /Pair the NoteAI helper again/i,
+  );
+  assert.match(
+    formatLocalHelperRecoveryMessage(new Error("Local helper is busy with another capture."), "start"),
+    /already recording/i,
+  );
+  assert.match(
+    formatLocalHelperRecoveryMessage(new Error("Screen Recording permission denied."), "start"),
+    /Grant macOS recording permissions/i,
+  );
 });
 
 test("Teams Desktop source records when paired helper advertises capture control", () => {

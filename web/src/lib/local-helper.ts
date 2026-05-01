@@ -6,6 +6,13 @@ export type LocalCaptureHelperPermissionStatus = "unknown" | "granted" | "denied
 export type LocalCaptureHelperSourceStatus = "available" | "blocked" | "notProbed" | "capturing" | "idle" | "unavailable";
 export type LocalCaptureHelperDiagnosticSeverity = "info" | "warning" | "error";
 export type LocalHelperDiagnosticTone = "good" | "warning" | "muted";
+export type LocalCaptureHelperRecoveryCode =
+  | "launch-helper"
+  | "pairing-required"
+  | "stale-token"
+  | "permission-denied"
+  | "helper-busy"
+  | "ready";
 
 export interface LocalCaptureHelperCapabilities {
   status: boolean;
@@ -75,6 +82,7 @@ export interface LocalCaptureHelperDetection {
   health?: LocalCaptureHelperHealthResponse;
   status?: LocalCaptureHelperStatusResponse;
   error?: string;
+  statusErrorStatus?: number;
 }
 
 export interface LocalCapturePairRequestResponse {
@@ -122,6 +130,31 @@ export interface LocalCaptureStopResponse {
   transcript: LocalCaptureTranscriptSegment[];
 }
 
+export interface LocalCaptureSessionSnapshot {
+  sessionId: string | null;
+  state: string;
+  recordingIndicator: string;
+  startedAt: string | null;
+  duration: number;
+  transcript: LocalCaptureTranscriptSegment[];
+}
+
+export interface LocalCaptureHelperEventData {
+  type: "capture.snapshot" | string;
+  protocolVersion: string;
+  emittedAt: string;
+  snapshot: LocalCaptureSessionSnapshot;
+  transcriptRevision: number;
+  audioStreaming: "unsupported" | string;
+}
+
+export interface LocalCaptureHelperEvent {
+  id?: string;
+  event: string;
+  retry?: number;
+  data: LocalCaptureHelperEventData;
+}
+
 export interface LocalHelperDiagnosticRow {
   label: string;
   value: string;
@@ -129,10 +162,23 @@ export interface LocalHelperDiagnosticRow {
   detail?: string;
 }
 
+export interface LocalCaptureHelperRecoveryState {
+  code: LocalCaptureHelperRecoveryCode;
+  title: string;
+  detail: string;
+  tone: LocalHelperDiagnosticTone;
+  actionLabel?: string;
+  canOpenHelper?: boolean;
+  canPair?: boolean;
+  shouldClearStoredToken?: boolean;
+}
+
 type HelperFetchResponse = {
   ok: boolean;
   status?: number;
   json: () => Promise<unknown>;
+  text?: () => Promise<string>;
+  body?: ReadableStream<Uint8Array> | null;
 };
 
 type HelperFetch = (input: string, init: RequestInit) => Promise<HelperFetchResponse>;
@@ -160,6 +206,11 @@ function errorMessage(err: unknown): string {
     return "Timed out while checking the local helper.";
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+function errorStatus(err: unknown): number | undefined {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
 }
 
 function isHealthResponse(value: unknown): value is LocalCaptureHelperHealthResponse {
@@ -240,6 +291,7 @@ export async function detectLocalCaptureHelper({
         });
       } catch (err) {
         detection.error = errorMessage(err);
+        detection.statusErrorStatus = errorStatus(err);
       }
     }
 
@@ -371,6 +423,11 @@ export function storeLocalCaptureHelperToken(token: string): void {
   window.localStorage.setItem(LOCAL_CAPTURE_HELPER_TOKEN_STORAGE_KEY, token);
 }
 
+export function clearLocalCaptureHelperToken(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LOCAL_CAPTURE_HELPER_TOKEN_STORAGE_KEY);
+}
+
 export async function getLocalCaptureHelperStatus({
   baseUrl = LOCAL_CAPTURE_HELPER_BASE_URL,
   fetchImpl = defaultFetch(),
@@ -401,7 +458,10 @@ export async function getLocalCaptureHelperStatus({
     });
 
     if (!response.ok) {
-      throw new Error(`Local helper status returned HTTP ${response.status ?? "error"}.`);
+      throw await parseHelperError(
+        response,
+        `Local helper status returned HTTP ${response.status ?? "error"}.`,
+      );
     }
 
     return (await response.json()) as LocalCaptureHelperStatusResponse;
@@ -410,18 +470,116 @@ export async function getLocalCaptureHelperStatus({
   }
 }
 
+async function readResponseText(response: HelperFetchResponse): Promise<string> {
+  if (typeof response.text === "function") {
+    return response.text();
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+
+function parseLocalCaptureSSE(text: string): LocalCaptureHelperEvent[] {
+  return text
+    .split(/\r?\n\r?\n/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const event: Partial<LocalCaptureHelperEvent> = {};
+      const dataLines: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (!line || line.startsWith(":")) continue;
+        const separator = line.indexOf(":");
+        const field = separator >= 0 ? line.slice(0, separator) : line;
+        const rawValue = separator >= 0 ? line.slice(separator + 1) : "";
+        const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+        if (field === "id") event.id = value;
+        if (field === "event") event.event = value;
+        if (field === "retry") event.retry = Number(value);
+        if (field === "data") dataLines.push(value);
+      }
+      const data = JSON.parse(dataLines.join("\n")) as LocalCaptureHelperEventData;
+      return {
+        event: event.event || data.type,
+        ...(event.id ? { id: event.id } : {}),
+        ...(Number.isFinite(event.retry) ? { retry: event.retry } : {}),
+        data,
+      };
+    });
+}
+
+export async function readLocalCaptureHelperEvents({
+  baseUrl = LOCAL_CAPTURE_HELPER_BASE_URL,
+  fetchImpl = defaultFetch(),
+  token,
+  timeoutMs = 30_000,
+}: {
+  baseUrl?: string;
+  fetchImpl?: HelperFetch | null;
+  token: string;
+  timeoutMs?: number;
+}): Promise<LocalCaptureHelperEvent[]> {
+  if (!fetchImpl) {
+    throw new Error("Fetch is not available in this environment.");
+  }
+  const trimmedToken = token.trim();
+  if (!trimmedToken) {
+    throw new Error("Pair the NoteAI local helper before streaming capture events.");
+  }
+
+  const abort = createAbortSignal(timeoutMs);
+  try {
+    const response = await fetchImpl(`${baseUrl}/v1/events`, {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store",
+      credentials: "omit",
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${trimmedToken}`,
+      },
+      signal: abort.signal,
+    });
+
+    if (!response.ok) {
+      throw await parseHelperError(
+        response,
+        `Local helper events returned HTTP ${response.status ?? "error"}.`,
+      );
+    }
+
+    return parseLocalCaptureSSE(await readResponseText(response));
+  } finally {
+    abort.cancel();
+  }
+}
+
 async function parseHelperError(response: HelperFetchResponse, fallback: string): Promise<Error> {
+  let message = fallback;
   try {
     const payload = await response.json();
     const candidate = payload as { message?: unknown; error?: unknown } | null;
     if (typeof candidate?.message === "string" && candidate.message.trim()) {
-      return new Error(candidate.message);
-    }
-    if (typeof candidate?.error === "string" && candidate.error.trim()) {
-      return new Error(candidate.error);
+      message = candidate.message;
+    } else if (typeof candidate?.error === "string" && candidate.error.trim()) {
+      message = candidate.error;
     }
   } catch {}
-  return new Error(fallback);
+  const error = new Error(message) as Error & { status?: number };
+  if (typeof response.status === "number") {
+    error.status = response.status;
+  }
+  return error;
 }
 
 export async function startLocalCaptureHelperCapture({
@@ -537,6 +695,32 @@ export function openLocalCaptureHelper(): boolean {
   return true;
 }
 
+function formatEnumLabel(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatRecordingIndicator(indicator: string): string {
+  return formatEnumLabel(indicator).toLowerCase();
+}
+
+function captureRow(status: LocalCaptureHelperStatusResponse): LocalHelperDiagnosticRow {
+  const captureState = status.captureState || "unknown";
+  const isActive = captureState === "recording" || captureState === "starting" || captureState === "stopping";
+  return {
+    label: "Capture",
+    value: formatEnumLabel(captureState),
+    tone: isActive ? "good" : captureState === "idle" || captureState === "stopped" ? "muted" : "warning",
+    detail: status.recordingIndicator
+      ? `Recording indicator: ${formatRecordingIndicator(status.recordingIndicator)}`
+      : undefined,
+  };
+}
+
 function permissionRow(label: string, permission?: LocalCaptureHelperPermissionDiagnostic): LocalHelperDiagnosticRow {
   if (!permission) {
     return { label, value: "Unknown", tone: "muted" };
@@ -591,6 +775,132 @@ function sourceRow(label: string, source?: LocalCaptureHelperSourceDiagnostic): 
   };
 }
 
+function deniedPermissionDetails(status: LocalCaptureHelperStatusResponse): string[] {
+  const details: string[] = [];
+  for (const [name, permission] of Object.entries(status.permissions)) {
+    if (permission.status === "denied") {
+      details.push(permission.reason || `${formatEnumLabel(name)} permission is denied.`);
+    }
+  }
+
+  for (const [name, source] of Object.entries(status.sources)) {
+    if (source.status === "blocked" && source.reason) {
+      details.push(`${formatEnumLabel(name)} is blocked: ${source.reason}`);
+    }
+  }
+
+  return details;
+}
+
+function helperIsBusy(status: LocalCaptureHelperStatusResponse): boolean {
+  if (status.captureState === "recording" || status.captureState === "starting" || status.captureState === "stopping") {
+    return true;
+  }
+  return Object.values(status.sources).some((source) => source.status === "capturing");
+}
+
+function isStaleTokenError(message?: string, status?: number): boolean {
+  if (status === 401) return true;
+  if (!message) return false;
+  return /HTTP 401|unauthorized|invalid token|expired token/i.test(message);
+}
+
+function isPermissionError(message: string): boolean {
+  return /permission|denied|blocked|screen recording|microphone/i.test(message);
+}
+
+function isBusyError(message: string): boolean {
+  return /busy|already recording|capture in progress|HTTP 409/i.test(message);
+}
+
+export function describeLocalCaptureHelperRecovery(
+  detection: LocalCaptureHelperDetection
+): LocalCaptureHelperRecoveryState {
+  if (detection.state !== "connected" || !detection.health) {
+    return {
+      code: "launch-helper",
+      title: "Helper unavailable",
+      detail: detection.error
+        ? `Launch NoteAI on this Mac, then refresh helper status. Last check: ${detection.error}`
+        : "Launch NoteAI on this Mac, then refresh helper status.",
+      tone: "warning",
+      actionLabel: "Open NoteAI Helper",
+      canOpenHelper: true,
+    };
+  }
+
+  if (isStaleTokenError(detection.error, detection.statusErrorStatus)) {
+    return {
+      code: "stale-token",
+      title: "Pair helper again",
+      detail: "The previous helper trust is no longer valid. NoteAI will clear only the local helper token for this browser, then you can pair again.",
+      tone: "warning",
+      actionLabel: "Pair Helper",
+      canPair: true,
+      shouldClearStoredToken: detection.statusErrorStatus === 401,
+    };
+  }
+
+  if (!detection.status) {
+    return {
+      code: "pairing-required",
+      title: "Pairing required",
+      detail: detection.health.pairingRequired
+        ? "Trust this browser with the local helper to unlock Teams Desktop capture status and controls."
+        : "Status details are not available yet. Refresh helper status or pair this browser if prompted.",
+      tone: detection.health.pairingRequired ? "warning" : "muted",
+      actionLabel: detection.health.pairingRequired ? "Pair Helper" : undefined,
+      canPair: detection.health.pairingRequired,
+    };
+  }
+
+  if (helperIsBusy(detection.status)) {
+    return {
+      code: "helper-busy",
+      title: "Helper recording",
+      detail: "The helper is already recording Teams Desktop audio. Stop the active capture before starting another one.",
+      tone: "good",
+    };
+  }
+
+  const deniedDetails = deniedPermissionDetails(detection.status);
+  if (deniedDetails.length > 0) {
+    return {
+      code: "permission-denied",
+      title: "Permission blocked",
+      detail: `${deniedDetails.join(" ")} Grant macOS recording permissions for NoteAI, then refresh helper status.`,
+      tone: "warning",
+    };
+  }
+
+  return {
+    code: "ready",
+    title: "Helper ready",
+    detail: "Teams Desktop capture is paired, idle, and ready to start.",
+    tone: "good",
+  };
+}
+
+export function formatLocalHelperRecoveryMessage(error: unknown, action: "start" | "stop"): string {
+  const message = errorMessage(error);
+  const retryAction = action === "start" ? "starting" : "stopping";
+
+  if (isStaleTokenError(message, errorStatus(error))) {
+    return `Pair the NoteAI helper again in Settings, then retry ${retryAction} Teams Desktop capture.`;
+  }
+  if (isBusyError(message)) {
+    return "The NoteAI helper is already recording. Stop the active Teams Desktop capture before starting another one.";
+  }
+  if (isPermissionError(message)) {
+    return `Grant macOS recording permissions for NoteAI, refresh helper status in Settings, then retry ${retryAction} Teams Desktop capture.`;
+  }
+  if (/pair/i.test(message)) {
+    return `Pair the NoteAI local helper in Settings, then retry ${retryAction} Teams Desktop capture.`;
+  }
+
+  return message;
+}
+
 export function formatLocalHelperDiagnosticRows(detection: LocalCaptureHelperDetection): LocalHelperDiagnosticRow[] {
   if (detection.state !== "connected" || !detection.health) {
     return [
@@ -622,6 +932,7 @@ export function formatLocalHelperDiagnosticRows(detection: LocalCaptureHelperDet
 
   if (!detection.status) return rows;
 
+  rows.push(captureRow(detection.status));
   rows.push(permissionRow("Microphone", detection.status.permissions.microphone));
   rows.push(permissionRow("Screen Recording", detection.status.permissions.screenRecording));
   rows.push({

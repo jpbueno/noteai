@@ -51,6 +51,42 @@ enum OnboardingActionTarget: Equatable {
     case openPrivacySettings
 }
 
+enum AIConfigurationPreflight {
+    static func recordingBlocker(
+        provider: LLMProviderType,
+        providerKeyConfigured: Bool,
+        microphonePermission: OnboardingPermissionStatus,
+        screenRecordingPermission: OnboardingPermissionStatus
+    ) -> String? {
+        if !providerKeyConfigured {
+            return "Add your \(provider.displayName) summaries API key before recording."
+        }
+
+        switch microphonePermission {
+        case .denied:
+            return "Grant Microphone access before recording."
+        case .unsupported(let reason):
+            return "Microphone capture is unavailable: \(reason)"
+        case .unknown, .granted:
+            break
+        }
+
+        if case .unsupported(let reason) = screenRecordingPermission {
+            return "System audio capture is unavailable: \(reason)"
+        }
+
+        return nil
+    }
+
+    static func copilotSetupMessage(
+        provider: LLMProviderType,
+        providerKeyConfigured: Bool
+    ) -> String? {
+        guard !providerKeyConfigured else { return nil }
+        return "Add your \(provider.displayName) API key in AI settings before using AI copilot."
+    }
+}
+
 struct OnboardingChecklistItem: Equatable, Identifiable {
     let id: OnboardingItemID
     let label: String
@@ -89,8 +125,7 @@ struct OnboardingChecklist: Equatable {
             provider: provider,
             providerKeyConfigured: providerKeyConfigured,
             microphonePermission: microphonePermission,
-            screenRecordingPermission: screenRecordingPermission,
-            meetingCount: meetingCount
+            screenRecordingPermission: screenRecordingPermission
         )
 
         let items = [
@@ -158,7 +193,7 @@ struct OnboardingChecklist: Equatable {
                     : firstRecordingBlocker ?? "Complete required setup to avoid a failed first capture.",
                 actionLabel: "Start recording",
                 actionTarget: firstRecordingBlocker == nil ? .startRecording : nil,
-                status: meetingCount > 0 ? .complete : firstRecordingBlocker == nil ? .needsAction : .blocked,
+                status: firstRecordingBlocker != nil ? .blocked : meetingCount > 0 ? .complete : .needsAction,
                 required: false
             ),
         ]
@@ -239,30 +274,13 @@ struct OnboardingChecklist: Equatable {
         provider: LLMProviderType,
         providerKeyConfigured: Bool,
         microphonePermission: OnboardingPermissionStatus,
-        screenRecordingPermission: OnboardingPermissionStatus,
-        meetingCount: Int
+        screenRecordingPermission: OnboardingPermissionStatus
     ) -> String? {
-        if meetingCount > 0 {
-            return nil
-        }
-
-        if !providerKeyConfigured {
-            return "Add your \(provider.displayName) summaries API key before the first recording."
-        }
-
-        switch microphonePermission {
-        case .denied:
-            return "Grant Microphone access before the first recording."
-        case .unsupported(let reason):
-            return "Microphone capture is unavailable: \(reason)"
-        case .unknown, .granted:
-            break
-        }
-
-        if case .unsupported(let reason) = screenRecordingPermission {
-            return "System audio capture is unavailable: \(reason)"
-        }
-
-        return nil
+        AIConfigurationPreflight.recordingBlocker(
+            provider: provider,
+            providerKeyConfigured: providerKeyConfigured,
+            microphonePermission: microphonePermission,
+            screenRecordingPermission: screenRecordingPermission
+        )
     }
 }

@@ -47,7 +47,7 @@ final class OnboardingChecklistTests: XCTestCase {
             .complete,
             .blocked,
         ])
-        XCTAssertEqual(checklist.firstRecordingBlocker, "Add your NVIDIA Inference summaries API key before the first recording.")
+        XCTAssertEqual(checklist.firstRecordingBlocker, "Add your NVIDIA Inference summaries API key before recording.")
     }
 
     func testFirstRecordingValidationAllowsPermissionPromptButRequiresProviderKey() {
@@ -63,7 +63,7 @@ final class OnboardingChecklistTests: XCTestCase {
 
         XCTAssertEqual(checklist.requiredReady, false)
         XCTAssertEqual(checklist.canCollapse, false)
-        XCTAssertEqual(checklist.firstRecordingBlocker, "Add your OpenAI summaries API key before the first recording.")
+        XCTAssertEqual(checklist.firstRecordingBlocker, "Add your OpenAI summaries API key before recording.")
     }
 
     func testUnsupportedPlatformCapabilitiesAreExplicit() {
@@ -98,6 +98,41 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(checklist.completedCount, 7)
         XCTAssertEqual(checklist.items.first { $0.id == .firstRecording }?.status, .complete)
         XCTAssertNil(checklist.firstRecordingBlocker)
+    }
+
+    func testRecordingValidationRequiresProviderKeyAfterMeetingsExist() {
+        let checklist = OnboardingChecklist.build(
+            provider: .openAI,
+            providerKeyConfigured: false,
+            microphonePermission: .granted,
+            screenRecordingPermission: .granted,
+            notificationPermission: .granted,
+            calendarAuthConfigured: true,
+            meetingCount: 3
+        )
+
+        XCTAssertEqual(checklist.requiredReady, false)
+        XCTAssertEqual(checklist.canCollapse, false)
+        XCTAssertEqual(checklist.firstRecordingBlocker, "Add your OpenAI summaries API key before recording.")
+        XCTAssertEqual(item(.firstRecording, in: checklist).status, .blocked)
+        XCTAssertNil(item(.firstRecording, in: checklist).actionTarget)
+    }
+
+    func testCopilotPreflightExplainsMissingSelectedProviderKey() {
+        XCTAssertEqual(
+            AIConfigurationPreflight.copilotSetupMessage(
+                provider: .nvidia,
+                providerKeyConfigured: false
+            ),
+            "Add your NVIDIA Inference API key in AI settings before using AI copilot."
+        )
+
+        XCTAssertNil(
+            AIConfigurationPreflight.copilotSetupMessage(
+                provider: .nvidia,
+                providerKeyConfigured: true
+            )
+        )
     }
 
     func testGrantedScreenRecordingCompletesRequiredSetupAndRemovesRecoveryAction() {

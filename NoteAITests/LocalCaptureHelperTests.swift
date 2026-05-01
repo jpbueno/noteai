@@ -100,6 +100,25 @@ final class LocalCaptureHelperTests: XCTestCase {
         XCTAssertFalse(response.bodyText.contains("microphone"))
     }
 
+    func testHealthAdvertisesEventsAndDefersAudioStreaming() async throws {
+        let router = LocalCaptureHelperRouter(
+            statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),
+            pairingStore: LocalCaptureHelperPairingStore(trustedClientStore: InMemoryTrustedClientStore()),
+            allowedOrigins: ["http://localhost:3000"]
+        )
+
+        let response = await router.route(LocalCaptureHTTPRouterRequest(
+            method: "GET",
+            path: "/v1/health",
+            headers: ["Origin": "http://localhost:3000", "Host": "127.0.0.1:47391"],
+            body: Data()
+        ))
+
+        let health = try JSONDecoder().decode(LocalCaptureHelperHealthResponse.self, from: response.body)
+        XCTAssertTrue(health.capabilities.events)
+        XCTAssertFalse(health.capabilities.audioStreaming)
+    }
+
     func testServerServesHealthOnLoopbackSocket() async throws {
         let router = LocalCaptureHelperRouter(
             statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),
@@ -141,6 +160,83 @@ final class LocalCaptureHelperTests: XCTestCase {
 
         XCTAssertEqual(response.statusCode, 401)
         XCTAssertTrue(response.bodyText.contains("pairing_required"))
+    }
+
+    func testEventsRequiresPairedBearerToken() async throws {
+        let router = LocalCaptureHelperRouter(
+            statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),
+            pairingStore: LocalCaptureHelperPairingStore(trustedClientStore: InMemoryTrustedClientStore()),
+            allowedOrigins: ["http://localhost:3000"]
+        )
+
+        let response = await router.route(LocalCaptureHTTPRouterRequest(
+            method: "GET",
+            path: "/v1/events",
+            headers: ["Origin": "http://localhost:3000", "Host": "127.0.0.1:47391"],
+            body: Data()
+        ))
+
+        XCTAssertEqual(response.statusCode, 401)
+        XCTAssertTrue(response.bodyText.contains("pairing_required"))
+    }
+
+    @MainActor
+    func testPairedEventsReturnsBoundedSnapshotSSEWithoutTokenLeakage() async throws {
+        let storage = InMemoryTrustedClientStore()
+        let pairingStore = LocalCaptureHelperPairingStore(trustedClientStore: storage)
+        let challenge = pairingStore.createPairingRequest(
+            origin: "http://localhost:3000",
+            clientName: "NoteAI Web",
+            clientNonce: "nonce"
+        )
+        let token = try pairingStore.confirmPairing(
+            sessionId: challenge.pairingSessionId,
+            code: challenge.debugCode,
+            clientNonce: "nonce"
+        ).accessToken
+        let controller = FakeCaptureController()
+        controller.snapshot = LocalCaptureSessionSnapshot(
+            sessionId: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            state: "recording",
+            recordingIndicator: "visible-recording",
+            startedAt: Date(timeIntervalSince1970: 1_772_000_000),
+            duration: 7,
+            transcript: [
+                LocalCaptureTranscriptSegment(
+                    id: 1,
+                    text: "Snapshot from Teams.",
+                    startTime: 0,
+                    endTime: 3,
+                    speaker: "JP",
+                    confidence: 0.92
+                )
+            ]
+        )
+        let router = LocalCaptureHelperRouter(
+            statusProvider: LocalCaptureHelperStatusProvider(helperVersion: "0.1.0"),
+            pairingStore: pairingStore,
+            captureController: controller,
+            allowedOrigins: ["http://localhost:3000"]
+        )
+
+        let response = await router.route(LocalCaptureHTTPRouterRequest(
+            method: "GET",
+            path: "/v1/events",
+            headers: [
+                "Origin": "http://localhost:3000",
+                "Host": "127.0.0.1:47391",
+                "Authorization": "Bearer \(token)",
+            ],
+            body: Data()
+        ))
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
+        XCTAssertTrue(response.bodyText.contains("event: capture.snapshot"))
+        XCTAssertTrue(response.bodyText.contains("\"transcriptRevision\":1"))
+        XCTAssertTrue(response.bodyText.contains("\"audioStreaming\":\"unsupported\""))
+        XCTAssertTrue(response.bodyText.contains("Snapshot from Teams."))
+        XCTAssertFalse(response.bodyText.contains(token))
     }
 
     @MainActor

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Floating AI assistant chat panel.
 struct ChatPanelView: View {
+    @Environment(\.openSettings) private var openSettings
     @ObservedObject var chatManager: ChatManager
     var onClose: (() -> Void)?
     @State private var inputText = ""
@@ -73,6 +74,39 @@ struct ChatPanelView: View {
             Divider().foregroundStyle(Theme.border)
 
             // Input
+            if let setupMessage = chatManager.setupMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("AI setup required", systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text(setupMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                    HStack(spacing: 8) {
+                        Button {
+                            openSettings()
+                        } label: {
+                            Label("Open AI Settings", systemImage: "gearshape")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button {
+                            chatManager.refreshConfigurationPreflight()
+                        } label: {
+                            Label("Check Again", systemImage: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Theme.sidebarBG)
+            }
+
             HStack(spacing: 8) {
                 TextField("Ask anything...", text: $inputText)
                     .textFieldStyle(.plain)
@@ -86,14 +120,17 @@ struct ChatPanelView: View {
                         .foregroundStyle(inputText.isEmpty ? Theme.textTertiary : Color.accentColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || chatManager.isTyping)
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || chatManager.isTyping || chatManager.setupMessage != nil)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Theme.sidebarBG)
         }
         .background(Theme.contentBG)
-        .onAppear { inputFocused = true }
+        .onAppear {
+            chatManager.refreshConfigurationPreflight()
+            inputFocused = chatManager.setupMessage == nil
+        }
     }
 
     private func chatBubble(_ message: ChatMessage) -> some View {

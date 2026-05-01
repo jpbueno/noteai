@@ -33,10 +33,13 @@ import {
   type RecordingSourceDiagnostic,
 } from "@/lib/recording-diagnostics";
 import {
+  clearLocalCaptureHelperToken,
   confirmLocalCaptureHelperPairing,
   createLocalCaptureClientNonce,
+  describeLocalCaptureHelperRecovery,
   detectLocalCaptureHelper,
   formatLocalHelperDiagnosticRows,
+  openLocalCaptureHelper,
   readLocalCaptureHelperToken,
   requestLocalCaptureHelperPairing,
   storeLocalCaptureHelperToken,
@@ -684,7 +687,14 @@ function TeamsDesktopHelperDiagnosticsPanel() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      setDetection(await detectLocalCaptureHelper({ token: readLocalCaptureHelperToken() }));
+      const nextDetection = await detectLocalCaptureHelper({ token: readLocalCaptureHelperToken() });
+      const recovery = describeLocalCaptureHelperRecovery(nextDetection);
+      if (recovery.shouldClearStoredToken) {
+        clearLocalCaptureHelperToken();
+        setPairingSession(null);
+        setPairingCode("");
+      }
+      setDetection(nextDetection);
     } finally {
       setRefreshing(false);
     }
@@ -750,14 +760,35 @@ function TeamsDesktopHelperDiagnosticsPanel() {
       error: "Checking helper...",
     }
   );
-  const statusError = detection?.state === "connected" ? detection.error : undefined;
-  const canPair =
-    detection?.state === "connected" &&
-    detection.health?.pairingRequired &&
-    !detection.status;
+  const recovery = detection ? describeLocalCaptureHelperRecovery(detection) : null;
+  const statusError = detection?.state === "connected" && recovery?.code !== "stale-token" ? detection.error : undefined;
+  const canPair = Boolean(recovery?.canPair);
 
   return (
     <div className="space-y-4">
+      {recovery && recovery.code !== "ready" && (
+        <div className="rounded-md border border-border bg-hover/40 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className={recovery.tone === "warning" ? "text-sm font-medium text-orange-300" : "text-sm font-medium text-text-primary"}>
+                {recovery.title}
+              </p>
+              <p className="mt-1 text-xs text-text-tertiary">{recovery.detail}</p>
+            </div>
+            {recovery.canOpenHelper && (
+              <button
+                type="button"
+                onClick={() => openLocalCaptureHelper()}
+                className="inline-flex flex-shrink-0 items-center gap-2 rounded-md bg-hover px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-selected"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {recovery.actionLabel}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2">
         {rows.map((row) => (
           <LocalHelperDiagnosticRowView key={row.label} row={row} />

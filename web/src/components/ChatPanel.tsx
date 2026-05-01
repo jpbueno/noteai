@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { X, Send, Loader2, Trash2 } from "lucide-react";
+import { useCallback, useState, useRef, useEffect } from "react";
+import { X, Send, Loader2, Trash2, TriangleAlert } from "lucide-react";
 import BrainHeadIcon from "@/components/BrainHeadIcon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import type { ChatMessage, Meeting, Note, SidebarSelection, T5TReport, TodoItem } from "@/lib/types";
-import { db } from "@/lib/db";
+import { db, getSetting, isSettingConfigured } from "@/lib/db";
 import { chatWithAI } from "@/lib/ai";
+import { loadCopilotSetupMessage } from "@/lib/ai-preflight";
 import { triggerRefresh } from "@/lib/hooks";
 import { buildChatSourceContext, sourceSelectionFromUrl } from "@/lib/chat-sources";
 
@@ -19,6 +20,7 @@ interface ChatPanelProps {
   todos: TodoItem[];
   t5tReports: T5TReport[];
   onClose: () => void;
+  onOpenAISettings: () => void;
   onNavigate: (selection: NonNullable<SidebarSelection>) => void;
 }
 
@@ -29,10 +31,12 @@ export default function ChatPanel({
   todos,
   t5tReports,
   onClose,
+  onOpenAISettings,
   onNavigate,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,9 +45,21 @@ export default function ChatPanel({
     }
   }, [messages, isLoading]);
 
+  const refreshSetupState = useCallback(async () => {
+    setSetupMessage(await loadCopilotSetupMessage({ getSetting, isSettingConfigured }));
+  }, []);
+
+  useEffect(() => {
+    void refreshSetupState();
+  }, [refreshSetupState]);
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
+
+    const latestSetupMessage = await loadCopilotSetupMessage({ getSetting, isSettingConfigured });
+    setSetupMessage(latestSetupMessage);
+    if (latestSetupMessage) return;
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -207,6 +223,33 @@ export default function ChatPanel({
 
       {/* Input */}
       <div className="border-t border-border p-3">
+        {setupMessage && (
+          <div className="mb-3 rounded-lg border border-orange-400/25 bg-orange-400/10 p-3">
+            <div className="flex items-start gap-2">
+              <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-orange-300" />
+              <div className="min-w-0 space-y-2">
+                <p className="text-xs font-semibold text-orange-200">AI setup required</p>
+                <p className="text-xs leading-5 text-text-secondary">{setupMessage}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onOpenAISettings}
+                    className="rounded-md border border-accent/35 bg-accent/12 px-2 py-1 text-xs font-semibold text-accent transition-colors hover:bg-accent/18"
+                  >
+                    Open AI settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshSetupState()}
+                    className="rounded-md border border-border bg-hover px-2 py-1 text-xs font-semibold text-text-secondary transition-colors hover:bg-selected"
+                  >
+                    Check again
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={input}
@@ -223,7 +266,7 @@ export default function ChatPanel({
           />
           <button
             onClick={sendMessage}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isLoading || Boolean(setupMessage)}
             className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-black transition-colors hover:bg-accent/85 disabled:opacity-50"
           >
             <Send className="w-4 h-4" />

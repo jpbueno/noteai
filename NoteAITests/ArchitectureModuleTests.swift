@@ -144,14 +144,28 @@ final class ArchitectureModuleTests: XCTestCase {
     }
 
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
-        let testFile = URL(fileURLWithPath: #filePath)
-        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
-        let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
-        let source = try String(contentsOf: sidebarFile, encoding: .utf8)
+        let source = try meetingLibrarySource()
 
         XCTAssertFalse(source.contains("recordingSourceCard("))
         XCTAssertFalse(source.contains("Native capture"))
         XCTAssertFalse(source.contains("subtitle: \"Ready\""))
+    }
+
+    func testSidebarDividerIsFullHeightShellChrome() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("private let sidebarDividerHitWidth"))
+        XCTAssertTrue(source.contains("sidebarResizeDivider(layout: layout, effectiveSidebarWidth: effectiveSidebarWidth)"))
+        XCTAssertTrue(source.contains("private func sidebarResizeDivider"))
+        XCTAssertTrue(source.contains(".ignoresSafeArea(edges: .top)"))
+        XCTAssertFalse(source.contains("Rectangle()\n                        .fill(Theme.border)\n                        .frame(width: 1)\n                        .contentShape(Rectangle())"))
+    }
+
+    private func meetingLibrarySource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
+        return try String(contentsOf: sidebarFile, encoding: .utf8)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

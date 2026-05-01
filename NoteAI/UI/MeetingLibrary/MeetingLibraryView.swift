@@ -57,6 +57,8 @@ struct MeetingLibraryView: View {
     @State private var quickFilter: CommandCenterQuickFilter?
     @FocusState private var searchFocused: Bool
 
+    private let sidebarDividerHitWidth: CGFloat = 8
+
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM/dd/yy"
@@ -72,47 +74,34 @@ struct MeetingLibraryView: View {
             let layout = CommandCenterLayout.metrics(forWindowWidth: proxy.size.width)
             let effectiveSidebarWidth = resolvedSidebarWidth(for: layout)
 
-            HStack(spacing: 0) {
-                if !sidebarCollapsed {
-                    sidebar(layout: layout)
-                        .frame(width: effectiveSidebarWidth)
-                    Rectangle()
-                        .fill(Theme.border)
-                        .frame(width: 1)
-                        .contentShape(Rectangle())
-                        .onHover { hovering in
-                            if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            ZStack(alignment: .leading) {
+                HStack(spacing: 0) {
+                    if !sidebarCollapsed {
+                        sidebar(layout: layout)
+                            .frame(width: effectiveSidebarWidth)
+                            .ignoresSafeArea(edges: .top)
+                    }
+                    ZStack {
+                        VStack(spacing: 0) {
+                            commandBar(layout: layout)
+                            detail
                         }
-                        .gesture(
-                            DragGesture(minimumDistance: 1)
-                                .onChanged { value in
-                                    let startWidth = sidebarDragStartWidth ?? effectiveSidebarWidth
-                                    sidebarDragStartWidth = startWidth
-                                    sidebarWidth = min(
-                                        layout.maximumSidebarWidth,
-                                        max(layout.minimumSidebarWidth, startWidth + value.translation.width)
-                                    )
-                                }
-                                .onEnded { _ in
-                                    sidebarDragStartWidth = nil
-                                }
-                        )
-                }
-                ZStack {
-                    VStack(spacing: 0) {
-                        commandBar(layout: layout)
-                        detail
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if showChatDrawer {
+                        Rectangle().fill(Theme.border).frame(width: 1)
+                        ChatPanelView(chatManager: chatManager, onClose: {
+                            withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = false }
+                        })
+                        .frame(width: min(420, max(340, round(340 * layout.scale))))
+                        .transition(.move(edge: .trailing))
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if showChatDrawer {
-                    Rectangle().fill(Theme.border).frame(width: 1)
-                    ChatPanelView(chatManager: chatManager, onClose: {
-                        withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = false }
-                    })
-                    .frame(width: min(420, max(340, round(340 * layout.scale))))
-                    .transition(.move(edge: .trailing))
+                if !sidebarCollapsed {
+                    sidebarResizeDivider(layout: layout, effectiveSidebarWidth: effectiveSidebarWidth)
+                        .ignoresSafeArea(edges: .top)
                 }
             }
             .environment(\.commandCenterLayout, layout)
@@ -159,6 +148,45 @@ struct MeetingLibraryView: View {
     private func resolvedSidebarWidth(for layout: CommandCenterLayout) -> CGFloat {
         guard sidebarWidth > 0 else { return layout.sidebarWidth }
         return min(layout.maximumSidebarWidth, max(layout.minimumSidebarWidth, sidebarWidth))
+    }
+
+    private func sidebarResizeDivider(layout: CommandCenterLayout, effectiveSidebarWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: max(0, effectiveSidebarWidth - sidebarDividerHitWidth / 2))
+                .allowsHitTesting(false)
+            ZStack {
+                Color.clear
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: 1)
+            }
+            .frame(width: sidebarDividerHitWidth)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(sidebarResizeGesture(layout: layout, effectiveSidebarWidth: effectiveSidebarWidth))
+            Spacer(minLength: 0)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func sidebarResizeGesture(layout: CommandCenterLayout, effectiveSidebarWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let startWidth = sidebarDragStartWidth ?? effectiveSidebarWidth
+                sidebarDragStartWidth = startWidth
+                sidebarWidth = min(
+                    layout.maximumSidebarWidth,
+                    max(layout.minimumSidebarWidth, startWidth + value.translation.width)
+                )
+            }
+            .onEnded { _ in
+                sidebarDragStartWidth = nil
+            }
     }
 
     // MARK: - Command bar

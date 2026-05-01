@@ -7,6 +7,7 @@ final class ChatManager: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isTyping = false
     @Published var lastError: String?
+    @Published var setupMessage: String?
 
     private let summarizationEngine = SummarizationEngine()
     weak var meetingManager: MeetingManager?
@@ -46,11 +47,19 @@ final class ChatManager: ObservableObject {
 
     init() {
         messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, T5T reports, search your meetings, and more."))
+        refreshConfigurationPreflight()
     }
 
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        refreshConfigurationPreflight()
+
+        if let setupMessage {
+            lastError = setupMessage
+            messages.append(ChatMessage(role: .assistant, content: setupMessage))
+            return
+        }
 
         messages.append(ChatMessage(role: .user, content: trimmed))
         isTyping = true
@@ -111,6 +120,14 @@ final class ChatManager: ObservableObject {
             isTyping = false
         }
         currentChatTask = chatTask
+    }
+
+    func refreshConfigurationPreflight() {
+        let provider = selectedProvider()
+        setupMessage = AIConfigurationPreflight.copilotSetupMessage(
+            provider: provider,
+            providerKeyConfigured: !APIKeyStore.key(for: provider).isEmpty
+        )
     }
 
     func clearChat() {
@@ -224,5 +241,10 @@ final class ChatManager: ObservableObject {
         default:
             return nil
         }
+    }
+
+    private func selectedProvider() -> LLMProviderType {
+        let raw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
+        return LLMProviderType(rawValue: raw) ?? .openRouter
     }
 }

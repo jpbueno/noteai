@@ -84,15 +84,13 @@ export function buildOnboardingChecklist(
     microphoneStatus === "complete" &&
     input.providerKeyConfigured &&
     input.transcriptionKeyConfigured;
-  const firstRecordingBlocker = input.meetingCount > 0
-    ? null
-    : !input.providerKeyConfigured
-      ? `Add your ${providerDisplayName} summaries API key before the first recording.`
-      : !input.transcriptionKeyConfigured
-        ? "Add a Groq or OpenAI transcription key before the first recording."
-        : microphoneStatus === "unsupported"
-          ? "This browser does not support microphone capture for recording."
-          : null;
+  const firstRecordingBlocker = !input.providerKeyConfigured
+    ? `Add your ${providerDisplayName} summaries API key before recording.`
+    : !input.transcriptionKeyConfigured
+      ? "Add a Groq or OpenAI transcription key before recording."
+      : microphoneStatus === "unsupported"
+        ? "This browser does not support microphone capture for recording."
+        : null;
 
   const items: OnboardingChecklistItem[] = [
     {
@@ -163,7 +161,7 @@ export function buildOnboardingChecklist(
         : "Complete required setup to avoid a failed first capture."),
       actionLabel: "Start recording",
       target: "recording",
-      status: input.meetingCount > 0 ? "complete" : firstRecordingBlocker ? "blocked" : "needs-action",
+      status: firstRecordingBlocker ? "blocked" : input.meetingCount > 0 ? "complete" : "needs-action",
       required: false,
     },
   ];

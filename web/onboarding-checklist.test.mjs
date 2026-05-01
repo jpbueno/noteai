@@ -32,7 +32,7 @@ test("marks required setup incomplete until permissions and provider keys are re
   );
 });
 
-test("validates required provider settings before the first recording", () => {
+test("validates required provider settings before recording", () => {
   const checklist = buildOnboardingChecklist({
     provider: "nvidia",
     providerKeyConfigured: false,
@@ -45,7 +45,25 @@ test("validates required provider settings before the first recording", () => {
     meetingCount: 0,
   });
 
-  assert.equal(checklist.firstRecordingBlocker, "Add your NVIDIA summaries API key before the first recording.");
+  assert.equal(checklist.firstRecordingBlocker, "Add your NVIDIA summaries API key before recording.");
+});
+
+test("validates required provider settings after meetings exist", () => {
+  const checklist = buildOnboardingChecklist({
+    provider: "openai",
+    providerKeyConfigured: false,
+    transcriptionKeyConfigured: true,
+    authConfigured: true,
+    microphonePermission: "granted",
+    notificationPermission: "granted",
+    supportsMediaDevices: true,
+    supportsNotifications: true,
+    meetingCount: 2,
+  });
+
+  assert.equal(checklist.requiredReady, false);
+  assert.equal(checklist.firstRecordingBlocker, "Add your OpenAI summaries API key before recording.");
+  assert.equal(checklist.items.find((item) => item.id === "first-recording")?.status, "blocked");
 });
 
 test("shows unsupported browser capabilities explicitly", () => {

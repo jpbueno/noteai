@@ -29,7 +29,7 @@ struct SettingsView: View {
         }
     }
 
-    init(initialTab: SettingsTab = .account) {
+    init(initialTab: SettingsTab = .ai) {
         _selectedTab = State(initialValue: initialTab)
     }
 

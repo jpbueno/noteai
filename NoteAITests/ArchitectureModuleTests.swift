@@ -143,6 +143,17 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 42)
     }
 
+    func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
+        let source = try String(contentsOf: sidebarFile, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("recordingSourceCard("))
+        XCTAssertFalse(source.contains("Native capture"))
+        XCTAssertFalse(source.contains("subtitle: \"Ready\""))
+    }
+
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {
         let rawOrder = "upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
 

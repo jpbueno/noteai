@@ -380,11 +380,6 @@ struct MeetingLibraryView: View {
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
                 .onDisappear { pulseAnimation = false }
             } else {
-                HStack(spacing: 6) {
-                    recordingSourceCard(icon: "waveform", title: "System", subtitle: "Native capture", active: true, layout: layout)
-                    recordingSourceCard(icon: "mic", title: "Mic", subtitle: "Ready", active: false, layout: layout)
-                }
-
                 Button {
                     meetingManager.startRecording()
                     selection = nil
@@ -406,29 +401,6 @@ struct MeetingLibraryView: View {
         }
         .padding(.horizontal, round(10 * layout.scale))
         .padding(.bottom, round(10 * layout.scale))
-    }
-
-    private func recordingSourceCard(icon: String, title: String, subtitle: String, active: Bool, layout: CommandCenterLayout) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: layout.smallFontSize, weight: .semibold))
-                Text(title)
-                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
-                    .lineLimit(1)
-            }
-            Text(subtitle)
-                .font(.system(size: layout.tinyFontSize))
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-        }
-        .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-        .padding(.horizontal, round(9 * layout.scale))
-        .padding(.vertical, round(7 * layout.scale))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: max(38, round(40 * layout.scale)))
-        .background(active ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
     }
 
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {

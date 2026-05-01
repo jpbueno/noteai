@@ -37,6 +37,7 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(checklist.completedCount, 1)
         XCTAssertEqual(checklist.totalCount, 7)
         XCTAssertEqual(checklist.requiredReady, false)
+        XCTAssertEqual(checklist.canCollapse, false)
         XCTAssertEqual(checklist.items.map(\.status), [
             .needsAction,
             .blocked,
@@ -61,6 +62,7 @@ final class OnboardingChecklistTests: XCTestCase {
         )
 
         XCTAssertEqual(checklist.requiredReady, false)
+        XCTAssertEqual(checklist.canCollapse, false)
         XCTAssertEqual(checklist.firstRecordingBlocker, "Add your OpenAI summaries API key before the first recording.")
     }
 
@@ -92,9 +94,50 @@ final class OnboardingChecklistTests: XCTestCase {
         )
 
         XCTAssertEqual(checklist.requiredReady, true)
+        XCTAssertEqual(checklist.canCollapse, true)
         XCTAssertEqual(checklist.completedCount, 7)
         XCTAssertEqual(checklist.items.first { $0.id == .firstRecording }?.status, .complete)
         XCTAssertNil(checklist.firstRecordingBlocker)
+    }
+
+    func testGrantedScreenRecordingCompletesRequiredSetupAndRemovesRecoveryAction() {
+        let checklist = OnboardingChecklist.build(
+            provider: .nvidia,
+            providerKeyConfigured: true,
+            microphonePermission: .granted,
+            screenRecordingPermission: .granted,
+            notificationPermission: .granted,
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        let screenRecording = item(.screenRecording, in: checklist)
+        XCTAssertEqual(screenRecording.status, .complete)
+        XCTAssertNil(screenRecording.actionLabel)
+        XCTAssertNil(screenRecording.actionTarget)
+        XCTAssertEqual(checklist.requiredReady, true)
+        XCTAssertEqual(checklist.canCollapse, true)
+        XCTAssertNil(checklist.firstRecordingBlocker)
+        XCTAssertEqual(item(.firstRecording, in: checklist).status, .needsAction)
+    }
+
+    func testScreenAudioPermissionDoesNotHardBlockFirstRecordingAttempt() {
+        let checklist = OnboardingChecklist.build(
+            provider: .nvidia,
+            providerKeyConfigured: true,
+            microphonePermission: .granted,
+            screenRecordingPermission: .denied,
+            notificationPermission: .granted,
+            calendarAuthConfigured: true,
+            meetingCount: 0
+        )
+
+        XCTAssertEqual(checklist.requiredReady, false)
+        XCTAssertEqual(checklist.canCollapse, false)
+        XCTAssertNil(checklist.firstRecordingBlocker)
+        XCTAssertEqual(item(.screenRecording, in: checklist).status, .blocked)
+        XCTAssertEqual(item(.firstRecording, in: checklist).status, .needsAction)
+        XCTAssertEqual(item(.firstRecording, in: checklist).actionTarget, .startRecording)
     }
 
     func testPermissionRowsExposeDirectPromptOrRecoveryActions() {
@@ -110,8 +153,8 @@ final class OnboardingChecklistTests: XCTestCase {
 
         XCTAssertEqual(item(.microphone, in: unknownChecklist).actionTarget, .requestMicrophonePermission)
         XCTAssertEqual(item(.microphone, in: unknownChecklist).actionLabel, "Request access")
-        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionTarget, .openScreenRecordingPrivacySettings)
-        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionLabel, "Open Screen Recording")
+        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionTarget, .requestScreenRecordingPermission)
+        XCTAssertEqual(item(.screenRecording, in: unknownChecklist).actionLabel, "Grant Screen & Audio")
         XCTAssertEqual(item(.notifications, in: unknownChecklist).actionTarget, .requestNotificationPermission)
         XCTAssertEqual(item(.notifications, in: unknownChecklist).actionLabel, "Request access")
 
@@ -128,7 +171,7 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(item(.microphone, in: deniedChecklist).status, .blocked)
         XCTAssertEqual(item(.microphone, in: deniedChecklist).actionTarget, .openMicrophonePrivacySettings)
         XCTAssertEqual(item(.microphone, in: deniedChecklist).actionLabel, "Open Microphone")
-        XCTAssertEqual(item(.screenRecording, in: deniedChecklist).actionTarget, .openScreenRecordingPrivacySettings)
+        XCTAssertEqual(item(.screenRecording, in: deniedChecklist).actionTarget, .requestScreenRecordingPermission)
         XCTAssertEqual(item(.notifications, in: deniedChecklist).actionTarget, .openNotificationSettings)
         XCTAssertEqual(item(.notifications, in: deniedChecklist).actionLabel, "Open Notifications")
     }
@@ -160,7 +203,7 @@ final class OnboardingChecklistTests: XCTestCase {
             meetingCount: 0
         )
 
-        XCTAssertTrue(item(.screenRecording, in: checklist).detail.contains("quit and reopen NoteAI"))
-        XCTAssertEqual(item(.screenRecording, in: checklist).actionTarget, .openScreenRecordingPrivacySettings)
+        XCTAssertTrue(item(.screenRecording, in: checklist).detail.contains("Screen & System Audio Recording"))
+        XCTAssertEqual(item(.screenRecording, in: checklist).actionTarget, .requestScreenRecordingPermission)
     }
 }

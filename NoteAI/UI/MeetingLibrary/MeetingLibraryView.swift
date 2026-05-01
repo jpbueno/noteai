@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -138,6 +139,9 @@ struct MeetingLibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleChatPanel)) { _ in
             showChatDrawer.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            meetingManager.refreshOnboardingChecklistState()
         }
         .sheet(isPresented: $meetingManager.showMeetingNamePrompt) {
             MeetingNamePromptView(
@@ -953,9 +957,15 @@ struct MeetingLibraryView: View {
         case .requestMicrophonePermission:
             requestMicrophonePermissionForOnboarding()
         case .openMicrophonePrivacySettings:
-            openSystemSettings(path: "com.apple.preference.security?Privacy_Microphone")
+            if openSystemSettings(path: "com.apple.preference.security?Privacy_Microphone") {
+                meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
+            }
+        case .requestScreenRecordingPermission:
+            requestScreenRecordingPermissionForOnboarding()
         case .openScreenRecordingPrivacySettings:
-            openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture")
+            if openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture") {
+                meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
+            }
         case .requestNotificationPermission:
             meetingManager.requestNotificationPermissionForOnboarding()
         case .openNotificationSettings:
@@ -978,6 +988,21 @@ struct MeetingLibraryView: View {
             Task { @MainActor in
                 meetingManager.refreshOnboardingChecklistState()
             }
+        }
+    }
+
+    private func requestScreenRecordingPermissionForOnboarding() {
+        let granted = CGRequestScreenCaptureAccess()
+        if granted {
+            RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(true)
+            meetingManager.refreshOnboardingChecklistState()
+            return
+        }
+
+        if openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture") {
+            meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
+        } else {
+            meetingManager.refreshOnboardingChecklistState()
         }
     }
 

@@ -40,6 +40,7 @@ enum OnboardingItemStatus: Equatable {
 enum OnboardingActionTarget: Equatable {
     case startRecording
     case requestMicrophonePermission
+    case requestScreenRecordingPermission
     case openMicrophonePrivacySettings
     case openScreenRecordingPrivacySettings
     case requestNotificationPermission
@@ -65,6 +66,7 @@ struct OnboardingChecklist: Equatable {
     let completedCount: Int
     let totalCount: Int
     let requiredReady: Bool
+    let canCollapse: Bool
     let firstRecordingBlocker: String?
 
     static func build(
@@ -103,10 +105,10 @@ struct OnboardingChecklist: Equatable {
             ),
             OnboardingChecklistItem(
                 id: .screenRecording,
-                label: "Screen Recording",
+                label: "Screen & audio",
                 detail: screenRecordingStatus == .unsupported
                     ? "System audio capture requires macOS 14.2 or later."
-                    : "Required to capture meeting audio from Teams and browsers. After granting access, quit and reopen NoteAI if it still shows missing.",
+                    : "Required to capture meeting audio from Teams and browsers. Allow NoteAI in Screen & System Audio Recording, then return to NoteAI.",
                 actionLabel: Self.screenRecordingActionLabel(for: screenRecordingPermission),
                 actionTarget: Self.screenRecordingActionTarget(for: screenRecordingPermission),
                 status: screenRecordingStatus,
@@ -166,6 +168,7 @@ struct OnboardingChecklist: Equatable {
             completedCount: items.filter { $0.status == .complete }.count,
             totalCount: items.count,
             requiredReady: requiredReady,
+            canCollapse: requiredReady,
             firstRecordingBlocker: firstRecordingBlocker
         )
     }
@@ -195,7 +198,7 @@ struct OnboardingChecklist: Equatable {
     private static func screenRecordingActionLabel(for permission: OnboardingPermissionStatus) -> String? {
         switch permission {
         case .unknown, .denied:
-            return "Open Screen Recording"
+            return "Grant Screen & Audio"
         case .granted, .unsupported:
             return nil
         }
@@ -204,7 +207,7 @@ struct OnboardingChecklist: Equatable {
     private static func screenRecordingActionTarget(for permission: OnboardingPermissionStatus) -> OnboardingActionTarget? {
         switch permission {
         case .unknown, .denied:
-            return .openScreenRecordingPrivacySettings
+            return .requestScreenRecordingPermission
         case .granted, .unsupported:
             return nil
         }
@@ -256,13 +259,8 @@ struct OnboardingChecklist: Equatable {
             break
         }
 
-        switch screenRecordingPermission {
-        case .denied:
-            return "Grant Screen Recording access before the first recording."
-        case .unsupported(let reason):
+        if case .unsupported(let reason) = screenRecordingPermission {
             return "System audio capture is unavailable: \(reason)"
-        case .unknown, .granted:
-            break
         }
 
         return nil

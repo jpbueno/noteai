@@ -100,6 +100,7 @@ final class MeetingManager: ObservableObject {
     private var coachLastAnalyzedSegmentCount = 0
     private var coachLastAnalyzedTime: Date?
     private var cancellables = Set<AnyCancellable>()
+    private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
 
     init() {
         self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
@@ -121,7 +122,7 @@ final class MeetingManager: ObservableObject {
     }
 
     var onboardingChecklist: OnboardingChecklist {
-        let permissions = RecordingDiagnosticsSnapshot.currentPermissions().permissions
+        let permissions = recordingDiagnostics.permissions
         let providerRaw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
         let provider = LLMProviderType(rawValue: providerRaw) ?? .openRouter
 
@@ -138,6 +139,7 @@ final class MeetingManager: ObservableObject {
 
     func refreshOnboardingChecklistState() {
         recordingDiagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             let status: OnboardingPermissionStatus
             switch settings.authorizationStatus {
@@ -152,6 +154,21 @@ final class MeetingManager: ObservableObject {
             }
             Task { @MainActor in
                 self?.onboardingNotificationPermission = status
+            }
+        }
+    }
+
+    func refreshOnboardingChecklistStateAfterExternalPermissionChange() {
+        onboardingPermissionRefreshSequenceTask?.cancel()
+        onboardingPermissionRefreshSequenceTask = Task { [weak self] in
+            for delay in [UInt64(0), 500_000_000, 1_500_000_000, 3_000_000_000] {
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.refreshOnboardingChecklistState()
+                }
             }
         }
     }

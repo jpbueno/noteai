@@ -31,6 +31,8 @@
     <false/>
     <key>NSMicrophoneUsageDescription</key>
     <string>NoteAI needs microphone access to capture your voice during meetings for accurate speaker identification.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>NoteAI needs system audio access to capture meeting audio from apps like Teams and browsers.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>NoteAI needs screen recording permission to capture system audio from meeting applications.</string>
     <key>NSCalendarsUsageDescription</key>

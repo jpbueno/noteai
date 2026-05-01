@@ -132,20 +132,12 @@ final class AudioCaptureManager: NSObject {
     // MARK: - App audio capture (Teams/browser)
 
     private func startAppAudioCapture() async -> Bool {
-        // Check if we have Screen Recording permission before attempting
-        // anything that triggers the system prompt
+        // ScreenCaptureKit needs screen capture access, but Core Audio process taps
+        // use the system-audio permission added in macOS 14.2. Try taps first so
+        // audio-only grants are not blocked by a screen preflight failure.
         let hasScreenPermission = CGPreflightScreenCaptureAccess()
         updateDiagnostics { snapshot in
             snapshot.updatePermission(.screenRecording, status: hasScreenPermission ? .granted : .denied)
-        }
-        if !hasScreenPermission {
-            log("No Screen Recording permission — app audio disabled")
-            updateDiagnostics { snapshot in
-                snapshot.updateCapture(.systemAudio, status: .unavailable("Screen Recording permission is denied"))
-                snapshot.updatePermission(.processTap, status: .unavailable("Screen Recording permission is denied"))
-            }
-            print("[AudioCapture] No Screen Recording permission — skipping app audio, mic only")
-            return false
         }
 
         // Strategy 1: ProcessTap (macOS 14.2+) — direct per-PID capture, best quality
@@ -157,7 +149,9 @@ final class AudioCaptureManager: NSObject {
                         self?.handleAppAudioBuffer(buffer)
                     }
                     processTap = tap
+                    RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(true)
                     updateDiagnostics { snapshot in
+                        snapshot.updatePermission(.screenRecording, status: .granted)
                         snapshot.updatePermission(.processTap, status: .granted)
                         snapshot.updateCapture(.systemAudio, status: .capturing)
                     }
@@ -165,6 +159,7 @@ final class AudioCaptureManager: NSObject {
                     print("[AudioCapture] ProcessTap capturing PID \(app.processIdentifier) (\(app.localizedName ?? "unknown"))")
                     return true
                 } catch {
+                    RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(false)
                     updateDiagnostics { snapshot in
                         snapshot.updatePermission(.processTap, status: .unavailable(error.localizedDescription))
                     }
@@ -178,12 +173,26 @@ final class AudioCaptureManager: NSObject {
             }
         }
 
+        guard hasScreenPermission else {
+            log("No Screen Recording permission — ScreenCaptureKit fallback disabled; mic-only mode")
+            updateDiagnostics { snapshot in
+                snapshot.updateCapture(.systemAudio, status: .unavailable("Screen & System Audio Recording permission is not available"))
+                if snapshot.permissions[.processTap] == .unknown {
+                    snapshot.updatePermission(.processTap, status: .unavailable("No supported meeting app is running"))
+                }
+            }
+            print("[AudioCapture] No Screen Recording permission for SCK fallback — mic only")
+            return false
+        }
+
         // Strategy 2: ScreenCaptureKit — capture ALL desktop audio
         // Not limited to a specific meeting app — captures any audio output
         // so it works regardless of which app is producing sound
         do {
             try await startSCKDesktopAudioCapture()
+            RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(true)
             updateDiagnostics { snapshot in
+                snapshot.updatePermission(.screenRecording, status: .granted)
                 snapshot.updateCapture(.systemAudio, status: .capturing)
             }
             log("ScreenCaptureKit desktop audio OK")

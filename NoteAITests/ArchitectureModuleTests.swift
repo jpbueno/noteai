@@ -121,25 +121,23 @@ final class ArchitectureModuleTests: XCTestCase {
             .operationalSnapshot,
             .focusQueue,
             .suggestedNextMove,
-            .setupChecklist,
             .recentlyCompleted,
+            .setupChecklist,
         ])
     }
 
-    func testCommandCenterPanelRowsKeepFullWidthSetupPanelOnOwnRow() {
-        let rows = CommandCenterPanelOrder.rows(for: [
+    func testCommandCenterPanelColumnsUseCopilotLikeTwoColumnStacks() {
+        let columns = CommandCenterPanelOrder.columns(for: DashboardPanelID.defaultOrder)
+
+        XCTAssertEqual(columns.leading, [
             .operationalSnapshot,
-            .setupChecklist,
-            .upcoming,
             .focusQueue,
             .recentlyCompleted,
         ])
-
-        XCTAssertEqual(rows, [
-            [.operationalSnapshot],
-            [.setupChecklist],
-            [.upcoming, .focusQueue],
-            [.recentlyCompleted],
+        XCTAssertEqual(columns.trailing, [
+            .suggestedNextMove,
+            .upcoming,
+            .setupChecklist,
         ])
     }
 
@@ -152,15 +150,15 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertEqual(moved, [
             .suggestedNextMove,
-            .setupChecklist,
             .focusQueue,
             .upcoming,
             .operationalSnapshot,
             .recentlyCompleted,
+            .setupChecklist,
         ])
         XCTAssertEqual(
             CommandCenterPanelOrder.rawValue(for: moved),
-            "suggestedNextMove,setupChecklist,focusQueue,upcoming,operationalSnapshot,recentlyCompleted"
+            "suggestedNextMove,focusQueue,upcoming,operationalSnapshot,recentlyCompleted,setupChecklist"
         )
     }
 
@@ -175,9 +173,9 @@ final class ArchitectureModuleTests: XCTestCase {
             .operationalSnapshot,
             .upcoming,
             .suggestedNextMove,
-            .setupChecklist,
             .focusQueue,
             .recentlyCompleted,
+            .setupChecklist,
         ])
     }
 

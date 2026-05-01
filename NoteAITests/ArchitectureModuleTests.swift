@@ -108,6 +108,79 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 38)
     }
 
+    func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {
+        let rawOrder = "upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
+
+        let ordered = CommandCenterPanelOrder.orderedIDs(
+            availableIDs: DashboardPanelID.defaultOrder,
+            rawValue: rawOrder
+        )
+
+        XCTAssertEqual(ordered, [
+            .upcoming,
+            .operationalSnapshot,
+            .focusQueue,
+            .suggestedNextMove,
+            .setupChecklist,
+            .recentlyCompleted,
+        ])
+    }
+
+    func testCommandCenterPanelRowsKeepFullWidthSetupPanelOnOwnRow() {
+        let rows = CommandCenterPanelOrder.rows(for: [
+            .operationalSnapshot,
+            .setupChecklist,
+            .upcoming,
+            .focusQueue,
+            .recentlyCompleted,
+        ])
+
+        XCTAssertEqual(rows, [
+            [.operationalSnapshot],
+            [.setupChecklist],
+            [.upcoming, .focusQueue],
+            [.recentlyCompleted],
+        ])
+    }
+
+    func testCommandCenterPanelDropMovesDraggedPanelAfterLaterTarget() {
+        let moved = CommandCenterPanelOrder.moveForDrop(
+            .operationalSnapshot,
+            onto: .upcoming,
+            in: DashboardPanelID.defaultOrder
+        )
+
+        XCTAssertEqual(moved, [
+            .suggestedNextMove,
+            .setupChecklist,
+            .focusQueue,
+            .upcoming,
+            .operationalSnapshot,
+            .recentlyCompleted,
+        ])
+        XCTAssertEqual(
+            CommandCenterPanelOrder.rawValue(for: moved),
+            "suggestedNextMove,setupChecklist,focusQueue,upcoming,operationalSnapshot,recentlyCompleted"
+        )
+    }
+
+    func testCommandCenterPanelDropMovesDraggedPanelBeforeEarlierTarget() {
+        let moved = CommandCenterPanelOrder.moveForDrop(
+            .upcoming,
+            onto: .suggestedNextMove,
+            in: DashboardPanelID.defaultOrder
+        )
+
+        XCTAssertEqual(moved, [
+            .operationalSnapshot,
+            .upcoming,
+            .suggestedNextMove,
+            .setupChecklist,
+            .focusQueue,
+            .recentlyCompleted,
+        ])
+    }
+
     func testOAuthCallbackRequiresExpectedState() {
         let valid = "GET /?code=abc123&state=state-1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         let missingState = "GET /?code=abc123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"

@@ -122,6 +122,31 @@ export interface LocalCaptureStopResponse {
   transcript: LocalCaptureTranscriptSegment[];
 }
 
+export interface LocalCaptureSessionSnapshot {
+  sessionId: string | null;
+  state: string;
+  recordingIndicator: string;
+  startedAt: string | null;
+  duration: number;
+  transcript: LocalCaptureTranscriptSegment[];
+}
+
+export interface LocalCaptureHelperEventData {
+  type: "capture.snapshot" | string;
+  protocolVersion: string;
+  emittedAt: string;
+  snapshot: LocalCaptureSessionSnapshot;
+  transcriptRevision: number;
+  audioStreaming: "unsupported" | string;
+}
+
+export interface LocalCaptureHelperEvent {
+  id?: string;
+  event: string;
+  retry?: number;
+  data: LocalCaptureHelperEventData;
+}
+
 export interface LocalHelperDiagnosticRow {
   label: string;
   value: string;
@@ -133,6 +158,8 @@ type HelperFetchResponse = {
   ok: boolean;
   status?: number;
   json: () => Promise<unknown>;
+  text?: () => Promise<string>;
+  body?: ReadableStream<Uint8Array> | null;
 };
 
 type HelperFetch = (input: string, init: RequestInit) => Promise<HelperFetchResponse>;
@@ -405,6 +432,100 @@ export async function getLocalCaptureHelperStatus({
     }
 
     return (await response.json()) as LocalCaptureHelperStatusResponse;
+  } finally {
+    abort.cancel();
+  }
+}
+
+async function readResponseText(response: HelperFetchResponse): Promise<string> {
+  if (typeof response.text === "function") {
+    return response.text();
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+
+function parseLocalCaptureSSE(text: string): LocalCaptureHelperEvent[] {
+  return text
+    .split(/\r?\n\r?\n/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const event: Partial<LocalCaptureHelperEvent> = {};
+      const dataLines: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (!line || line.startsWith(":")) continue;
+        const separator = line.indexOf(":");
+        const field = separator >= 0 ? line.slice(0, separator) : line;
+        const rawValue = separator >= 0 ? line.slice(separator + 1) : "";
+        const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+        if (field === "id") event.id = value;
+        if (field === "event") event.event = value;
+        if (field === "retry") event.retry = Number(value);
+        if (field === "data") dataLines.push(value);
+      }
+      const data = JSON.parse(dataLines.join("\n")) as LocalCaptureHelperEventData;
+      return {
+        event: event.event || data.type,
+        ...(event.id ? { id: event.id } : {}),
+        ...(Number.isFinite(event.retry) ? { retry: event.retry } : {}),
+        data,
+      };
+    });
+}
+
+export async function readLocalCaptureHelperEvents({
+  baseUrl = LOCAL_CAPTURE_HELPER_BASE_URL,
+  fetchImpl = defaultFetch(),
+  token,
+  timeoutMs = 30_000,
+}: {
+  baseUrl?: string;
+  fetchImpl?: HelperFetch | null;
+  token: string;
+  timeoutMs?: number;
+}): Promise<LocalCaptureHelperEvent[]> {
+  if (!fetchImpl) {
+    throw new Error("Fetch is not available in this environment.");
+  }
+  const trimmedToken = token.trim();
+  if (!trimmedToken) {
+    throw new Error("Pair the NoteAI local helper before streaming capture events.");
+  }
+
+  const abort = createAbortSignal(timeoutMs);
+  try {
+    const response = await fetchImpl(`${baseUrl}/v1/events`, {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store",
+      credentials: "omit",
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${trimmedToken}`,
+      },
+      signal: abort.signal,
+    });
+
+    if (!response.ok) {
+      throw await parseHelperError(
+        response,
+        `Local helper events returned HTTP ${response.status ?? "error"}.`,
+      );
+    }
+
+    return parseLocalCaptureSSE(await readResponseText(response));
   } finally {
     abort.cancel();
   }

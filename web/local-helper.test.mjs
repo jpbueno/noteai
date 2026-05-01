@@ -7,6 +7,7 @@ import {
   detectLocalCaptureHelper,
   formatLocalHelperDiagnosticRows,
   getLocalCaptureHelperStatus,
+  readLocalCaptureHelperEvents,
   requestLocalCaptureHelperPairing,
   startLocalCaptureHelperCapture,
   stopLocalCaptureHelperCapture,
@@ -221,6 +222,36 @@ test("capture stop returns helper transcript segments for web persistence", asyn
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.Authorization, "Bearer paired-token");
   assert.equal(stopped.transcript[0].text, "Hello from Teams.");
+});
+
+test("event stream reader sends bearer auth and parses bounded SSE snapshots", async () => {
+  const calls = [];
+  const events = await readLocalCaptureHelperEvents({
+    token: "paired-token",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => [
+          "id: 1",
+          "event: capture.snapshot",
+          "retry: 5000",
+          'data: {"type":"capture.snapshot","protocolVersion":"2026-04-28","emittedAt":"2026-04-28T16:00:00Z","snapshot":{"sessionId":"11111111-1111-1111-1111-111111111111","state":"recording","recordingIndicator":"visible-recording","startedAt":"2026-04-28T16:00:00Z","duration":7,"transcript":[{"id":1,"text":"Snapshot from Teams.","startTime":0,"endTime":3,"speaker":"JP","confidence":0.92}]},"transcriptRevision":1,"audioStreaming":"unsupported"}',
+          "",
+        ].join("\n"),
+      };
+    },
+  });
+
+  assert.equal(calls[0].url, `${LOCAL_CAPTURE_HELPER_BASE_URL}/v1/events`);
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.Accept, "text/event-stream");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer paired-token");
+  assert.equal(events[0].event, "capture.snapshot");
+  assert.equal(events[0].data.transcriptRevision, 1);
+  assert.equal(events[0].data.audioStreaming, "unsupported");
+  assert.equal(events[0].data.snapshot.transcript[0].text, "Snapshot from Teams.");
 });
 
 test("diagnostic rows include connection, pairing, permissions, and Teams state", () => {

@@ -101,6 +101,41 @@ struct LocalCaptureSessionSnapshot: Codable, Equatable {
     )
 }
 
+// /v1/events is intentionally a small SSE Interface for this slice:
+// authenticated localhost-only clients receive one capture.snapshot event and
+// the connection closes. Reconnects get a fresh snapshot; raw audio is not
+// streamed until a bounded, separately authorized audio Interface exists.
+struct LocalCaptureHelperEventStreamPolicy: Codable, Equatable {
+    var transport: String
+    var endpoint: String
+    var authentication: String
+    var reconnect: String
+    var backpressure: String
+    var transcriptSemantics: String
+    var audioStreaming: String
+    var reconnectRetryMilliseconds: Int
+
+    static let current = LocalCaptureHelperEventStreamPolicy(
+        transport: "server-sent-events-over-loopback-http",
+        endpoint: "/v1/events",
+        authentication: "origin-bound-bearer-token",
+        reconnect: "clients may reconnect and receive a fresh snapshot; Last-Event-ID replay is unsupported in this slice",
+        backpressure: "bounded snapshot response closes after the current event; future live streams should coalesce transcript snapshots instead of queueing unbounded events",
+        transcriptSemantics: "capture.snapshot carries the complete current transcript snapshot and a transcriptRevision derived from the latest segment id",
+        audioStreaming: "unsupported",
+        reconnectRetryMilliseconds: 5_000
+    )
+}
+
+struct LocalCaptureHelperEventEnvelope: Codable, Equatable {
+    var type: String
+    var protocolVersion: String
+    var emittedAt: Date
+    var snapshot: LocalCaptureSessionSnapshot
+    var transcriptRevision: Int
+    var audioStreaming: String
+}
+
 struct LocalCaptureStartRequest: Codable, Equatable {
     var source: String
     var title: String?

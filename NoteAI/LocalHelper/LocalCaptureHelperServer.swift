@@ -107,6 +107,8 @@ final class LocalCaptureHelperRouter {
         case ("GET", "/v1/health"):
             var health = statusProvider.health()
             health.capabilities.captureControl = captureController != nil
+            health.capabilities.events = true
+            health.capabilities.audioStreaming = false
             return json(health, statusCode: 200, origin: origin)
         case ("POST", "/v1/pair/request"):
             return pairRequest(request, origin: origin)
@@ -122,6 +124,11 @@ final class LocalCaptureHelperRouter {
                 status.recordingIndicator = snapshot.recordingIndicator
             }
             return json(status, statusCode: 200, origin: origin)
+        case ("GET", "/v1/events"):
+            guard let origin, isAuthorized(request: request, origin: origin) else {
+                return jsonError("pairing_required", "Pair NoteAI Web with the local helper before streaming capture events.", statusCode: 401, origin: origin)
+            }
+            return await events(origin: origin)
         case ("POST", "/v1/capture/start"):
             guard let origin, isAuthorized(request: request, origin: origin) else {
                 return jsonError("pairing_required", "Pair NoteAI Web with the local helper before starting capture.", statusCode: 401, origin: origin)
@@ -135,6 +142,33 @@ final class LocalCaptureHelperRouter {
         default:
             return jsonError("not_found", "No local helper route matches this request.", statusCode: 404, origin: origin)
         }
+    }
+
+    private func events(origin: String) async -> LocalCaptureHTTPRouterResponse {
+        let snapshot = await captureController?.snapshot ?? .idle
+        let event = LocalCaptureHelperEventEnvelope(
+            type: "capture.snapshot",
+            protocolVersion: LocalCaptureHelperProtocol.version,
+            emittedAt: Date(),
+            snapshot: snapshot,
+            transcriptRevision: snapshot.transcript.map(\.id).max() ?? 0,
+            audioStreaming: LocalCaptureHelperEventStreamPolicy.current.audioStreaming
+        )
+        let data = (try? encoder.encode(event)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+        let retry = LocalCaptureHelperEventStreamPolicy.current.reconnectRetryMilliseconds
+        let body = """
+        id: 1
+        event: \(event.type)
+        retry: \(retry)
+        data: \(data)
+
+        """
+
+        return LocalCaptureHTTPRouterResponse(
+            statusCode: 200,
+            headers: eventStreamHeaders(origin: origin),
+            body: Data(body.utf8)
+        )
     }
 
     private func pairRequest(
@@ -290,6 +324,13 @@ final class LocalCaptureHelperRouter {
             headers["Access-Control-Allow-Origin"] = origin
             headers["Vary"] = "Origin"
         }
+        return headers
+    }
+
+    private func eventStreamHeaders(origin: String?) -> [String: String] {
+        var headers = corsHeaders(origin: origin)
+        headers["Content-Type"] = "text/event-stream; charset=utf-8"
+        headers["Cache-Control"] = "no-store, no-transform"
         return headers
     }
 }

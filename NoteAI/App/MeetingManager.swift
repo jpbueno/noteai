@@ -300,6 +300,7 @@ final class MeetingManager: ObservableObject {
             do {
                 try meetingStore.save(meeting: meeting)
                 meetings.insert(meeting, at: 0)
+                syncActionItemsToTodos(for: meeting)
             } catch {
                 print("Failed to save meeting: \(error)")
             }
@@ -315,10 +316,17 @@ final class MeetingManager: ObservableObject {
         guard let itemIndex = meetings[index].summary.actionItems.firstIndex(where: { $0.id == actionItemId }) else { return }
 
         meetings[index].summary.actionItems[itemIndex].isCompleted.toggle()
+        let completed = meetings[index].summary.actionItems[itemIndex].isCompleted
 
         // Persist the change
         do {
             try meetingStore.save(meeting: meetings[index])
+            syncActionItemsToTodos(for: meetings[index])
+            syncLinkedTodoCompletion(
+                meetingID: meetingId,
+                actionItemID: actionItemId,
+                completed: completed
+            )
         } catch {
             print("Failed to save action item toggle: \(error)")
         }
@@ -353,7 +361,54 @@ final class MeetingManager: ObservableObject {
             meetings[index] = updated
         }
 
+        syncActionItemsToTodos(for: updated)
+
         debugLog("meeting updated and saved")
+        return updated
+    }
+
+    func regenerateSummarySection(_ section: MeetingSummarySection, meeting: Meeting) async throws -> Meeting {
+        debugLog("regenerateSummarySection \(section.rawValue) called for meeting \(meeting.id)")
+
+        let content = try await summarizationEngine.regenerateSection(section, meeting: meeting)
+        var updated = meeting
+        updated.summary.replace(section, with: content, state: .generated)
+
+        try meetingStore.save(meeting: updated)
+
+        if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+            meetings[index] = updated
+        }
+
+        if section == .actionItems {
+            syncActionItemsToTodos(for: updated)
+        }
+
+        debugLog("regenerated section \(section.rawValue) and saved")
+        return updated
+    }
+
+    @discardableResult
+    func updateSummarySection(
+        _ section: MeetingSummarySection,
+        content: MeetingSummarySectionContent,
+        meeting: Meeting
+    ) -> Meeting {
+        var updated = meeting
+        updated.summary.replace(section, with: content, state: .userEdited)
+
+        do {
+            try meetingStore.save(meeting: updated)
+            if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+                meetings[index] = updated
+            }
+            if section == .actionItems {
+                syncActionItemsToTodos(for: updated)
+            }
+        } catch {
+            print("Failed to save edited summary section: \(error)")
+        }
+
         return updated
     }
 
@@ -481,6 +536,7 @@ final class MeetingManager: ObservableObject {
         updated.completed.toggle()
         updated.modifiedDate = Date()
         updateTodo(updated)
+        syncActionItemCompletionFromTodo(updated)
     }
 
     func deleteTodo(_ todo: TodoItem) {
@@ -496,11 +552,68 @@ final class MeetingManager: ObservableObject {
         todos.filter { $0.createdDate >= start && $0.createdDate <= end }
     }
 
+    func todosLinked(to meetingID: UUID) -> [TodoItem] {
+        todos.filter { $0.isLinked(to: meetingID) }
+    }
+
     private func loadTodos() {
         do {
             todos = try meetingStore.fetchAllTodos()
         } catch {
             print("Failed to load todos: \(error)")
+        }
+    }
+
+    private func syncActionItemsToTodos(for meeting: Meeting) {
+        let merged = TodoItem.mergingActionLinkedTodos(existing: todos, meeting: meeting)
+        let existingByID = Dictionary(uniqueKeysWithValues: todos.map { ($0.id, $0) })
+        let changedTodos = merged.filter { existingByID[$0.id] != $0 }
+        guard !changedTodos.isEmpty else { return }
+
+        do {
+            for todo in changedTodos {
+                try meetingStore.saveTodo(todo)
+            }
+            todos = merged
+        } catch {
+            print("Failed to sync action item todos: \(error)")
+        }
+    }
+
+    private func syncLinkedTodoCompletion(meetingID: UUID, actionItemID: String, completed: Bool) {
+        for index in todos.indices {
+            guard todos[index].sourceMeetingID == meetingID,
+                  todos[index].sourceActionItemID == actionItemID,
+                  todos[index].completed != completed else { continue }
+
+            var updated = todos[index]
+            updated.completed = completed
+            updated.modifiedDate = Date()
+
+            do {
+                try meetingStore.saveTodo(updated)
+                todos[index] = updated
+            } catch {
+                print("Failed to sync linked todo completion: \(error)")
+            }
+        }
+    }
+
+    private func syncActionItemCompletionFromTodo(_ todo: TodoItem) {
+        guard let sourceMeetingID = todo.sourceMeetingID,
+              let sourceActionItemID = todo.sourceActionItemID,
+              let meetingIndex = meetings.firstIndex(where: { $0.id == sourceMeetingID }),
+              let actionIndex = meetings[meetingIndex].summary.actionItems.firstIndex(where: { $0.id == sourceActionItemID }),
+              meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted != todo.completed else {
+            return
+        }
+
+        meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted = todo.completed
+
+        do {
+            try meetingStore.save(meeting: meetings[meetingIndex])
+        } catch {
+            print("Failed to sync todo completion back to action item: \(error)")
         }
     }
 

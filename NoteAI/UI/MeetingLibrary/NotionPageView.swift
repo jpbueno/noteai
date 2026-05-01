@@ -12,6 +12,8 @@ struct NotionPageView: View {
     @State private var isGeneratingFollowUp = false
     @State private var followUpError: String?
     @State private var isRegeneratingSummary = false
+    @State private var regeneratingSection: MeetingSummarySection?
+    @State private var sectionRegenerateError: (section: MeetingSummarySection, message: String)?
 
     enum PageTab: String, CaseIterable {
         case summary = "Summary"
@@ -195,37 +197,19 @@ struct NotionPageView: View {
             }
             .padding(.top, 8)
         } else {
-            if !meeting.summary.decisions.isEmpty {
-                heading2("Key Decisions")
-                ForEach(meeting.summary.decisions, id: \.self) { decision in
-                    bullet(decision)
-                }
-                verticalSpace()
-            }
+            editableTextSection(.decisions)
+            verticalSpace()
 
-            if !meeting.summary.actionItems.isEmpty {
-                heading2("Action Items")
-                ForEach(meeting.summary.actionItems) { item in
-                    actionItemRow(item)
-                }
-                verticalSpace()
-            }
+            editableActionItemsSection
+            verticalSpace()
 
-            if !meeting.summary.topics.isEmpty {
-                heading2("Topics Discussed")
-                ForEach(meeting.summary.topics, id: \.self) { topic in
-                    bullet(topic)
-                }
-                verticalSpace()
-            }
+            editableTextSection(.topics)
+            verticalSpace()
 
-            if !meeting.summary.openQuestions.isEmpty {
-                heading2("Open Questions")
-                ForEach(meeting.summary.openQuestions, id: \.self) { q in
-                    bullet(q)
-                }
-                verticalSpace()
-            }
+            editableTextSection(.openQuestions)
+            verticalSpace()
+
+            linkedTodosSection
 
             // Follow-up email section
             followUpSection
@@ -273,6 +257,198 @@ struct NotionPageView: View {
         .padding(.vertical, 3)
     }
 
+    private func summarySectionHeader(_ section: MeetingSummarySection) -> some View {
+        HStack(spacing: 10) {
+            heading2(section.title)
+
+            let metadata = meeting.summary.metadata(for: section)
+            Text(metadata.state == .userEdited ? "Edited" : "Generated")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(metadata.state == .userEdited ? Theme.textSecondary : Theme.textTertiary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 5))
+
+            Spacer()
+
+            Button {
+                regenerateSection(section)
+            } label: {
+                HStack(spacing: 5) {
+                    if regeneratingSection == section {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                    }
+                    Text("Regenerate")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textSecondary)
+            .disabled(regeneratingSection != nil)
+        }
+    }
+
+    private func editableTextSection(_ section: MeetingSummarySection) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            summarySectionHeader(section)
+
+            TextEditor(text: Binding(
+                get: { textValues(for: section).joined(separator: "\n") },
+                set: { updateTextSection(section, text: $0) }
+            ))
+            .font(.system(size: Theme.bodySize))
+            .foregroundStyle(Theme.textPrimary)
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: 76)
+            .padding(10)
+            .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+
+            sectionErrorText(for: section)
+        }
+    }
+
+    private var editableActionItemsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            summarySectionHeader(.actionItems)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(meeting.summary.actionItems) { item in
+                    actionItemEditorRow(item)
+                }
+
+                Button {
+                    addActionItem()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                        Text("Add Action Item")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .padding(10)
+            .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+
+            sectionErrorText(for: .actionItems)
+        }
+    }
+
+    private func actionItemEditorRow(_ item: ActionItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                meetingManager?.toggleActionItem(meetingId: meeting.id, actionItemId: item.id)
+                if let idx = meeting.summary.actionItems.firstIndex(where: { $0.id == item.id }) {
+                    meeting.summary.actionItems[idx].isCompleted.toggle()
+                }
+            } label: {
+                Image(systemName: item.isCompleted ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14))
+                    .foregroundStyle(item.isCompleted ? Color(hex: "2ECC71") : Theme.textTertiary)
+                    .padding(.top, 6)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Action item", text: actionItemTaskBinding(id: item.id))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: Theme.bodySize))
+                    .foregroundStyle(item.isCompleted ? Theme.textTertiary : Theme.textPrimary)
+                    .strikethrough(item.isCompleted, color: Theme.textTertiary)
+
+                HStack(spacing: 8) {
+                    TextField("Owner", text: actionItemOwnerBinding(id: item.id))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: Theme.smallSize))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: 160)
+
+                    TextField("Deadline", text: actionItemDeadlineBinding(id: item.id))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: Theme.smallSize))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(maxWidth: 180)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                deleteActionItem(id: item.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 6)
+        }
+        .padding(.vertical, 3)
+    }
+
+    @ViewBuilder
+    private var linkedTodosSection: some View {
+        let linkedTodos = meetingManager?.todosLinked(to: meeting.id) ?? []
+        if !linkedTodos.isEmpty {
+            heading2("Linked Todos")
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(linkedTodos) { todo in
+                    linkedTodoRow(todo)
+                }
+            }
+            verticalSpace()
+        }
+    }
+
+    private func linkedTodoRow(_ todo: TodoItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                meetingManager?.toggleTodoCompletion(todo)
+            } label: {
+                Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
+                    .padding(.top, 1)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
+                    .font(.system(size: Theme.bodySize))
+                    .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
+                    .strikethrough(todo.completed, color: Theme.textTertiary)
+                    .lineSpacing(4)
+
+                HStack(spacing: 8) {
+                    if let owner = todo.owner {
+                        Text("@\(owner)")
+                            .font(.system(size: Theme.smallSize))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    if let label = todo.dueDateLabel {
+                        Text(label)
+                            .font(.system(size: Theme.smallSize))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+            }
+        }
+        .padding(.leading, 4)
+        .padding(.vertical, 3)
+    }
+
     private func actionItemRow(_ item: ActionItem) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Button {
@@ -315,6 +491,123 @@ struct NotionPageView: View {
         }
         .padding(.leading, 4)
         .padding(.vertical, 3)
+    }
+
+    @ViewBuilder
+    private func sectionErrorText(for section: MeetingSummarySection) -> some View {
+        if let error = sectionRegenerateError, error.section == section {
+            Text(error.message)
+                .font(.system(size: Theme.smallSize))
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func textValues(for section: MeetingSummarySection) -> [String] {
+        switch section {
+        case .decisions:
+            return meeting.summary.decisions
+        case .topics:
+            return meeting.summary.topics
+        case .openQuestions:
+            return meeting.summary.openQuestions
+        case .actionItems:
+            return meeting.summary.actionItems.map(\.task)
+        }
+    }
+
+    private func updateTextSection(_ section: MeetingSummarySection, text: String) {
+        let values = Self.summaryLines(from: text)
+        let content: MeetingSummarySectionContent
+
+        switch section {
+        case .decisions:
+            content = .decisions(values)
+        case .topics:
+            content = .topics(values)
+        case .openQuestions:
+            content = .openQuestions(values)
+        case .actionItems:
+            return
+        }
+
+        if let manager = meetingManager {
+            meeting = manager.updateSummarySection(section, content: content, meeting: meeting)
+        } else {
+            meeting.summary.replace(section, with: content, state: .userEdited)
+        }
+    }
+
+    private func actionItemTaskBinding(id: String) -> Binding<String> {
+        Binding(
+            get: { actionItem(id: id)?.task ?? "" },
+            set: { newValue in
+                updateActionItem(id: id) { item in
+                    item.task = newValue
+                }
+            }
+        )
+    }
+
+    private func actionItemOwnerBinding(id: String) -> Binding<String> {
+        Binding(
+            get: { actionItem(id: id)?.owner ?? "" },
+            set: { newValue in
+                updateActionItem(id: id) { item in
+                    item.owner = Self.trimmedOptional(newValue)
+                }
+            }
+        )
+    }
+
+    private func actionItemDeadlineBinding(id: String) -> Binding<String> {
+        Binding(
+            get: { actionItem(id: id)?.deadline ?? "" },
+            set: { newValue in
+                updateActionItem(id: id) { item in
+                    item.deadline = Self.trimmedOptional(newValue)
+                }
+            }
+        )
+    }
+
+    private func actionItem(id: String) -> ActionItem? {
+        meeting.summary.actionItems.first { $0.id == id }
+    }
+
+    private func updateActionItem(id: String, mutate: (inout ActionItem) -> Void) {
+        guard let index = meeting.summary.actionItems.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&meeting.summary.actionItems[index])
+        persistActionItems()
+    }
+
+    private func addActionItem() {
+        meeting.summary.actionItems.append(ActionItem(id: "manual-\(UUID().uuidString)", task: ""))
+        persistActionItems()
+    }
+
+    private func deleteActionItem(id: String) {
+        meeting.summary.actionItems.removeAll { $0.id == id }
+        persistActionItems()
+    }
+
+    private func persistActionItems() {
+        let content = MeetingSummarySectionContent.actionItems(meeting.summary.actionItems)
+        if let manager = meetingManager {
+            meeting = manager.updateSummarySection(.actionItems, content: content, meeting: meeting)
+        } else {
+            meeting.summary.replace(.actionItems, with: content, state: .userEdited)
+        }
+    }
+
+    private static func summaryLines(from text: String) -> [String] {
+        text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func trimmedOptional(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func transcriptLine(_ segment: TranscriptSegment) -> some View {
@@ -471,6 +764,26 @@ struct NotionPageView: View {
                 print("[NotionPageView] Resummarize failed: \(error)")
                 regenerateError = error.localizedDescription
                 isRegeneratingSummary = false
+            }
+        }
+    }
+
+    private func regenerateSection(_ section: MeetingSummarySection) {
+        guard let manager = meetingManager else {
+            sectionRegenerateError = (section, "Internal error: meeting manager unavailable")
+            return
+        }
+        regeneratingSection = section
+        sectionRegenerateError = nil
+
+        Task { @MainActor in
+            do {
+                let updatedMeeting = try await manager.regenerateSummarySection(section, meeting: meeting)
+                meeting = updatedMeeting
+                regeneratingSection = nil
+            } catch {
+                sectionRegenerateError = (section, error.localizedDescription)
+                regeneratingSection = nil
             }
         }
     }

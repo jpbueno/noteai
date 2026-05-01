@@ -77,6 +77,33 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Welcome everyone."))
     }
 
+    func testPlainTextExportIncludesAllEditedSummarySections() {
+        var summary = MeetingSummary(
+            decisions: ["Keep edited decision"],
+            actionItems: [ActionItem(task: "Follow up with customer", owner: "Ana", deadline: "2026-05-08")],
+            topics: ["Edited topic"],
+            openQuestions: ["Edited question?"],
+            wasSummarized: true
+        )
+        summary.mark(.decisions, state: .userEdited, modifiedAt: Date(timeIntervalSince1970: 10))
+        summary.mark(.topics, state: .userEdited, modifiedAt: Date(timeIntervalSince1970: 20))
+        let meeting = Meeting(
+            id: UUID(),
+            title: "Edited Summary Export",
+            date: Date(),
+            duration: 60,
+            transcript: [],
+            summary: summary
+        )
+
+        let text = ExportManager.exportAsPlainText(meeting)
+
+        XCTAssertTrue(text.contains("Keep edited decision"))
+        XCTAssertTrue(text.contains("Follow up with customer"))
+        XCTAssertTrue(text.contains("Edited topic"))
+        XCTAssertTrue(text.contains("Edited question?"))
+    }
+
     func testMarkdownExportIncludesSharedSourceFieldsAndTaskList() {
         let meetingID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let meeting = Meeting(

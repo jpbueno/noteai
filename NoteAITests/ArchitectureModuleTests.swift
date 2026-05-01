@@ -81,6 +81,175 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(summary.wasSummarized)
     }
 
+    func testParsedActionItemsUseDeterministicContentIDs() throws {
+        let raw = """
+        {"decisions":[],"actionItems":[{"task":"Email the launch brief","owner":"Ana","deadline":"2026-05-08"},{"task":"Email  the launch brief","owner":" ana ","deadline":"2026-05-08"}],"topics":[],"openQuestions":[]}
+        """
+
+        let summary = try AITasks.parseMeetingSummary(raw)
+
+        XCTAssertEqual(summary.actionItems.count, 1)
+        XCTAssertEqual(
+            summary.actionItems.first?.id,
+            ActionItem.stableID(task: "Email the launch brief", owner: "Ana", deadline: "2026-05-08")
+        )
+    }
+
+    func testLegacySummaryDecodesWithGeneratedSectionMetadata() throws {
+        let data = """
+        {"decisions":["Ship"],"actionItems":[],"topics":["Launch"],"openQuestions":[],"wasSummarized":true}
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(MeetingSummary.self, from: data)
+
+        XCTAssertEqual(summary.metadata(for: .decisions).state, .generated)
+        XCTAssertEqual(summary.metadata(for: .actionItems).state, .generated)
+        XCTAssertEqual(summary.metadata(for: .topics).state, .generated)
+        XCTAssertEqual(summary.metadata(for: .openQuestions).state, .generated)
+    }
+
+    func testReplacingOneSummarySectionPreservesOtherUserEdits() {
+        let editedAt = Date(timeIntervalSince1970: 100)
+        let regeneratedAt = Date(timeIntervalSince1970: 200)
+        var summary = MeetingSummary(
+            decisions: ["User edited decision"],
+            actionItems: [ActionItem(task: "Keep customer follow-up", owner: "Bo")],
+            topics: ["Old topic"],
+            openQuestions: ["Existing question"],
+            wasSummarized: true,
+            sectionMetadata: [
+                MeetingSummarySection.decisions.rawValue: SummarySectionEditMetadata(state: .userEdited, modifiedAt: editedAt),
+                MeetingSummarySection.actionItems.rawValue: SummarySectionEditMetadata(state: .userEdited, modifiedAt: editedAt),
+            ]
+        )
+
+        summary.replace(.topics, with: .topics(["Regenerated topic"]), state: .generated, modifiedAt: regeneratedAt)
+
+        XCTAssertEqual(summary.decisions, ["User edited decision"])
+        XCTAssertEqual(summary.actionItems.map(\.task), ["Keep customer follow-up"])
+        XCTAssertEqual(summary.topics, ["Regenerated topic"])
+        XCTAssertEqual(summary.openQuestions, ["Existing question"])
+        XCTAssertEqual(summary.metadata(for: .decisions).state, .userEdited)
+        XCTAssertEqual(summary.metadata(for: .actionItems).state, .userEdited)
+        XCTAssertEqual(summary.metadata(for: .topics).state, .generated)
+        XCTAssertEqual(summary.metadata(for: .topics).modifiedAt, regeneratedAt)
+    }
+
+    func testActionLinkedTodoMergeUsesSourceFieldsWithoutDuplicating() {
+        let meetingID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let action = ActionItem(task: "Send pricing notes", owner: "Ana", deadline: "2026-05-08")
+        let meeting = Meeting(
+            id: meetingID,
+            title: "Customer Sync",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 60,
+            transcript: [],
+            summary: MeetingSummary(actionItems: [action], wasSummarized: true)
+        )
+        let now = Date(timeIntervalSince1970: 300)
+
+        let firstMerge = TodoItem.mergingActionLinkedTodos(existing: [], meeting: meeting, now: now)
+        let secondMerge = TodoItem.mergingActionLinkedTodos(existing: firstMerge, meeting: meeting, now: now.addingTimeInterval(60))
+
+        XCTAssertEqual(firstMerge.count, 1)
+        XCTAssertEqual(secondMerge.count, 1)
+        XCTAssertEqual(firstMerge[0].title, "Send pricing notes")
+        XCTAssertEqual(firstMerge[0].sourceMeetingID, meetingID)
+        XCTAssertEqual(firstMerge[0].sourceActionItemID, action.id)
+        XCTAssertEqual(firstMerge[0].owner, "Ana")
+    }
+
+    func testActionLinkedTodoMergeRefreshesExistingSourceFieldsWithoutResettingCompletion() throws {
+        let meetingID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let originalAction = ActionItem(task: "Send pricing notes", owner: "Ana", deadline: "2026-05-08")
+        let refreshedAction = ActionItem(
+            task: "Send updated pricing notes",
+            owner: "Bo",
+            deadline: "2026-05-15",
+            isCompleted: false
+        )
+        let existingTodoID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let existingTodo = TodoItem(
+            id: existingTodoID,
+            title: "Send pricing notes",
+            description: "From meeting: Customer Sync\nOwner: Ana\nDeadline: 2026-05-08",
+            completed: true,
+            dueDate: Date(timeIntervalSince1970: 0),
+            sourceMeetingID: meetingID,
+            sourceActionItemID: originalAction.id,
+            owner: "Ana",
+            createdDate: Date(timeIntervalSince1970: 100),
+            modifiedDate: Date(timeIntervalSince1970: 100)
+        )
+        let meeting = Meeting(
+            id: meetingID,
+            title: "Customer Sync",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 60,
+            transcript: [],
+            summary: MeetingSummary(actionItems: [refreshedAction], wasSummarized: true)
+        )
+
+        let merged = TodoItem.mergingActionLinkedTodos(
+            existing: [existingTodo],
+            meeting: meeting,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].id, existingTodoID)
+        XCTAssertEqual(merged[0].title, "Send updated pricing notes")
+        XCTAssertTrue(merged[0].description.contains("Owner: Bo"))
+        XCTAssertTrue(merged[0].description.contains("Deadline: 2026-05-15"))
+        XCTAssertEqual(merged[0].owner, "Bo")
+        XCTAssertEqual(merged[0].sourceActionItemID, refreshedAction.id)
+        XCTAssertTrue(merged[0].completed)
+        XCTAssertEqual(merged[0].createdDate, Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(merged[0].modifiedDate, Date(timeIntervalSince1970: 200))
+
+        let dueDate = try XCTUnwrap(merged[0].dueDate)
+        let components = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: dueDate)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 5)
+        XCTAssertEqual(components.day, 15)
+    }
+
+    func testRemovedRegeneratedActionItemsAreUnlinkedWithoutDeletingTodo() {
+        let meetingID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let staleAction = ActionItem(task: "Publish stale notes", owner: "Ana", deadline: "2026-05-08")
+        let existingTodoID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let existingTodo = TodoItem(
+            id: existingTodoID,
+            title: "Publish stale notes",
+            description: "From meeting: Customer Sync",
+            sourceMeetingID: meetingID,
+            sourceActionItemID: staleAction.id,
+            owner: "Ana",
+            createdDate: Date(timeIntervalSince1970: 100),
+            modifiedDate: Date(timeIntervalSince1970: 100)
+        )
+        let meeting = Meeting(
+            id: meetingID,
+            title: "Customer Sync",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 60,
+            transcript: [],
+            summary: MeetingSummary(actionItems: [], wasSummarized: true)
+        )
+
+        let merged = TodoItem.mergingActionLinkedTodos(
+            existing: [existingTodo],
+            meeting: meeting,
+            now: Date(timeIntervalSince1970: 200)
+        )
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].id, existingTodoID)
+        XCTAssertNil(merged[0].sourceMeetingID)
+        XCTAssertNil(merged[0].sourceActionItemID)
+        XCTAssertEqual(merged[0].modifiedDate, Date(timeIntervalSince1970: 200))
+    }
+
     func testCommandCenterSnapshotPrioritizesFocusQueueAndNextMove() throws {
         let calendar = Calendar(identifier: .gregorian)
         let today = calendar.startOfDay(for: Date())

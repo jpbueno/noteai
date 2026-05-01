@@ -169,6 +169,22 @@ enum ExportManager {
             text += "\n"
         }
 
+        if !meeting.summary.topics.isEmpty {
+            text += "Topics:\n"
+            for topic in meeting.summary.topics {
+                text += "  * \(topic)\n"
+            }
+            text += "\n"
+        }
+
+        if !meeting.summary.openQuestions.isEmpty {
+            text += "Open Questions:\n"
+            for question in meeting.summary.openQuestions {
+                text += "  * \(question)\n"
+            }
+            text += "\n"
+        }
+
         text += "\nTRANSCRIPT\n"
         text += String(repeating: "=", count: 40) + "\n\n"
         for segment in meeting.transcript {

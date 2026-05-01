@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { CheckSquare, Square, Save, Loader2, Calendar, X } from "lucide-react";
+import { CheckSquare, Square, Save, Loader2, Calendar, X, User } from "lucide-react";
 import type { TodoItem } from "@/lib/types";
 import { db } from "@/lib/db";
 import { formatDateTime, parseDueDate, triggerRefresh } from "@/lib/hooks";
@@ -53,6 +53,7 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
   const [description, setDescription] = useState(todo.description);
   const [completed, setCompleted] = useState(!!todo.completed);
   const [dueDate, setDueDate] = useState(todo.dueDate || "");
+  const [owner, setOwner] = useState(todo.owner || "");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -62,13 +63,14 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
       title,
       description,
       dueDate: dueDate || null,
+      owner: owner.trim() || null,
       modifiedDate: new Date().toISOString(),
     });
     triggerRefresh();
     setDirty(false);
     setSaving(false);
 
-  }, [todo.id, title, description, dueDate]);
+  }, [todo.id, title, description, dueDate, owner]);
 
   const toggleCompleted = useCallback(async () => {
     const newVal = !completed;
@@ -127,6 +129,11 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
               {formatDueLabel(dueDate)}
             </span>
           )}
+          {todo.sourceMeetingID && (
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-500/15 text-blue-300">
+              Linked meeting
+            </span>
+          )}
         </div>
 
         <div className="border-t border-border mb-6" />
@@ -147,6 +154,30 @@ function TodoDetailForm({ todo }: TodoDetailProps) {
                 onClick={() => { setDueDate(""); setDirty(true); }}
                 className="text-text-tertiary hover:text-text-secondary"
                 title="Clear due date"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Owner */}
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-text-secondary mb-3">Owner</h3>
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 text-text-tertiary" />
+            <input
+              type="text"
+              value={owner}
+              onChange={(e) => { setOwner(e.target.value); setDirty(true); }}
+              placeholder="Owner"
+              className="bg-hover border border-border rounded-md text-sm text-text-primary px-3 py-1.5 outline-none focus:border-accent"
+            />
+            {owner && (
+              <button
+                onClick={() => { setOwner(""); setDirty(true); }}
+                className="text-text-tertiary hover:text-text-secondary"
+                title="Clear owner"
               >
                 <X className="w-3.5 h-3.5" />
               </button>

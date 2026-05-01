@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Clock,
   Calendar,
@@ -8,14 +8,25 @@ import {
   Circle,
   Copy,
   Download,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Save,
+  Trash2,
   Volume2,
   FileText,
   Sparkles,
   AlignLeft,
 } from "lucide-react";
-import type { Meeting, ActionItem, SidebarSelection } from "@/lib/types";
+import type { ActionItem, Meeting, SidebarSelection, SummarySectionKey, TodoItem } from "@/lib/types";
+import {
+  ensureMeetingSummaryMetadata,
+  markSummarySectionUserEdited,
+  normalizeActionItems,
+} from "@/lib/types";
 import { formatDuration, formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { db } from "@/lib/db";
+import { regenerateSummarySection } from "@/lib/ai";
 import { generateMeetingMarkdown, meetingMarkdownFilename, printMeetingPdf } from "@/lib/exports";
 import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
@@ -25,15 +36,22 @@ type Tab = "summary" | "transcript" | "raw";
 
 interface MeetingDetailProps {
   meeting: Meeting;
+  todos?: TodoItem[];
   onNavigate?: (sel: SidebarSelection) => void;
 }
 
-export default function MeetingDetail({ meeting }: MeetingDetailProps) {
-  const { summary } = meeting;
+export default function MeetingDetail({ meeting, todos = [], onNavigate }: MeetingDetailProps) {
+  const summary = useMemo(() => ensureMeetingSummaryMetadata(meeting.summary), [meeting.summary]);
   const hasSummary = summary.wasSummarized && !summaryEmpty(summary);
   const [activeTab, setActiveTab] = useState<Tab>(hasSummary ? "summary" : "transcript");
+  const [regeneratingSection, setRegeneratingSection] = useState<SummarySectionKey | null>(null);
+  const [summaryError, setSummaryError] = useState("");
   const tts = useTTS();
   const readAloudRootRef = useRef<HTMLDivElement>(null);
+  const linkedTodos = useMemo(
+    () => todos.filter((todo) => todo.sourceMeetingID === meeting.id),
+    [meeting.id, todos],
+  );
 
   const readableText = hasSummary
     ? [
@@ -44,16 +62,36 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
       ].join(". ")
     : meeting.transcript.map((s) => s.text).join(" ");
 
-  const handleToggleAction = async (actionId: string) => {
-    const updated = { ...meeting };
-    updated.summary = {
-      ...updated.summary,
-      actionItems: updated.summary.actionItems.map((ai) =>
-        ai.id === actionId ? { ...ai, isCompleted: !ai.isCompleted } : ai
-      ),
-    };
+  const saveSummary = async (nextSummary: Meeting["summary"]) => {
+    const updated = { ...meeting, summary: ensureMeetingSummaryMetadata(nextSummary) };
     await db.meetings.put(updated);
     triggerRefresh();
+  };
+
+  const handleSaveTextSection = async (section: Exclude<SummarySectionKey, "actionItems">, items: string[]) => {
+    await saveSummary(markSummarySectionUserEdited({ ...summary, [section]: items }, section));
+  };
+
+  const handleSaveActionItems = async (items: ActionItem[]) => {
+    await saveSummary(
+      markSummarySectionUserEdited(
+        { ...summary, actionItems: normalizeActionItems(items) },
+        "actionItems",
+      ),
+    );
+  };
+
+  const handleRegenerateSection = async (section: SummarySectionKey) => {
+    setSummaryError("");
+    setRegeneratingSection(section);
+    try {
+      const nextSummary = await regenerateSummarySection({ ...meeting, summary }, section);
+      await saveSummary(nextSummary);
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : "Could not regenerate this summary section.");
+    } finally {
+      setRegeneratingSection(null);
+    }
   };
 
   const rawText = meeting.transcript.map((s) => s.text).join("\n");
@@ -188,55 +226,62 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
 
         {/* Tab content */}
         {activeTab === "summary" && hasSummary && (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {summary.decisions.length > 0 && (
-              <SummaryBlock title="Key Decisions" color="text-blue-400">
-                <ul className="space-y-1.5">
-                  {summary.decisions.map((d, i) => (
-                    <li key={i} className="text-[15px] text-text-primary flex items-start gap-2">
-                      <span className="text-blue-400 mt-1">•</span>
-                      {d}
-                    </li>
-                  ))}
-                </ul>
-              </SummaryBlock>
+          <div className="space-y-4">
+            {summaryError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {summaryError}
+              </div>
             )}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SummaryTextSection
+                key={summarySectionRenderKey("decisions", summary.decisions, summary.sectionMetadata?.decisions?.modifiedAt)}
+                section="decisions"
+                title="Key Decisions"
+                color="text-blue-400"
+                items={summary.decisions}
+                metadata={summary.sectionMetadata?.decisions}
+                regenerating={regeneratingSection === "decisions"}
+                onSave={handleSaveTextSection}
+                onRegenerate={handleRegenerateSection}
+              />
 
-            {summary.actionItems.length > 0 && (
-              <SummaryBlock title="Action Items" color="text-orange-400">
-                <ul className="space-y-2">
-                  {summary.actionItems.map((ai) => (
-                    <ActionItemRow key={ai.id} item={ai} onToggle={() => handleToggleAction(ai.id)} />
-                  ))}
-                </ul>
-              </SummaryBlock>
-            )}
+              <ActionItemsSection
+                key={summarySectionRenderKey("actionItems", summary.actionItems, summary.sectionMetadata?.actionItems?.modifiedAt)}
+                items={summary.actionItems}
+                metadata={summary.sectionMetadata?.actionItems}
+                regenerating={regeneratingSection === "actionItems"}
+                onSave={handleSaveActionItems}
+                onRegenerate={() => handleRegenerateSection("actionItems")}
+              />
 
-            {summary.topics.length > 0 && (
-              <SummaryBlock title="Topics Discussed" color="text-green-400">
-                <ul className="space-y-1.5">
-                  {summary.topics.map((t, i) => (
-                    <li key={i} className="text-[15px] text-text-primary flex items-start gap-2">
-                      <span className="text-green-400 mt-1">•</span>
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </SummaryBlock>
-            )}
+              <SummaryTextSection
+                key={summarySectionRenderKey("topics", summary.topics, summary.sectionMetadata?.topics?.modifiedAt)}
+                section="topics"
+                title="Topics Discussed"
+                color="text-green-400"
+                items={summary.topics}
+                metadata={summary.sectionMetadata?.topics}
+                regenerating={regeneratingSection === "topics"}
+                onSave={handleSaveTextSection}
+                onRegenerate={handleRegenerateSection}
+              />
 
-            {summary.openQuestions.length > 0 && (
-              <SummaryBlock title="Open Questions" color="text-purple-400">
-                <ul className="space-y-1.5">
-                  {summary.openQuestions.map((q, i) => (
-                    <li key={i} className="text-[15px] text-text-primary flex items-start gap-2">
-                      <span className="text-purple-400 mt-1">?</span>
-                      {q}
-                    </li>
-                  ))}
-                </ul>
-              </SummaryBlock>
-            )}
+              <SummaryTextSection
+                key={summarySectionRenderKey("openQuestions", summary.openQuestions, summary.sectionMetadata?.openQuestions?.modifiedAt)}
+                section="openQuestions"
+                title="Open Questions"
+                color="text-purple-400"
+                items={summary.openQuestions}
+                metadata={summary.sectionMetadata?.openQuestions}
+                regenerating={regeneratingSection === "openQuestions"}
+                onSave={handleSaveTextSection}
+                onRegenerate={handleRegenerateSection}
+              />
+
+              {linkedTodos.length > 0 && (
+                <LinkedTodosBlock todos={linkedTodos} onNavigate={onNavigate} />
+              )}
+            </div>
           </div>
         )}
 
@@ -300,38 +345,298 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
   );
 }
 
-function SummaryBlock({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
+function SummaryBlock({
+  title,
+  color,
+  metadata,
+  regenerating = false,
+  onRegenerate,
+  className = "",
+  children,
+}: {
+  title: string;
+  color: string;
+  metadata?: { state: "generated" | "userEdited"; modifiedAt: string };
+  regenerating?: boolean;
+  onRegenerate?: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="v4-panel p-5">
-      <h3 className={`text-sm font-bold uppercase tracking-[0.14em] ${color} mb-3`}>{title}</h3>
+    <div className={`v4-panel p-5 ${className}`}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className={`text-sm font-bold uppercase tracking-[0.14em] ${color}`}>{title}</h3>
+          {metadata && (
+            <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.12em] text-text-tertiary">
+              {metadata.state === "userEdited" ? "Edited" : "Generated"}
+            </p>
+          )}
+        </div>
+        {onRegenerate && (
+          <button
+            onClick={onRegenerate}
+            disabled={regenerating}
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border bg-content/60 text-text-tertiary transition-colors hover:text-text-primary disabled:cursor-wait disabled:opacity-60"
+            title={`Regenerate ${title}`}
+          >
+            {regenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+          </button>
+        )}
+      </div>
       {children}
     </div>
   );
 }
 
-function ActionItemRow({ item, onToggle }: { item: ActionItem; onToggle: () => void }) {
+function SummaryTextSection({
+  section,
+  title,
+  color,
+  items,
+  metadata,
+  regenerating,
+  onSave,
+  onRegenerate,
+}: {
+  section: Exclude<SummarySectionKey, "actionItems">;
+  title: string;
+  color: string;
+  items: string[];
+  metadata?: { state: "generated" | "userEdited"; modifiedAt: string };
+  regenerating: boolean;
+  onSave: (section: Exclude<SummarySectionKey, "actionItems">, items: string[]) => Promise<void>;
+  onRegenerate: (section: SummarySectionKey) => void;
+}) {
+  const source = items.join("\n");
+  const [draft, setDraft] = useState(source);
+  const [saving, setSaving] = useState(false);
+
+  const dirty = draft !== source;
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(
+      section,
+      draft
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+    setSaving(false);
+  };
+
   return (
-    <li className="v4-row flex items-start gap-2 p-3">
-      <button onClick={onToggle} className="mt-0.5 flex-shrink-0">
-        {item.isCompleted ? (
-          <CheckCircle className="w-4 h-4 text-green-500" />
-        ) : (
-          <Circle className="w-4 h-4 text-text-tertiary hover:text-orange-400 transition-colors" />
-        )}
-      </button>
-      <div className="flex-1">
-        <span className={`text-[15px] ${item.isCompleted ? "text-text-tertiary line-through" : "text-text-primary"}`}>
-          {item.task}
-        </span>
-        {(item.owner || item.deadline) && (
-          <div className="flex gap-3 mt-0.5">
-            {item.owner && <span className="text-xs text-text-tertiary">@{item.owner}</span>}
-            {item.deadline && <span className="text-xs text-text-tertiary">Due: {item.deadline}</span>}
-          </div>
-        )}
+    <SummaryBlock
+      title={title}
+      color={color}
+      metadata={metadata}
+      regenerating={regenerating}
+      onRegenerate={() => onRegenerate(section)}
+    >
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-[132px] w-full resize-y rounded-md border border-border bg-content/70 p-3 text-[14px] leading-relaxed text-text-primary outline-none transition-colors placeholder:text-text-tertiary focus:border-accent"
+      />
+      <div className="mt-3 flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          {saving ? "Saving" : "Save"}
+        </button>
       </div>
-    </li>
+    </SummaryBlock>
   );
+}
+
+function ActionItemsSection({
+  items,
+  metadata,
+  regenerating,
+  onSave,
+  onRegenerate,
+}: {
+  items: ActionItem[];
+  metadata?: { state: "generated" | "userEdited"; modifiedAt: string };
+  regenerating: boolean;
+  onSave: (items: ActionItem[]) => Promise<void>;
+  onRegenerate: () => void;
+}) {
+  const sourceKey = actionItemsKey(items);
+  const [draft, setDraft] = useState(() => actionDraftsFromItems(items));
+  const [saving, setSaving] = useState(false);
+
+  const dirty = actionItemsKey(draft) !== sourceKey;
+
+  const updateDraft = (id: string, changes: Partial<ActionDraft>) => {
+    setDraft((current) => current.map((item) => (item.id === id ? { ...item, ...changes } : item)));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(
+      draft
+        .filter((item) => item.task.trim())
+        .map((item) => ({
+          id: item.id,
+          task: item.task.trim(),
+          owner: item.owner.trim() || null,
+          deadline: item.deadline.trim() || null,
+          isCompleted: item.isCompleted,
+        })),
+    );
+    setSaving(false);
+  };
+
+  return (
+    <SummaryBlock
+      title="Action Items"
+      color="text-orange-400"
+      metadata={metadata}
+      regenerating={regenerating}
+      onRegenerate={onRegenerate}
+    >
+      <div className="space-y-2">
+        {draft.map((item) => (
+          <div key={item.id} className="rounded-lg border border-border bg-content/55 p-3">
+            <div className="flex items-start gap-2">
+              <button
+                onClick={() => updateDraft(item.id, { isCompleted: !item.isCompleted })}
+                className="mt-2 flex-shrink-0 text-text-tertiary transition-colors hover:text-orange-400"
+                title={item.isCompleted ? "Mark pending" : "Mark complete"}
+              >
+                {item.isCompleted ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Circle className="h-4 w-4" />}
+              </button>
+              <input
+                value={item.task}
+                onChange={(event) => updateDraft(item.id, { task: event.target.value })}
+                className="min-w-0 flex-1 rounded-md border border-border bg-sidebar/70 px-2.5 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+              />
+              <button
+                onClick={() => setDraft((current) => current.filter((draftItem) => draftItem.id !== item.id))}
+                className="mt-1.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-hover hover:text-red-300"
+                title="Remove action item"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <input
+                value={item.owner}
+                onChange={(event) => updateDraft(item.id, { owner: event.target.value })}
+                placeholder="Owner"
+                className="rounded-md border border-border bg-sidebar/70 px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-tertiary focus:border-accent"
+              />
+              <input
+                value={item.deadline}
+                onChange={(event) => updateDraft(item.id, { deadline: event.target.value })}
+                placeholder="Deadline"
+                className="rounded-md border border-border bg-sidebar/70 px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-tertiary focus:border-accent"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <button
+          onClick={() =>
+            setDraft((current) => [
+              ...current,
+              { id: crypto.randomUUID(), task: "", owner: "", deadline: "", isCompleted: false },
+            ])
+          }
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:text-text-primary"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          {saving ? "Saving" : "Save"}
+        </button>
+      </div>
+    </SummaryBlock>
+  );
+}
+
+function LinkedTodosBlock({
+  todos,
+  onNavigate,
+}: {
+  todos: TodoItem[];
+  onNavigate?: (sel: SidebarSelection) => void;
+}) {
+  return (
+    <SummaryBlock title="Linked Todos" color="text-yellow-300" className="lg:col-span-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {todos.map((todo) => (
+          <button
+            key={todo.id}
+            onClick={() => onNavigate?.({ type: "todo", id: todo.id })}
+            className="v4-row flex items-start gap-2 p-3 text-left transition-colors hover:border-accent/50"
+          >
+            {todo.completed ? (
+              <CheckCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-500" />
+            ) : (
+              <Circle className="mt-0.5 h-4 w-4 flex-shrink-0 text-text-tertiary" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className={`block text-sm ${todo.completed ? "text-text-tertiary line-through" : "text-text-primary"}`}>
+                {todo.title || "Untitled todo"}
+              </span>
+              {(todo.owner || todo.dueDate) && (
+                <span className="mt-1 flex flex-wrap gap-2 text-xs text-text-tertiary">
+                  {todo.owner && <span>@{todo.owner}</span>}
+                  {todo.dueDate && <span>Due: {todo.dueDate}</span>}
+                </span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
+    </SummaryBlock>
+  );
+}
+
+interface ActionDraft {
+  id: string;
+  task: string;
+  owner: string;
+  deadline: string;
+  isCompleted: boolean;
+}
+
+function actionDraftsFromItems(items: ActionItem[]): ActionDraft[] {
+  return items.map((item) => ({
+    id: item.id,
+    task: item.task,
+    owner: item.owner ?? "",
+    deadline: item.deadline ?? "",
+    isCompleted: item.isCompleted,
+  }));
+}
+
+function actionItemsKey(items: Array<ActionItem | ActionDraft>): string {
+  return JSON.stringify(
+    items.map((item) => ({
+      task: item.task.trim(),
+      owner: item.owner?.trim() ?? "",
+      deadline: item.deadline?.trim() ?? "",
+      isCompleted: item.isCompleted,
+    })),
+  );
+}
+
+function summarySectionRenderKey(section: SummarySectionKey, items: string[] | ActionItem[], modifiedAt?: string): string {
+  return `${section}:${modifiedAt ?? ""}:${Array.isArray(items) ? JSON.stringify(items) : ""}`;
 }
 
 function summaryEmpty(s: Meeting["summary"]): boolean {

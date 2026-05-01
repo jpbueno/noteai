@@ -331,6 +331,9 @@ export default function Home() {
       description: "",
       completed: 0,
       dueDate: null,
+      sourceMeetingID: null,
+      sourceActionItemID: null,
+      owner: null,
       createdDate: new Date().toISOString(),
       modifiedDate: new Date().toISOString(),
     };
@@ -564,7 +567,7 @@ export default function Home() {
 
     if (selection.type === "meeting") {
       const meeting = meetings.find((m) => m.id === selection.id);
-      if (meeting) return <MeetingDetail meeting={meeting} onNavigate={setSelection} />;
+      if (meeting) return <MeetingDetail meeting={meeting} todos={todos} onNavigate={setSelection} />;
     }
 
     if (selection.type === "note") {

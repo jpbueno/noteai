@@ -1,4 +1,15 @@
-import { chunkBlobForTranscription, type LLMProvider, type MeetingTemplate, type MeetingSummary, type CoachInsight, type CoachInsightType } from "./types";
+import {
+  chunkBlobForTranscription,
+  mergeRegeneratedSummarySection,
+  parseMeetingSummaryContent,
+  type CoachInsight,
+  type CoachInsightType,
+  type LLMProvider,
+  type Meeting,
+  type MeetingTemplate,
+  type MeetingSummary,
+  type SummarySectionKey,
+} from "./types";
 import { getSetting } from "./db";
 
 const CLIENT_CHAT_TIMEOUT_MS = 75_000;
@@ -85,33 +96,49 @@ Only return the JSON object, no markdown fences or additional text.`;
     ],
   });
 
-  try {
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned);
-    return {
-      decisions: parsed.decisions || [],
-      actionItems: (parsed.actionItems || []).map(
-        (ai: { task: string; owner?: string; deadline?: string }) => ({
-          id: crypto.randomUUID(),
-          task: ai.task,
-          owner: ai.owner || null,
-          deadline: ai.deadline || null,
-          isCompleted: false,
-        })
-      ),
-      topics: parsed.topics || [],
-      openQuestions: parsed.openQuestions || [],
-      wasSummarized: true,
-    };
-  } catch {
-    return {
-      decisions: [],
-      actionItems: [],
-      topics: [],
-      openQuestions: [],
-      wasSummarized: false,
-    };
-  }
+  return parseMeetingSummaryContent(content);
+}
+
+export async function regenerateSummarySection(
+  meeting: Meeting,
+  section: SummarySectionKey,
+  template: MeetingTemplate = "auto",
+): Promise<MeetingSummary> {
+  const provider = ((await getSetting("llm_provider")) || "openrouter") as LLMProvider;
+  const model = (await getSetting("llm_model")) || "anthropic/claude-sonnet-4";
+  const transcript = meeting.transcript.map((segment) => segment.text).join("\n");
+  const sectionShape =
+    section === "actionItems"
+      ? `{"actionItems": [{"task": "...", "owner": "...", "deadline": "..."}]}`
+      : `{"${section}": ["..."]}`;
+
+  const content = await chatCompletion({
+    provider,
+    model,
+    messages: [
+      {
+        role: "system",
+        content: `You are an expert meeting summarizer. Regenerate only the requested section for the ${template} template.
+
+Return valid JSON with exactly this shape:
+${sectionShape}
+
+Do not include any other summary section. For action items, include task, owner, and deadline when known. Use null or omit unknown owner/deadline values. Only return the JSON object, no markdown fences or extra text.`,
+      },
+      {
+        role: "user",
+        content: `Meeting title: ${meeting.title}
+
+Current summary JSON:
+${JSON.stringify(meeting.summary)}
+
+Transcript:
+${transcript}`,
+      },
+    ],
+  });
+
+  return mergeRegeneratedSummarySection(meeting.summary, section, content);
 }
 
 export async function chatWithAI(

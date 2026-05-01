@@ -19,6 +19,7 @@ import { applyLibraryFilters, type LibraryQuickFilter } from "./search";
 import { emptyRecordingDiagnostics, type RecordingDiagnostics } from "./recording-diagnostics";
 import { disposeRecorder, startOwnedRecorder } from "./recording-lifecycle";
 import {
+  formatLocalHelperRecoveryMessage,
   readLocalCaptureHelperToken,
   startLocalCaptureHelperCapture,
   stopLocalCaptureHelperCapture,
@@ -231,7 +232,7 @@ export function useRecording() {
       setMicLevel(0);
       setRecordingDiagnostics(emptyRecordingDiagnostics);
       globalThis.setTimeout(() => {
-        alert(`Recording failed:\n\n${msg}`);
+        alert(`Recording failed:\n\n${source === "teams-desktop" ? formatLocalHelperRecoveryMessage(err, "start") : msg}`);
       }, 0);
       return false;
     } finally {
@@ -313,7 +314,7 @@ export function useRecording() {
           console.error("Failed to stop Teams Desktop recording:", err);
           setState("recording");
           startDurationTicker();
-          alert(`Stopping Teams Desktop capture failed:\n\n${err instanceof Error ? err.message : String(err)}`);
+          alert(`Stopping Teams Desktop capture failed:\n\n${formatLocalHelperRecoveryMessage(err, "stop")}`);
           return null;
         }
       }

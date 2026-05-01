@@ -111,15 +111,16 @@ enum DashboardPanelID: String, CaseIterable, Hashable {
     static let defaultOrder: [DashboardPanelID] = [
         .operationalSnapshot,
         .suggestedNextMove,
-        .setupChecklist,
         .focusQueue,
         .upcoming,
         .recentlyCompleted,
+        .setupChecklist,
     ]
+}
 
-    var isFullWidth: Bool {
-        self == .setupChecklist
-    }
+struct DashboardPanelColumns: Equatable {
+    let leading: [DashboardPanelID]
+    let trailing: [DashboardPanelID]
 }
 
 enum CommandCenterPanelOrder {
@@ -166,31 +167,19 @@ enum CommandCenterPanelOrder {
         return result
     }
 
-    static func rows(for ids: [DashboardPanelID]) -> [[DashboardPanelID]] {
-        var rows: [[DashboardPanelID]] = []
-        var currentRow: [DashboardPanelID] = []
+    static func columns(for ids: [DashboardPanelID]) -> DashboardPanelColumns {
+        var leading: [DashboardPanelID] = []
+        var trailing: [DashboardPanelID] = []
 
-        for id in ids {
-            if id.isFullWidth {
-                if !currentRow.isEmpty {
-                    rows.append(currentRow)
-                    currentRow.removeAll()
-                }
-                rows.append([id])
+        for (index, id) in ids.enumerated() {
+            if index.isMultiple(of: 2) {
+                leading.append(id)
             } else {
-                currentRow.append(id)
-                if currentRow.count == 2 {
-                    rows.append(currentRow)
-                    currentRow.removeAll()
-                }
+                trailing.append(id)
             }
         }
 
-        if !currentRow.isEmpty {
-            rows.append(currentRow)
-        }
-
-        return rows
+        return DashboardPanelColumns(leading: leading, trailing: trailing)
     }
 
     static func rawValue(for ids: [DashboardPanelID]) -> String {
@@ -213,7 +202,7 @@ extension EnvironmentValues {
 /// web/src/components/HomeDashboard.tsx.
 struct HomeDashboardView: View {
     @Environment(\.commandCenterLayout) private var layout
-    @AppStorage("noteai.commandCenterPanelOrder") private var commandCenterPanelOrderRaw = ""
+    @AppStorage("noteai.commandCenterPanelOrder.v2") private var commandCenterPanelOrderRaw = ""
     @AppStorage("noteai.setupChecklistCollapsed") private var setupChecklistCollapsed = false
     @State private var draggedDashboardPanelID: DashboardPanelID?
     @State private var dashboardDropTargetID: DashboardPanelID?
@@ -265,7 +254,7 @@ struct HomeDashboardView: View {
                     .foregroundStyle(.black)
                     .padding(.horizontal, round(14 * layout.scale))
                     .frame(height: layout.actionButtonHeight)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
         }
@@ -274,32 +263,26 @@ struct HomeDashboardView: View {
     private var dashboardPanels: some View {
         let snapshot = snapshot
         let orderedIDs = orderedDashboardPanelIDs(for: snapshot)
-        let rows = CommandCenterPanelOrder.rows(for: orderedIDs)
-        return VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                dashboardPanelRow(row, snapshot: snapshot, orderedIDs: orderedIDs)
+        let columns = CommandCenterPanelOrder.columns(for: orderedIDs)
+        return HStack(alignment: .top, spacing: layout.dashboardSpacing) {
+            dashboardPanelColumn(columns.leading, snapshot: snapshot, orderedIDs: orderedIDs)
+                .frame(maxWidth: .infinity, alignment: .top)
+            if !columns.trailing.isEmpty {
+                dashboardPanelColumn(columns.trailing, snapshot: snapshot, orderedIDs: orderedIDs)
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
         }
+        .animation(.easeInOut(duration: 0.16), value: commandCenterPanelOrderRaw)
     }
 
-    @ViewBuilder
-    private func dashboardPanelRow(
-        _ row: [DashboardPanelID],
+    private func dashboardPanelColumn(
+        _ ids: [DashboardPanelID],
         snapshot: CommandCenterSnapshot,
         orderedIDs: [DashboardPanelID]
     ) -> some View {
-        if row.count == 1, row[0].isFullWidth {
-            dashboardPanelCard(row[0], snapshot: snapshot, orderedIDs: orderedIDs)
-        } else {
-            HStack(alignment: .top, spacing: layout.dashboardSpacing) {
-                ForEach(row, id: \.self) { id in
-                    dashboardPanelCard(id, snapshot: snapshot, orderedIDs: orderedIDs)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
-                if row.count == 1 {
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                }
+        VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
+            ForEach(ids, id: \.self) { id in
+                dashboardPanelCard(id, snapshot: snapshot, orderedIDs: orderedIDs)
             }
         }
     }
@@ -325,10 +308,11 @@ struct HomeDashboardView: View {
     ) -> some View {
         dashboardPanelContent(id, snapshot: snapshot)
             .contentShape(Rectangle())
+            .frame(minHeight: dashboardPanelMinimumHeight(for: id), alignment: .topLeading)
             .opacity(draggedDashboardPanelID == id ? 0.65 : 1)
             .overlay {
                 if dashboardDropTargetID == id {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 8)
                         .stroke(Theme.accent, lineWidth: 2)
                         .padding(-3)
                 }
@@ -343,6 +327,19 @@ struct HomeDashboardView: View {
                     activeTargetID: $dashboardDropTargetID
                 )
             )
+    }
+
+    private func dashboardPanelMinimumHeight(for id: DashboardPanelID) -> CGFloat {
+        switch id {
+        case .operationalSnapshot, .suggestedNextMove:
+            return round(126 * layout.scale)
+        case .focusQueue, .upcoming:
+            return round(124 * layout.scale)
+        case .recentlyCompleted:
+            return round(196 * layout.scale)
+        case .setupChecklist:
+            return round(96 * layout.scale)
+        }
     }
 
     @ViewBuilder
@@ -422,8 +419,8 @@ struct HomeDashboardView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                    .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 10)
@@ -543,8 +540,8 @@ struct HomeDashboardView: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: max(72, round(82 * layout.scale)), alignment: .topLeading)
-            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))
+            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rowBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .disabled(item.status == .complete || item.actionTarget == nil)
@@ -591,10 +588,9 @@ struct HomeDashboardView: View {
         Image(systemName: "line.3.horizontal")
             .font(.system(size: layout.smallFontSize, weight: .bold))
             .foregroundStyle(Theme.textSecondary)
-            .frame(width: 26, height: 26)
-            .background(Theme.contentBG.opacity(0.92), in: Circle())
-            .overlay(Circle().stroke(Theme.rowBorder, lineWidth: 1))
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+            .frame(width: 24, height: 24)
+            .background(Theme.rowBG.opacity(0.85), in: Circle())
+            .overlay(Circle().stroke(Theme.rowBorder.opacity(0.85), lineWidth: 1))
             .help("Drag panel")
             .onDrag {
                 draggedDashboardPanelID = id
@@ -633,8 +629,8 @@ struct HomeDashboardView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.rowBorder, lineWidth: 1))
+            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rowBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -733,9 +729,9 @@ private struct CommandCenterPanel<Content: View>: View {
         }
         .padding(layout.panelPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panelBG, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 28, y: 12)
+        .background(Theme.panelBG, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
     }
 }
 
@@ -763,8 +759,8 @@ private struct MetricTile: View {
         }
         .padding(round(12 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+        .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -845,7 +841,7 @@ private struct EmptyColumn: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, round(28 * layout.scale))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 8)
                     .stroke(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             )
     }

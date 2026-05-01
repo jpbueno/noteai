@@ -8,6 +8,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var description: String
     var completed: Bool
     var dueDate: Date?
+    var sourceMeetingID: UUID?
+    var sourceActionItemID: String?
+    var owner: String?
     let createdDate: Date
     var modifiedDate: Date
 
@@ -17,6 +20,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
         description: String = "",
         completed: Bool = false,
         dueDate: Date? = nil,
+        sourceMeetingID: UUID? = nil,
+        sourceActionItemID: String? = nil,
+        owner: String? = nil,
         createdDate: Date = Date(),
         modifiedDate: Date = Date()
     ) {
@@ -25,8 +31,147 @@ struct TodoItem: Identifiable, Codable, Equatable {
         self.description = description
         self.completed = completed
         self.dueDate = dueDate
+        self.sourceMeetingID = sourceMeetingID
+        self.sourceActionItemID = sourceActionItemID
+        let trimmedOwner = owner?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.owner = trimmedOwner?.isEmpty == false
+            ? trimmedOwner
+            : nil
         self.createdDate = createdDate
         self.modifiedDate = modifiedDate
+    }
+
+    var isActionLinked: Bool {
+        sourceMeetingID != nil && sourceActionItemID != nil
+    }
+
+    func isLinked(to meetingID: UUID) -> Bool {
+        sourceMeetingID == meetingID
+    }
+
+    static func actionLinkedTodo(for actionItem: ActionItem, meeting: Meeting, now: Date = Date()) -> TodoItem {
+        let deadline = actionItem.deadline?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var descriptionParts = ["From meeting: \(meeting.title)"]
+        if let owner = actionItem.owner {
+            descriptionParts.append("Owner: \(owner)")
+        }
+        if let deadline, !deadline.isEmpty {
+            descriptionParts.append("Deadline: \(deadline)")
+        }
+
+        return TodoItem(
+            title: actionItem.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Untitled action item"
+                : actionItem.task,
+            description: descriptionParts.joined(separator: "\n"),
+            completed: actionItem.isCompleted,
+            dueDate: dueDate(from: deadline),
+            sourceMeetingID: meeting.id,
+            sourceActionItemID: actionItem.id,
+            owner: actionItem.owner,
+            createdDate: now,
+            modifiedDate: now
+        )
+    }
+
+    static func mergingActionLinkedTodos(existing: [TodoItem], meeting: Meeting, now: Date = Date()) -> [TodoItem] {
+        var merged = existing
+        let meetingLinkedIndexes = linkedIndexes(for: meeting.id, in: merged)
+        let linkedIndexesByKey = linkIndexes(in: merged)
+        var usedIndexes = Set<Int>()
+
+        for actionItem in meeting.summary.actionItems {
+            guard !actionItem.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let key = linkKey(meetingID: meeting.id, actionItemID: actionItem.id)
+            let desired = actionLinkedTodo(for: actionItem, meeting: meeting, now: now)
+
+            if let existingIndex = linkedIndexesByKey[key], !usedIndexes.contains(existingIndex) {
+                let refreshed = merged[existingIndex].refreshingSourceFields(from: desired, now: now)
+                merged[existingIndex] = refreshed
+                usedIndexes.insert(existingIndex)
+            } else if let existingIndex = meetingLinkedIndexes.first(where: { !usedIndexes.contains($0) }) {
+                let refreshed = merged[existingIndex].refreshingSourceFields(from: desired, now: now)
+                merged[existingIndex] = refreshed
+                usedIndexes.insert(existingIndex)
+            } else {
+                merged.insert(desired, at: 0)
+            }
+        }
+
+        for existingIndex in meetingLinkedIndexes where !usedIndexes.contains(existingIndex) {
+            merged[existingIndex] = merged[existingIndex].unlinkedFromSource(now: now)
+        }
+
+        return merged
+    }
+
+    private func refreshingSourceFields(from source: TodoItem, now: Date) -> TodoItem {
+        var refreshed = self
+        refreshed.title = source.title
+        refreshed.description = source.description
+        refreshed.dueDate = source.dueDate
+        refreshed.sourceMeetingID = source.sourceMeetingID
+        refreshed.sourceActionItemID = source.sourceActionItemID
+        refreshed.owner = source.owner
+        if refreshed != self {
+            refreshed.modifiedDate = now
+        }
+        return refreshed
+    }
+
+    private func unlinkedFromSource(now: Date) -> TodoItem {
+        guard sourceMeetingID != nil || sourceActionItemID != nil else { return self }
+        var unlinked = self
+        unlinked.sourceMeetingID = nil
+        unlinked.sourceActionItemID = nil
+        unlinked.modifiedDate = now
+        return unlinked
+    }
+
+    static func linkKey(meetingID: UUID, actionItemID: String) -> String {
+        "\(meetingID.uuidString.lowercased())|\(actionItemID)"
+    }
+
+    private static func linkKey(for todo: TodoItem) -> String? {
+        guard let sourceMeetingID = todo.sourceMeetingID,
+              let sourceActionItemID = todo.sourceActionItemID else { return nil }
+        return linkKey(meetingID: sourceMeetingID, actionItemID: sourceActionItemID)
+    }
+
+    private static func linkIndexes(in todos: [TodoItem]) -> [String: Int] {
+        var indexes: [String: Int] = [:]
+        for (index, todo) in todos.enumerated() {
+            guard let key = linkKey(for: todo), indexes[key] == nil else { continue }
+            indexes[key] = index
+        }
+        return indexes
+    }
+
+    private static func linkedIndexes(for meetingID: UUID, in todos: [TodoItem]) -> [Int] {
+        todos.indices.filter { todos[$0].sourceMeetingID == meetingID }
+    }
+
+    private static func dueDate(from deadline: String?) -> Date? {
+        guard let deadline, !deadline.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: deadline) {
+            return date
+        }
+
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        if let date = dayFormatter.date(from: deadline) {
+            return date
+        }
+
+        let mediumFormatter = DateFormatter()
+        mediumFormatter.locale = Locale(identifier: "en_US_POSIX")
+        mediumFormatter.dateStyle = .medium
+        mediumFormatter.timeStyle = .none
+        mediumFormatter.isLenient = true
+        return mediumFormatter.date(from: deadline)
     }
 
     // MARK: - Due-date groupings (match the web HomeDashboard bucketing)

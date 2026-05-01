@@ -26,13 +26,33 @@ enum AITasks {
         let raw = try JSONDecoder().decode(RawSummary.self, from: jsonData)
         return MeetingSummary(
             decisions: raw.decisions,
-            actionItems: raw.actionItems.map {
-                ActionItem(task: $0.task, owner: $0.owner, deadline: $0.deadline)
-            },
+            actionItems: actionItems(from: raw.actionItems),
             topics: raw.topics,
             openQuestions: raw.openQuestions,
             wasSummarized: true
         )
+    }
+
+    static func parseMeetingSummarySection(_ text: String, section: MeetingSummarySection) throws -> MeetingSummarySectionContent {
+        let jsonString = extractJSON(from: text)
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            throw SummarizationError.parseError
+        }
+
+        switch section {
+        case .decisions:
+            let raw = try JSONDecoder().decode(RawDecisionsSection.self, from: jsonData)
+            return .decisions(raw.decisions)
+        case .actionItems:
+            let raw = try JSONDecoder().decode(RawActionItemsSection.self, from: jsonData)
+            return .actionItems(actionItems(from: raw.actionItems))
+        case .topics:
+            let raw = try JSONDecoder().decode(RawTopicsSection.self, from: jsonData)
+            return .topics(raw.topics)
+        case .openQuestions:
+            let raw = try JSONDecoder().decode(RawOpenQuestionsSection.self, from: jsonData)
+            return .openQuestions(raw.openQuestions)
+        }
     }
 
     static func parseT5TSections(_ text: String) throws -> T5TSections {
@@ -71,12 +91,42 @@ enum AITasks {
         }
         return parts.joined(separator: "\n")
     }
+
+    private static func actionItems(from rawItems: [RawActionItem]) -> [ActionItem] {
+        var seenIDs = Set<String>()
+        var items: [ActionItem] = []
+
+        for raw in rawItems {
+            let item = ActionItem(task: raw.task, owner: raw.owner, deadline: raw.deadline)
+            guard !seenIDs.contains(item.id) else { continue }
+            seenIDs.insert(item.id)
+            items.append(item)
+        }
+
+        return items
+    }
 }
 
 private struct RawSummary: Decodable {
     let decisions: [String]
     let actionItems: [RawActionItem]
     let topics: [String]
+    let openQuestions: [String]
+}
+
+private struct RawDecisionsSection: Decodable {
+    let decisions: [String]
+}
+
+private struct RawActionItemsSection: Decodable {
+    let actionItems: [RawActionItem]
+}
+
+private struct RawTopicsSection: Decodable {
+    let topics: [String]
+}
+
+private struct RawOpenQuestionsSection: Decodable {
     let openQuestions: [String]
 }
 
@@ -96,4 +146,3 @@ private struct RawT5TEntry: Decodable {
     let headline: String
     let explanation: String
 }
-

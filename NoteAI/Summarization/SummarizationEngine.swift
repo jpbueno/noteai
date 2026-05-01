@@ -13,6 +13,14 @@ final class SummarizationEngine {
         return try AITasks.parseMeetingSummary(responseText)
     }
 
+    func regenerateSection(_ section: MeetingSummarySection, meeting: Meeting) async throws -> MeetingSummarySectionContent {
+        let client = try buildClient()
+        let model = selectedModelID()
+        let prompt = buildSectionPrompt(section: section, meeting: meeting)
+        let responseText = try await client.complete(prompt: prompt, model: model)
+        return try AITasks.parseMeetingSummarySection(responseText, section: section)
+    }
+
     /// Generates a follow-up email draft based on a meeting's transcript and summary.
     func draftFollowUp(meeting: Meeting) async throws -> String {
         let client = try buildClient()
@@ -101,6 +109,30 @@ final class SummarizationEngine {
 
         TRANSCRIPT:
         \(transcript)
+        """
+    }
+
+    private func buildSectionPrompt(section: MeetingSummarySection, meeting: Meeting) -> String {
+        let transcriptText = MeetingCaptureWorkflow.transcriptText(from: meeting.transcript)
+        let currentSummary = AITasks.formatSummaryForPrompt(meeting.summary)
+
+        return """
+        You are a meeting summarization assistant. Regenerate only the "\(section.title)" section for the meeting below.
+
+        Preserve the same semantic shape as the existing structured summary. Do not rewrite, mention, or include any other summary section.
+        For action items, include concrete follow-ups only, with optional owner and deadline when present.
+
+        Output ONLY valid JSON with this exact structure:
+        \(section.jsonStructure)
+
+        MEETING: \(meeting.title)
+        DATE: \(meeting.date.formatted(date: .long, time: .shortened))
+
+        CURRENT SUMMARY CONTEXT:
+        \(currentSummary)
+
+        TRANSCRIPT:
+        \(transcriptText)
         """
     }
 

@@ -80,7 +80,7 @@ enum ExportManager {
         md += "---\n\n"
         md += "## Transcript\n\n"
         for segment in meeting.transcript {
-            let speaker = segment.speaker ?? "Speaker"
+            let speaker = meeting.speakerDisplayName(for: segment)
             if includeTimestamps {
                 md += "**[\(segment.formattedTimestamp)] \(speaker):** \(segment.text)\n\n"
             } else {
@@ -188,7 +188,7 @@ enum ExportManager {
         text += "\nTRANSCRIPT\n"
         text += String(repeating: "=", count: 40) + "\n\n"
         for segment in meeting.transcript {
-            let speaker = segment.speaker ?? "Speaker"
+            let speaker = meeting.speakerDisplayName(for: segment)
             text += "[\(segment.formattedTimestamp)] \(speaker): \(segment.text)\n"
         }
 

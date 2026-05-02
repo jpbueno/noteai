@@ -8,6 +8,10 @@ import {
   ensureMeetingSummaryMetadata,
   mergeRegeneratedSummarySection,
   parseMeetingSummaryContent,
+  setSpeakerLabel,
+  speakerDisplayNameForSegment,
+  speakerIDForSegment,
+  withSpeakerPlaceholders,
 } from "./src/lib/types.ts";
 
 const NOW = "2026-05-01T12:00:00.000Z";
@@ -225,4 +229,55 @@ test("removed regenerated action items are unlinked from the meeting", () => {
   assert.equal(plan.unlinks[0].sourceMeetingID, null);
   assert.equal(plan.unlinks[0].sourceActionItemID, null);
   assert.equal(plan.unlinks[0].modifiedDate, LATER);
+});
+
+test("speaker labeling resolves stable placeholders and persisted overrides", () => {
+  const meeting = {
+    id: "meeting-1",
+    title: "Speaker Sync",
+    date: NOW,
+    duration: 60,
+    transcript: [
+      { id: 1, text: "Fallback speaker.", startTime: 0, endTime: 2, speaker: null, confidence: 0.9 },
+      { id: 2, text: "Known placeholder.", startTime: 2, endTime: 4, speaker: "speaker-2", confidence: 0.9 },
+      { id: 3, text: "Named participant.", startTime: 4, endTime: 6, speaker: "Ana", confidence: 0.9 },
+    ],
+    summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
+  };
+
+  assert.equal(speakerIDForSegment(meeting.transcript[0]), "speaker-1");
+  assert.equal(speakerDisplayNameForSegment(meeting, meeting.transcript[0]), "Speaker 1");
+  assert.equal(speakerDisplayNameForSegment(meeting, meeting.transcript[1]), "Speaker 2");
+  assert.equal(speakerDisplayNameForSegment(meeting, meeting.transcript[2]), "Ana");
+
+  const labeled = setSpeakerLabel(setSpeakerLabel(meeting, "speaker-1", "JP"), "speaker-2", "Customer");
+
+  assert.equal(labeled.speakerLabels["speaker-1"], "JP");
+  assert.equal(speakerDisplayNameForSegment(labeled, meeting.transcript[0]), "JP");
+  assert.equal(speakerDisplayNameForSegment(labeled, meeting.transcript[1]), "Customer");
+});
+
+test("transcript creation assigns fallback speaker placeholders", () => {
+  const transcript = withSpeakerPlaceholders([
+    { id: 1, text: "No diarization metadata.", startTime: 0, endTime: 2, speaker: null, confidence: 0.9 },
+  ]);
+
+  assert.equal(transcript[0].speaker, "speaker-1");
+});
+
+test("speaker labeling resolves source-aware placeholders from macOS capture", () => {
+  const meeting = {
+    id: "meeting-1",
+    title: "Source Sync",
+    date: NOW,
+    duration: 60,
+    transcript: [
+      { id: 1, text: "Local voice.", startTime: 0, endTime: 2, speaker: "speaker-local", confidence: 0.9 },
+      { id: 2, text: "Remote audio.", startTime: 2, endTime: 4, speaker: "speaker-remote", confidence: 0.9 },
+    ],
+    summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
+  };
+
+  assert.equal(speakerDisplayNameForSegment(meeting, meeting.transcript[0]), "You");
+  assert.equal(speakerDisplayNameForSegment(meeting, meeting.transcript[1]), "Remote audio");
 });

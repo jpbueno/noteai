@@ -1,3 +1,4 @@
+import { speakerDisplayNameForSegment } from "./types";
 import type { Meeting } from "./types";
 
 interface MeetingMarkdownOptions {
@@ -47,7 +48,7 @@ export function generateMeetingMarkdown(meeting: Meeting, options: MeetingMarkdo
   lines.push("## Transcript\n");
   meeting.transcript.forEach((segment) => {
     const timestamp = `[${formatTimestamp(segment.startTime)}]`;
-    const speaker = segment.speaker ?? "Speaker";
+    const speaker = speakerDisplayNameForSegment(meeting, segment);
     lines.push(`**${timestamp} ${speaker}:** ${segment.text}\n`);
   });
 
@@ -85,7 +86,7 @@ export function generateMeetingPdfHtml(meeting: Meeting, options: MeetingMarkdow
 
   const transcript = meeting.transcript
     .map((segment) => {
-      const speaker = escapeHtml(segment.speaker ?? "Speaker");
+      const speaker = escapeHtml(speakerDisplayNameForSegment(meeting, segment));
       return `<p><strong>[${formatTimestamp(segment.startTime)}] ${speaker}:</strong> ${escapeHtml(segment.text)}</p>`;
     })
     .join("");

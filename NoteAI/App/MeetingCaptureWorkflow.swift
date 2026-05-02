@@ -1,9 +1,15 @@
 import Foundation
 
 enum MeetingCaptureWorkflow {
-    static func transcriptText(from transcript: [TranscriptSegment]) -> String {
+    static func transcriptText(from transcript: [TranscriptSegment], speakerLabels: [String: String] = [:]) -> String {
         transcript
-            .map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }
+            .map {
+                let speaker = TranscriptSpeakerLabels.displayName(
+                    for: TranscriptSpeakerLabels.speakerID(for: $0),
+                    labels: speakerLabels
+                )
+                return "[\($0.formattedTimestamp)] \(speaker): \($0.text)"
+            }
             .joined(separator: "\n")
     }
 
@@ -30,9 +36,8 @@ enum MeetingCaptureWorkflow {
             title: title,
             date: start,
             duration: finishedAt.timeIntervalSince(start),
-            transcript: transcript,
+            transcript: TranscriptSpeakerLabels.assignPlaceholders(to: transcript),
             summary: summary
         )
     }
 }
-

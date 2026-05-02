@@ -611,20 +611,39 @@ struct NotionPageView: View {
     }
 
     private func transcriptLine(_ segment: TranscriptSegment) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let speaker = segment.speaker {
-                (Text("**\(speaker):** ") + Text(segment.text))
-                    .font(.system(size: Theme.bodySize))
-                    .foregroundStyle(Theme.textPrimary)
-            } else {
-                Text(segment.text)
-                    .font(.system(size: Theme.bodySize))
-                    .foregroundStyle(Theme.textPrimary)
-            }
+        HStack(alignment: .top, spacing: 10) {
+            TextField("Speaker", text: speakerNameBinding(for: segment))
+                .textFieldStyle(.plain)
+                .font(.system(size: Theme.smallSize, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 120)
+                .padding(.top, 1)
+
+            Text(segment.text)
+                .font(.system(size: Theme.bodySize))
+                .foregroundStyle(Theme.textPrimary)
+                .textSelection(.enabled)
+                .lineSpacing(4)
         }
-        .textSelection(.enabled)
-        .lineSpacing(4)
         .padding(.vertical, 4)
+    }
+
+    private func speakerNameBinding(for segment: TranscriptSegment) -> Binding<String> {
+        let speakerID = meeting.speakerID(for: segment)
+        return Binding(
+            get: { meeting.speakerDisplayName(for: segment) },
+            set: { newValue in
+                updateSpeakerLabel(speakerID: speakerID, displayName: newValue)
+            }
+        )
+    }
+
+    private func updateSpeakerLabel(speakerID: String, displayName: String) {
+        if let manager = meetingManager {
+            meeting = manager.updateSpeakerLabel(meeting: meeting, speakerID: speakerID, displayName: displayName)
+        } else {
+            meeting.setSpeakerLabel(speakerID: speakerID, displayName: displayName)
+        }
     }
 
     private func verticalSpace() -> some View {

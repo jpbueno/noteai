@@ -7,6 +7,48 @@ struct Meeting: Identifiable, Codable {
     let duration: TimeInterval
     var transcript: [TranscriptSegment]
     var summary: MeetingSummary
+    var speakerLabels: [String: String]
+
+    init(
+        id: UUID,
+        title: String,
+        date: Date,
+        duration: TimeInterval,
+        transcript: [TranscriptSegment],
+        summary: MeetingSummary,
+        speakerLabels: [String: String] = [:]
+    ) {
+        self.id = id
+        self.title = title
+        self.date = date
+        self.duration = duration
+        self.transcript = transcript
+        self.summary = summary
+        self.speakerLabels = TranscriptSpeakerLabels.normalizedLabels(speakerLabels)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case date
+        case duration
+        case transcript
+        case summary
+        case speakerLabels
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        date = try container.decode(Date.self, forKey: .date)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        transcript = try container.decodeIfPresent([TranscriptSegment].self, forKey: .transcript) ?? []
+        summary = try container.decode(MeetingSummary.self, forKey: .summary)
+        speakerLabels = TranscriptSpeakerLabels.normalizedLabels(
+            try container.decodeIfPresent([String: String].self, forKey: .speakerLabels) ?? [:]
+        )
+    }
 
     var formattedDuration: String {
         let minutes = Int(duration) / 60
@@ -17,6 +59,23 @@ struct Meeting: Identifiable, Codable {
             return "\(hours)h \(mins)m"
         }
         return "\(minutes)m \(seconds)s"
+    }
+
+    func speakerID(for segment: TranscriptSegment) -> String {
+        TranscriptSpeakerLabels.speakerID(for: segment)
+    }
+
+    func speakerDisplayName(for segment: TranscriptSegment) -> String {
+        let id = speakerID(for: segment)
+        return TranscriptSpeakerLabels.displayName(for: id, labels: speakerLabels)
+    }
+
+    mutating func setSpeakerLabel(speakerID: String, displayName: String) {
+        speakerLabels = TranscriptSpeakerLabels.settingLabel(
+            displayName,
+            for: speakerID,
+            in: speakerLabels
+        )
     }
 }
 
@@ -45,6 +104,99 @@ struct TranscriptSegment: Identifiable, Codable {
     }
 
     var timestamp: TimeInterval { Double(startTime) }
+
+    func withSpeaker(_ speaker: String) -> TranscriptSegment {
+        TranscriptSegment(
+            id: id,
+            text: text,
+            startTime: startTime,
+            endTime: endTime,
+            speaker: speaker,
+            confidence: confidence
+        )
+    }
+}
+
+enum TranscriptSpeakerLabels {
+    static let fallbackSpeakerID = "speaker-1"
+    static let localSpeakerID = "speaker-local"
+    static let remoteSpeakerID = "speaker-remote"
+
+    static func assignPlaceholders(
+        to transcript: [TranscriptSegment],
+        fallbackSpeakerID: String = fallbackSpeakerID
+    ) -> [TranscriptSegment] {
+        transcript.map { segment in
+            let id = speakerID(for: segment, fallbackSpeakerID: fallbackSpeakerID)
+            return segment.speaker == id ? segment : segment.withSpeaker(id)
+        }
+    }
+
+    static func speakerID(
+        for segment: TranscriptSegment,
+        fallbackSpeakerID: String = fallbackSpeakerID
+    ) -> String {
+        normalizedSpeakerID(segment.speaker)
+            ?? normalizedSpeakerID(fallbackSpeakerID)
+            ?? Self.fallbackSpeakerID
+    }
+
+    static func displayName(for speakerID: String, labels: [String: String]) -> String {
+        let id = normalizedSpeakerID(speakerID) ?? fallbackSpeakerID
+        if let override = normalizedLabel(labels[id]) {
+            return override
+        }
+        return defaultDisplayName(for: id)
+    }
+
+    static func normalizedLabels(_ labels: [String: String]) -> [String: String] {
+        labels.reduce(into: [:]) { result, entry in
+            guard let id = normalizedSpeakerID(entry.key),
+                  let label = normalizedLabel(entry.value) else { return }
+            result[id] = label
+        }
+    }
+
+    static func settingLabel(_ displayName: String, for speakerID: String, in labels: [String: String]) -> [String: String] {
+        guard let id = normalizedSpeakerID(speakerID) else { return normalizedLabels(labels) }
+        var next = normalizedLabels(labels)
+        if let label = normalizedLabel(displayName) {
+            next[id] = label
+        } else {
+            next.removeValue(forKey: id)
+        }
+        return next
+    }
+
+    private static func normalizedSpeakerID(_ speaker: String?) -> String? {
+        guard let speaker else { return nil }
+        let trimmed = speaker.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedLabel(_ label: String?) -> String? {
+        guard let label else { return nil }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func defaultDisplayName(for speakerID: String) -> String {
+        let lowercased = speakerID.lowercased()
+        switch lowercased {
+        case localSpeakerID:
+            return "You"
+        case remoteSpeakerID:
+            return "Remote audio"
+        default:
+            break
+        }
+
+        if lowercased.hasPrefix("speaker-"),
+           let number = Int(lowercased.dropFirst("speaker-".count)) {
+            return "Speaker \(number)"
+        }
+        return speakerID
+    }
 }
 
 struct MeetingSummary: Codable {

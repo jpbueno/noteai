@@ -18,6 +18,78 @@ export interface TranscriptSegment {
   confidence: number;
 }
 
+export type SpeakerLabels = Record<string, string>;
+
+export const FALLBACK_SPEAKER_ID = "speaker-1";
+export const LOCAL_SPEAKER_ID = "speaker-local";
+export const REMOTE_SPEAKER_ID = "speaker-remote";
+
+export function speakerIDForSegment(segment: Pick<TranscriptSegment, "speaker">): string {
+  return normalizeSpeakerID(segment.speaker) ?? FALLBACK_SPEAKER_ID;
+}
+
+export function speakerDisplayNameForSegment(
+  meeting: Pick<Meeting, "speakerLabels">,
+  segment: Pick<TranscriptSegment, "speaker">,
+): string {
+  const speakerID = speakerIDForSegment(segment);
+  const label = normalizeSpeakerLabel(meeting.speakerLabels?.[speakerID]);
+  return label ?? defaultSpeakerDisplayName(speakerID);
+}
+
+export function setSpeakerLabel<T extends { speakerLabels?: SpeakerLabels }>(
+  meeting: T,
+  speakerID: string,
+  displayName: string,
+): T & { speakerLabels: SpeakerLabels } {
+  const id = normalizeSpeakerID(speakerID);
+  const speakerLabels = normalizeSpeakerLabels(meeting.speakerLabels);
+  if (!id) return { ...meeting, speakerLabels };
+
+  const label = normalizeSpeakerLabel(displayName);
+  if (label) {
+    speakerLabels[id] = label;
+  } else {
+    delete speakerLabels[id];
+  }
+  return { ...meeting, speakerLabels };
+}
+
+export function withSpeakerPlaceholders<T extends TranscriptSegment>(transcript: T[]): T[] {
+  return transcript.map((segment) => ({
+    ...segment,
+    speaker: speakerIDForSegment(segment),
+  }));
+}
+
+function normalizeSpeakerLabels(labels: SpeakerLabels | undefined): SpeakerLabels {
+  return Object.fromEntries(
+    Object.entries(labels ?? {}).flatMap(([rawID, rawLabel]) => {
+      const id = normalizeSpeakerID(rawID);
+      const label = normalizeSpeakerLabel(rawLabel);
+      return id && label ? [[id, label]] : [];
+    }),
+  );
+}
+
+function normalizeSpeakerID(speaker: string | null | undefined): string | null {
+  const trimmed = speaker?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeSpeakerLabel(label: string | null | undefined): string | null {
+  const trimmed = label?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function defaultSpeakerDisplayName(speakerID: string): string {
+  if (speakerID.toLowerCase() === LOCAL_SPEAKER_ID) return "You";
+  if (speakerID.toLowerCase() === REMOTE_SPEAKER_ID) return "Remote audio";
+
+  const match = /^speaker-(\d+)$/i.exec(speakerID);
+  return match ? `Speaker ${Number(match[1])}` : speakerID;
+}
+
 export function buildIncompleteTranscriptWarning(options: {
   id: number;
   message: string;
@@ -88,6 +160,7 @@ export interface Meeting {
   duration: number; // seconds
   transcript: TranscriptSegment[];
   summary: MeetingSummary;
+  speakerLabels?: SpeakerLabels;
   pinned?: number;
 }
 

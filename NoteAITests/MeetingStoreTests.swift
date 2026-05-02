@@ -106,7 +106,7 @@ final class MeetingStoreTests: XCTestCase {
 
     func testMarkdownExportIncludesSharedSourceFieldsAndTaskList() {
         let meetingID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
-        let meeting = Meeting(
+        var meeting = Meeting(
             id: meetingID,
             title: "Q3 / Launch: Readout?",
             date: Date(timeIntervalSince1970: 0),
@@ -126,6 +126,7 @@ final class MeetingStoreTests: XCTestCase {
                 wasSummarized: true
             )
         )
+        meeting.setSpeakerLabel(speakerID: "speaker-1", displayName: "JP")
 
         let markdown = ExportManager.exportAsMarkdown(meeting)
 
@@ -133,8 +134,43 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("**Segments:** 2"))
         XCTAssertTrue(markdown.contains("- [ ] Update launch brief — **Dev** (by 2026-05-01)"))
         XCTAssertTrue(markdown.contains("- [x] Publish notes"))
-        XCTAssertTrue(markdown.contains("**[01:05] Speaker:** I will update the brief."))
+        XCTAssertTrue(markdown.contains("**[01:05] JP:** I will update the brief."))
         XCTAssertEqual(ExportManager.markdownFilename(for: meeting), "Q3 - Launch- Readout.md")
+    }
+
+    func testSpeakerLabelsPersistWithMeetingJSON() throws {
+        let store = MeetingStore()
+        var meeting = Meeting(
+            id: UUID(),
+            title: "Speaker Label Persistence",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 60,
+            transcript: [
+                TranscriptSegment(id: 1, text: "Hello from the fallback speaker.", startTime: 0, speaker: "speaker-1", confidence: 0.9)
+            ],
+            summary: MeetingSummary()
+        )
+        meeting.setSpeakerLabel(speakerID: "speaker-1", displayName: "JP")
+
+        try store.save(meeting: meeting)
+        let fetched = try XCTUnwrap(store.fetch(meetingId: meeting.id))
+
+        XCTAssertEqual(fetched.speakerLabels["speaker-1"], "JP")
+        XCTAssertEqual(fetched.speakerDisplayName(for: fetched.transcript[0]), "JP")
+
+        try store.delete(meetingId: meeting.id)
+    }
+
+    func testLegacyMeetingDecodesWithEmptySpeakerLabels() throws {
+        let data = """
+        {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","date":0,"duration":60,"transcript":[],"summary":{"decisions":[],"actionItems":[],"topics":[],"openQuestions":[],"wasSummarized":false}}
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let meeting = try decoder.decode(Meeting.self, from: data)
+
+        XCTAssertEqual(meeting.speakerLabels, [:])
     }
 
     func testPDFExportCreatesShareableMeetingRecord() throws {

@@ -16,6 +16,15 @@ test("Sidebar exposes Teams Desktop as a visible local-helper recording source",
   assert.match(sidebar, /onStartRecording\(undefined, activeRecordingSource\.id === "browser-tab", activeRecordingSource\.id\)/);
 });
 
+test("Sidebar exposes fallback-first recording readiness state", () => {
+  assert.match(sidebar, /resolveRecordingReadiness/);
+  assert.match(sidebar, /recordingReadiness\.title/);
+  assert.match(sidebar, /recordingReadiness\.detail/);
+  assert.match(sidebar, /recordingReadiness\.primaryActionTitle/);
+  assert.match(page, /calendarAuthConfigured=\{calendarAuthConfigured\}/);
+  assert.match(page, /browserMeetingDetectionAvailable=\{false\}/);
+});
+
 test("Settings includes local helper diagnostics and capture-control status", () => {
   assert.match(settings, /TeamsDesktopHelperDiagnosticsPanel/);
   assert.match(settings, /Local Helper Diagnostics/);

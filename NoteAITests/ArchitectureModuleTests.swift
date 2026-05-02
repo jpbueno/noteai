@@ -37,6 +37,60 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(fallback.wasSummarized)
     }
 
+    func testRecordingReadinessFallsBackToManualWhenCalendarAndDetectionAreMissing() {
+        let readiness = MeetingRecordingReadiness.resolve(
+            recordingState: .idle,
+            autoDetectEnabled: true,
+            detectionState: .monitoring,
+            detectedApp: nil,
+            calendarAuthorization: .denied,
+            upcomingCalendarEvent: nil
+        )
+
+        XCTAssertEqual(readiness.mode, .manualFallback)
+        XCTAssertEqual(readiness.title, "Manual recording")
+        XCTAssertTrue(readiness.detail.contains("Calendar access is unavailable"))
+        XCTAssertEqual(readiness.primaryActionTitle, "Start Recording")
+    }
+
+    func testRecordingReadinessSurfacesLikelyMeetingAppSignal() {
+        let readiness = MeetingRecordingReadiness.resolve(
+            recordingState: .idle,
+            autoDetectEnabled: true,
+            detectionState: .monitoring,
+            detectedApp: "Microsoft Teams",
+            calendarAuthorization: .notDetermined,
+            upcomingCalendarEvent: nil
+        )
+
+        XCTAssertEqual(readiness.mode, .likelyMeeting)
+        XCTAssertEqual(readiness.title, "Microsoft Teams detected")
+        XCTAssertTrue(readiness.detail.contains("likely meeting signal"))
+        XCTAssertEqual(readiness.badgeTitle, "Signal")
+    }
+
+    func testRecordingReadinessAutoArmsForUpcomingCalendarEvent() {
+        let event = CalendarMeetingSignal(
+            title: "Customer Sync",
+            startDate: Date(timeIntervalSince1970: 1_000),
+            endDate: Date(timeIntervalSince1970: 2_000)
+        )
+
+        let readiness = MeetingRecordingReadiness.resolve(
+            recordingState: .idle,
+            autoDetectEnabled: true,
+            detectionState: .monitoring,
+            detectedApp: nil,
+            calendarAuthorization: .authorized,
+            upcomingCalendarEvent: event
+        )
+
+        XCTAssertEqual(readiness.mode, .calendarArmed)
+        XCTAssertEqual(readiness.title, "Customer Sync soon")
+        XCTAssertTrue(readiness.detail.contains("auto-armed"))
+        XCTAssertEqual(readiness.badgeTitle, "Armed")
+    }
+
     func testTranscriptionWindowPlannerSplitsLongBuffersIntoBoundedWindows() {
         let windows = TranscriptionWindowPlanner.windows(
             frameLength: 75 * 16_000,
@@ -318,6 +372,14 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("recordingSourceCard("))
         XCTAssertFalse(source.contains("Native capture"))
         XCTAssertFalse(source.contains("subtitle: \"Ready\""))
+    }
+
+    func testSidebarRecordingControlsSurfaceReadinessState() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("meetingManager.recordingReadiness"))
+        XCTAssertTrue(source.contains("recordingReadinessRow"))
+        XCTAssertTrue(source.contains("recordingReadiness.primaryActionTitle"))
     }
 
     func testSidebarDividerIsFullHeightShellChrome() throws {

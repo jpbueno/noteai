@@ -27,6 +27,7 @@ import type {
 } from "@/lib/types";
 import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
+import { resolveRecordingReadiness, type RecordingReadinessMode } from "@/lib/recording-lifecycle";
 import type { LibraryQuickFilter } from "@/lib/search";
 import type { RecordingSourceId, RecordingSourceOption } from "@/lib/recording-sources";
 
@@ -46,6 +47,8 @@ interface SidebarProps {
   recordingState: RecordingState;
   recordingDuration: number;
   recordingSources: RecordingSourceOption[];
+  calendarAuthConfigured: boolean;
+  browserMeetingDetectionAvailable: boolean;
   onStartRecording: (micDeviceId?: string, captureTab?: boolean, source?: RecordingSourceId) => void;
   onStopRecording: () => void;
   onOpenLocalHelper: () => void;
@@ -72,6 +75,8 @@ export default function Sidebar({
   recordingState,
   recordingDuration,
   recordingSources,
+  calendarAuthConfigured,
+  browserMeetingDetectionAvailable,
   onStartRecording,
   onStopRecording,
   onOpenLocalHelper,
@@ -93,6 +98,13 @@ export default function Sidebar({
   const activeRecordingSource =
     recordingSources.find((source) => source.id === selectedRecordingSourceId) ??
     recordingSources[0]!;
+  const recordingReadiness = resolveRecordingReadiness({
+    state: recordingState,
+    activeSource: activeRecordingSource,
+    calendarAuthConfigured,
+    browserMeetingDetectionAvailable,
+    upcomingCalendarEvent: null,
+  });
   const shouldOpenHelper =
     activeRecordingSource?.id === "teams-desktop" &&
     activeRecordingSource.availability === "requires-helper";
@@ -146,6 +158,20 @@ export default function Sidebar({
           </div>
         ) : (
           <div className="space-y-1.5">
+            <div className="rounded-lg border border-border/70 bg-content/35 px-2.5 py-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <AudioWaveform className={`h-3.5 w-3.5 flex-shrink-0 ${recordingReadinessTone(recordingReadiness.mode)}`} />
+                <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-text-primary">
+                  {recordingReadiness.title}
+                </span>
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${recordingReadinessBadgeTone(recordingReadiness.mode)}`}>
+                  {recordingReadiness.badgeTitle}
+                </span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-text-tertiary">
+                {recordingReadiness.detail}
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-1">
               {recordingSources.map((source) => {
                 const active = selectedRecordingSourceId === source.id;
@@ -203,7 +229,7 @@ export default function Sidebar({
                   ? "Processing..."
                   : shouldOpenHelper
                     ? "Open Helper"
-                    : "Start Recording"}
+                    : recordingReadiness.primaryActionTitle}
               </span>
             </button>
             {activeRecordingSource?.disabledReason && (
@@ -411,6 +437,40 @@ function QuickFilterButton({
       {label}
     </button>
   );
+}
+
+function recordingReadinessTone(mode: RecordingReadinessMode): string {
+  switch (mode) {
+    case "calendar-armed":
+      return "text-accent";
+    case "likely-meeting":
+      return "text-warning";
+    case "recording":
+      return "text-danger";
+    case "starting":
+    case "processing":
+      return "text-text-secondary";
+    case "manual-fallback":
+    default:
+      return "text-text-tertiary";
+  }
+}
+
+function recordingReadinessBadgeTone(mode: RecordingReadinessMode): string {
+  switch (mode) {
+    case "calendar-armed":
+      return "bg-accent/12 text-accent";
+    case "likely-meeting":
+      return "bg-warning/12 text-warning";
+    case "recording":
+      return "bg-danger/12 text-danger";
+    case "starting":
+    case "processing":
+      return "bg-text-secondary/10 text-text-secondary";
+    case "manual-fallback":
+    default:
+      return "bg-content text-text-tertiary";
+  }
 }
 
 function SidebarSection({

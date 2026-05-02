@@ -62,6 +62,18 @@ final class MeetingManager: ObservableObject {
     var filteredMeetings: [Meeting] {
         LibraryOperations.filter(meetings: meetings, notes: notes, query: searchQuery).meetings
     }
+
+    var recordingReadiness: MeetingRecordingReadiness {
+        MeetingRecordingReadiness.resolve(
+            recordingState: recordingReadinessState,
+            autoDetectEnabled: autoDetectEnabled,
+            detectionState: meetingDetector.state,
+            detectedApp: meetingDetector.detectedApp ?? meetingDetector.likelyMeetingApp,
+            calendarAuthorization: meetingDetector.calendarAuthorization,
+            upcomingCalendarEvent: meetingDetector.upcomingCalendarEvent
+        )
+    }
+
     @Published var autoDetectEnabled: Bool {
         didSet {
             UserDefaults.standard.set(autoDetectEnabled, forKey: "autoDetectMeetings")
@@ -101,6 +113,17 @@ final class MeetingManager: ObservableObject {
     private var coachLastAnalyzedTime: Date?
     private var cancellables = Set<AnyCancellable>()
     private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
+
+    private var recordingReadinessState: RecordingReadinessState {
+        switch state {
+        case .idle:
+            return .idle
+        case .recording:
+            return .recording
+        case .processing:
+            return .processing
+        }
+    }
 
     init() {
         self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")

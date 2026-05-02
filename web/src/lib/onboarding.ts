@@ -120,7 +120,9 @@ export function buildOnboardingChecklist(
     {
       id: "auth",
       label: "Workspace access",
-      detail: "Optional Google sign-in keeps browser access tied to your authorized account.",
+      detail: input.authConfigured
+        ? "Calendar-aware prompts can use your signed-in workspace context when events are available."
+        : "Optional for calendar-aware prompts. Manual recording works without it.",
       actionLabel: "Review access",
       target: "settings-general",
       status: input.authConfigured ? "complete" : "needs-action",

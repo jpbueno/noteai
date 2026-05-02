@@ -170,7 +170,9 @@ struct OnboardingChecklist: Equatable {
             OnboardingChecklistItem(
                 id: .calendar,
                 label: "Calendar account",
-                detail: "Optional Google account connection for future calendar-aware meeting context.",
+                detail: calendarAuthConfigured
+                    ? "Calendar-aware meeting prompts can arm shortly before events."
+                    : "Optional for calendar-aware prompts. Manual recording works without it.",
                 actionLabel: "Open Account settings",
                 actionTarget: .openAccountSettings,
                 status: calendarAuthConfigured ? .complete : .needsAction,

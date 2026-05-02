@@ -32,7 +32,7 @@ final class ArchitectureModuleTests: XCTestCase {
         let fallback = MeetingCaptureWorkflow.failedSummary(errorDescription: "No key")
 
         XCTAssertTrue(text.contains("[00:03] Alice: Hello there"))
-        XCTAssertTrue(text.contains("[01:05] Speaker: Follow up next week"))
+        XCTAssertTrue(text.contains("[01:05] Speaker 1: Follow up next week"))
         XCTAssertEqual(fallback.topics, ["Summarization failed: No key"])
         XCTAssertFalse(fallback.wasSummarized)
     }
@@ -89,6 +89,67 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(readiness.title, "Customer Sync soon")
         XCTAssertTrue(readiness.detail.contains("auto-armed"))
         XCTAssertEqual(readiness.badgeTitle, "Armed")
+    }
+
+    func testSpeakerLabelingResolvesStablePlaceholdersAndOverrides() {
+        var meeting = Meeting(
+            id: UUID(),
+            title: "Speaker Sync",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 120,
+            transcript: [
+                TranscriptSegment(id: 1, text: "Fallback speaker.", startTime: 0, speaker: nil, confidence: 0.9),
+                TranscriptSegment(id: 2, text: "Known placeholder.", startTime: 5, speaker: "speaker-2", confidence: 0.9),
+                TranscriptSegment(id: 3, text: "Named participant.", startTime: 10, speaker: "Ana", confidence: 0.9),
+            ],
+            summary: MeetingSummary()
+        )
+
+        XCTAssertEqual(meeting.speakerID(for: meeting.transcript[0]), "speaker-1")
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[0]), "Speaker 1")
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[1]), "Speaker 2")
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[2]), "Ana")
+
+        meeting.setSpeakerLabel(speakerID: "speaker-1", displayName: "JP")
+        meeting.setSpeakerLabel(speakerID: "speaker-2", displayName: "Customer")
+
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[0]), "JP")
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[1]), "Customer")
+    }
+
+    func testMeetingCaptureWorkflowAssignsPlaceholderSpeakersBeforePersisting() {
+        let meeting = MeetingCaptureWorkflow.makeMeeting(
+            title: "Fallback Speakers",
+            startedAt: Date(timeIntervalSince1970: 0),
+            finishedAt: Date(timeIntervalSince1970: 30),
+            transcript: [
+                TranscriptSegment(id: 1, text: "We need a stable label.", startTime: 0, speaker: nil, confidence: 0.9)
+            ],
+            summary: MeetingSummary()
+        )
+
+        XCTAssertEqual(meeting.transcript.first?.speaker, "speaker-1")
+        XCTAssertEqual(meeting.speakerDisplayName(for: meeting.transcript[0]), "Speaker 1")
+    }
+
+    func testAudioSourcePlaceholdersSeparateLocalAndRemoteWhenAvailable() {
+        let localSegments = TranscriptSpeakerLabels.assignPlaceholders(
+            to: [
+                TranscriptSegment(id: 1, text: "Local voice.", startTime: 0, speaker: nil, confidence: 0.9)
+            ],
+            fallbackSpeakerID: CapturedAudioSource.microphone.fallbackSpeakerID
+        )
+        let remoteSegments = TranscriptSpeakerLabels.assignPlaceholders(
+            to: [
+                TranscriptSegment(id: 2, text: "Remote voice.", startTime: 7, speaker: nil, confidence: 0.9)
+            ],
+            fallbackSpeakerID: CapturedAudioSource.systemAudio.fallbackSpeakerID
+        )
+
+        XCTAssertEqual(localSegments[0].speaker, "speaker-local")
+        XCTAssertEqual(remoteSegments[0].speaker, "speaker-remote")
+        XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-local", labels: [:]), "You")
+        XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-remote", labels: [:]), "Remote audio")
     }
 
     func testTranscriptionWindowPlannerSplitsLongBuffersIntoBoundedWindows() {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "./db";
+import { FALLBACK_SPEAKER_ID, withSpeakerPlaceholders } from "./types";
 import type {
   Meeting,
   Note,
@@ -193,7 +194,7 @@ export function useRecording() {
               text,
               startTime: Math.max(0, elapsed - 5),
               endTime: elapsed,
-              speaker: null,
+              speaker: FALLBACK_SPEAKER_ID,
               confidence: 0.9,
             },
           ]);
@@ -256,14 +257,14 @@ export function useRecording() {
           const response = await stopLocalCaptureHelperCapture({ token });
           helperSessionRef.current = null;
           const recordedDuration = Math.max(duration, Math.round(response.duration || 0));
-          const finalSegments: TranscriptSegment[] = response.transcript.map((segment, index) => ({
+          const finalSegments: TranscriptSegment[] = withSpeakerPlaceholders(response.transcript.map((segment, index) => ({
             id: segment.id ?? index,
             text: segment.text,
             startTime: segment.startTime,
             endTime: segment.endTime,
             speaker: segment.speaker ?? null,
             confidence: segment.confidence,
-          }));
+          })));
           const finalText = finalSegments.map((s) => s.text).join(" ").trim();
 
           const meetingTitle = title || `Teams Desktop ${new Date().toLocaleDateString()}`;
@@ -273,7 +274,7 @@ export function useRecording() {
               title: meetingTitle,
               date: new Date().toISOString(),
               duration: recordedDuration,
-              transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: null, confidence: 0 }],
+              transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
               summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
             };
             await db.meetings.add(meeting);
@@ -356,7 +357,7 @@ export function useRecording() {
               text: whisperText,
               startTime: 0,
               endTime: recordedDuration,
-              speaker: null,
+              speaker: FALLBACK_SPEAKER_ID,
               confidence: 0.95,
             }];
           }
@@ -376,7 +377,7 @@ export function useRecording() {
           title: title || `Meeting ${new Date().toLocaleDateString()}`,
           date: new Date().toISOString(),
           duration: recordedDuration,
-          transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: null, confidence: 0 }],
+          transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
           summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
         };
         await db.meetings.add(meeting);
@@ -401,7 +402,7 @@ export function useRecording() {
         title: title || `Meeting ${new Date().toLocaleDateString()}`,
         date: new Date().toISOString(),
         duration: recordedDuration,
-        transcript: finalSegments,
+        transcript: withSpeakerPlaceholders(finalSegments),
         summary,
       };
 

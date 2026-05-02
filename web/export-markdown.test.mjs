@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import test from "node:test";
 
-import { generateMeetingMarkdown, generateMeetingPdfHtml, meetingMarkdownFilename, meetingPdfFilename } from "./src/lib/exports.ts";
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "./types" && context.parentURL?.endsWith("/src/lib/exports.ts")) {
+      return nextResolve("./types.ts", context);
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
+const {
+  generateMeetingMarkdown,
+  generateMeetingPdfHtml,
+  meetingMarkdownFilename,
+  meetingPdfFilename,
+} = await import("./src/lib/exports.ts");
 
 const meeting = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -22,6 +37,9 @@ const meeting = {
     openQuestions: ["Who sends the customer note?"],
     wasSummarized: true,
   },
+  speakerLabels: {
+    "speaker-1": "JP",
+  },
 };
 
 test("meeting markdown export includes shared source fields and task list", () => {
@@ -35,7 +53,7 @@ test("meeting markdown export includes shared source fields and task list", () =
   assert.match(markdown, /\*\*Segments:\*\* 2/);
   assert.match(markdown, /- \[ \] Update launch brief — \*\*Dev\*\* \(by 2026-05-01\)/);
   assert.match(markdown, /- \[x\] Publish notes/);
-  assert.match(markdown, /\*\*\[01:05\] Speaker:\*\* I will update the brief\./);
+  assert.match(markdown, /\*\*\[01:05\] JP:\*\* I will update the brief\./);
 });
 
 test("meeting markdown filename is safe and predictable", () => {
@@ -53,6 +71,6 @@ test("meeting PDF HTML includes polished print styles and shared fields", () => 
   assert.match(html, /<h2>Action Items<\/h2>/);
   assert.match(html, /☐ Update launch brief/);
   assert.match(html, /☑ Publish notes/);
-  assert.match(html, /\[01:05\] Speaker/);
+  assert.match(html, /\[01:05\] JP/);
   assert.equal(meetingPdfFilename(meeting), "Q3 - Launch- Readout.pdf");
 });

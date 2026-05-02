@@ -2,6 +2,25 @@ import AVFoundation
 import CoreAudio
 import ScreenCaptureKit
 
+struct CapturedAudioBuffer {
+    let source: CapturedAudioSource
+    let buffer: AVAudioPCMBuffer
+}
+
+enum CapturedAudioSource: Equatable {
+    case microphone
+    case systemAudio
+
+    var fallbackSpeakerID: String {
+        switch self {
+        case .microphone:
+            return TranscriptSpeakerLabels.localSpeakerID
+        case .systemAudio:
+            return TranscriptSpeakerLabels.remoteSpeakerID
+        }
+    }
+}
+
 /// Orchestrates audio capture:
 /// 1. ProcessTap (macOS 14.2+) for direct per-process audio capture from a meeting app
 /// 2. ScreenCaptureKit ALL desktop audio capture as fallback (any app, any speaker)
@@ -9,7 +28,7 @@ import ScreenCaptureKit
 ///
 /// All audio is resampled to 16kHz mono before being delivered to the transcription engine.
 final class AudioCaptureManager: NSObject {
-    var onAudioBuffer: ((AVAudioPCMBuffer) -> Void)?
+    var onAudioBuffer: ((CapturedAudioBuffer) -> Void)?
     var onDiagnosticsChange: ((RecordingDiagnosticsSnapshot) -> Void)?
 
     private var processTap: Any?  // ProcessTapProvider (macOS 14.2+)
@@ -251,7 +270,7 @@ final class AudioCaptureManager: NSObject {
         appAudioRing.append(resampled)
         if let merged = appAudioRing.mergeIfReady(targetDuration: 7.0) {
             print("[AudioCapture] App audio chunk: \(merged.frameLength) frames, RMS=\(rms(merged))")
-            onAudioBuffer?(merged)
+            onAudioBuffer?(CapturedAudioBuffer(source: .systemAudio, buffer: merged))
         }
     }
 
@@ -263,7 +282,7 @@ final class AudioCaptureManager: NSObject {
         micAudioRing.append(resampled)
         if let merged = micAudioRing.mergeIfReady(targetDuration: 7.0) {
             print("[AudioCapture] Mic audio chunk: \(merged.frameLength) frames, RMS=\(rms(merged))")
-            onAudioBuffer?(merged)
+            onAudioBuffer?(CapturedAudioBuffer(source: .microphone, buffer: merged))
         }
     }
 

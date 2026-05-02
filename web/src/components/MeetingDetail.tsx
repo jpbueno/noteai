@@ -23,6 +23,9 @@ import {
   ensureMeetingSummaryMetadata,
   markSummarySectionUserEdited,
   normalizeActionItems,
+  setSpeakerLabel,
+  speakerDisplayNameForSegment,
+  speakerIDForSegment,
 } from "@/lib/types";
 import { formatDuration, formatDateTime, triggerRefresh } from "@/lib/hooks";
 import { db } from "@/lib/db";
@@ -79,6 +82,12 @@ export default function MeetingDetail({ meeting, todos = [], onNavigate }: Meeti
         "actionItems",
       ),
     );
+  };
+
+  const handleSaveSpeakerLabel = async (speakerID: string, displayName: string) => {
+    const updated = setSpeakerLabel(meeting, speakerID, displayName);
+    await db.meetings.put(updated);
+    triggerRefresh();
   };
 
   const handleRegenerateSection = async (section: SummarySectionKey) => {
@@ -293,11 +302,12 @@ export default function MeetingDetail({ meeting, todos = [], onNavigate }: Meeti
                   {seg.startTime > 0 ? formatTimestamp(seg.startTime) : ""}
                 </span>
                 <div className="flex-1">
-                  {seg.speaker && (
-                    <span className="text-xs text-accent font-medium mr-2">
-                      {seg.speaker}
-                    </span>
-                  )}
+                  <SpeakerLabelInput
+                    key={`${meeting.id}:${speakerIDForSegment(seg)}:${speakerDisplayNameForSegment(meeting, seg)}`}
+                    meeting={meeting}
+                    segment={seg}
+                    onSave={handleSaveSpeakerLabel}
+                  />
                   <span className="text-[15px] text-text-primary leading-relaxed">
                     {seg.text}
                   </span>
@@ -342,6 +352,47 @@ export default function MeetingDetail({ meeting, todos = [], onNavigate }: Meeti
 
       </div>
     </div>
+  );
+}
+
+function SpeakerLabelInput({
+  meeting,
+  segment,
+  onSave,
+}: {
+  meeting: Meeting;
+  segment: Meeting["transcript"][number];
+  onSave: (speakerID: string, displayName: string) => Promise<void>;
+}) {
+  const speakerID = speakerIDForSegment(segment);
+  const displayName = speakerDisplayNameForSegment(meeting, segment);
+  const [draft, setDraft] = useState(displayName);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (draft.trim() === displayName) return;
+    setSaving(true);
+    try {
+      await onSave(speakerID, draft);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      aria-label={`Speaker name for ${displayName}`}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={save}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+      }}
+      disabled={saving}
+      className="mr-2 inline-block w-28 rounded-md border border-transparent bg-content/55 px-1.5 py-0.5 text-xs font-medium text-accent outline-none transition-colors hover:border-border focus:border-accent disabled:opacity-60"
+    />
   );
 }
 

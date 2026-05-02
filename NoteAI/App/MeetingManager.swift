@@ -362,7 +362,10 @@ final class MeetingManager: ObservableObject {
     func resummarize(meeting: Meeting) async throws -> Meeting {
         debugLog("resummarize called for meeting \(meeting.id), transcript count=\(meeting.transcript.count)")
 
-        let transcriptText = MeetingCaptureWorkflow.transcriptText(from: meeting.transcript)
+        let transcriptText = MeetingCaptureWorkflow.transcriptText(
+            from: meeting.transcript,
+            speakerLabels: meeting.speakerLabels
+        )
 
         debugLog("transcript text length=\(transcriptText.count)")
 
@@ -430,6 +433,23 @@ final class MeetingManager: ObservableObject {
             }
         } catch {
             print("Failed to save edited summary section: \(error)")
+        }
+
+        return updated
+    }
+
+    @discardableResult
+    func updateSpeakerLabel(meeting: Meeting, speakerID: String, displayName: String) -> Meeting {
+        var updated = meeting
+        updated.setSpeakerLabel(speakerID: speakerID, displayName: displayName)
+
+        do {
+            try meetingStore.save(meeting: updated)
+            if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+                meetings[index] = updated
+            }
+        } catch {
+            print("Failed to save speaker label: \(error)")
         }
 
         return updated
@@ -814,9 +834,14 @@ final class MeetingManager: ObservableObject {
             guard let self else { return }
             Task {
                 do {
-                    let segments = try await self.transcriptionEngine.transcribe(audioBuffer: buffer)
+                    let segments = try await self.transcriptionEngine.transcribe(audioBuffer: buffer.buffer)
                     await MainActor.run {
-                        self.currentTranscript.append(contentsOf: segments)
+                        self.currentTranscript.append(
+                            contentsOf: TranscriptSpeakerLabels.assignPlaceholders(
+                                to: segments,
+                                fallbackSpeakerID: buffer.source.fallbackSpeakerID
+                            )
+                        )
                     }
                 } catch {
                     print("Transcription error: \(error)")
@@ -1122,7 +1147,7 @@ private extension LocalCaptureTranscriptSegment {
             text: segment.text,
             startTime: segment.startTime,
             endTime: segment.endTime,
-            speaker: segment.speaker,
+            speaker: TranscriptSpeakerLabels.speakerID(for: segment),
             confidence: segment.confidence
         )
     }

@@ -136,19 +136,25 @@ function quickFilterLabel(filter: LibraryQuickFilter) {
 export default function Home() {
   const [authState, setAuthState] = useState<"loading" | "authenticated" | "login">("loading");
   const [googleClientId, setGoogleClientId] = useState("");
+  const [calendarAuthConfigured, setCalendarAuthConfigured] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth")
       .then(async (res) => {
         const data = await res.json();
         if (!data.required || data.authenticated) {
+          setCalendarAuthConfigured(Boolean(data.required && data.authenticated));
           setAuthState("authenticated");
         } else {
           setGoogleClientId(data.clientId || "");
+          setCalendarAuthConfigured(false);
           setAuthState("login");
         }
       })
-      .catch(() => setAuthState("login"));
+      .catch(() => {
+        setCalendarAuthConfigured(false);
+        setAuthState("login");
+      });
   }, []);
 
   const meetings = useMeetings();
@@ -514,7 +520,10 @@ export default function Home() {
   }, [recordingState, guardedStartRecording, handleStopRecording]);
 
   if (authState === "loading") return null;
-  if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => setAuthState("authenticated")} />;
+  if (authState === "login") return <LoginForm clientId={googleClientId} onSuccess={() => {
+    setCalendarAuthConfigured(true);
+    setAuthState("authenticated");
+  }} />;
 
   const renderDetail = () => {
     if (!selection) {
@@ -657,6 +666,8 @@ export default function Home() {
             recordingState={recordingState}
             recordingDuration={duration}
             recordingSources={recordingSources}
+            calendarAuthConfigured={calendarAuthConfigured}
+            browserMeetingDetectionAvailable={false}
             onStartRecording={(micDeviceId, captureTab, source) => {
               void guardedStartRecording(micDeviceId, captureTab, source);
             }}

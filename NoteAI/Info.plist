@@ -37,5 +37,7 @@
     <string>NoteAI needs screen recording permission to capture system audio from meeting applications.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>NoteAI uses your calendar to automatically detect upcoming meetings.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>NoteAI uses full calendar access to arm recording prompts before upcoming meetings.</string>
 </dict>
 </plist>

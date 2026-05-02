@@ -15,7 +15,11 @@ enum ProcessMonitor {
     /// Finds the first running meeting app, preferring Teams over browsers.
     static func findMeetingApp() -> NSRunningApplication? {
         let workspace = NSWorkspace.shared
-        let runningApps = workspace.runningApplications
+        return findMeetingApp(in: workspace.runningApplications)
+    }
+
+    /// Finds the first meeting app in a provided process snapshot.
+    static func findMeetingApp(in runningApps: [NSRunningApplication]) -> NSRunningApplication? {
 
         // Prefer dedicated meeting apps (Teams) over browsers
         for bundleID in meetingBundleIDs {

@@ -25,6 +25,7 @@ const contentSecurityPolicy = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  poweredByHeader: false,
   allowedDevOrigins: ["127.0.0.1", "*.trycloudflare.com"],
   headers: async () => [
     {

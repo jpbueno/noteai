@@ -20,6 +20,7 @@ jobs:
   deploy:
     name: Build and deploy production Worker
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     timeout-minutes: 20
     environment:
       name: production
@@ -49,3 +50,15 @@ jobs:
         run: npx wrangler deploy --keep-vars
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Smoke check production health endpoint
+        run: |
+          curl --fail --silent --show-error "https://noteai-web.noteai-jp.workers.dev/api/health" --output /tmp/noteai-health.json
+          node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("/tmp/noteai-health.json", "utf8"));
+            if (payload.ok !== true || payload.service !== "noteai-web") {
+              console.error("Unexpected health payload:", payload);
+              process.exit(1);
+            }
+          '

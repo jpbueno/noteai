@@ -80,13 +80,15 @@ This keeps automatic deploys predictable: production changes only after `main` c
 
 ## Cloudflare Deployment
 
-The workflow `.github/workflows/web-deploy-cloudflare.yml` deploys the web app to Cloudflare Workers after a push to `main` that changes `web/**` or the deploy workflow itself.
+The workflow `.github/workflows/web-deploy-cloudflare.yml` deploys the web app to Cloudflare Workers after a push to `main` that changes `web/**` or the deploy workflow itself. Because `web/wrangler.jsonc` also declares `env.preview`, production deploys pass `--env=""` to target the top-level production Worker explicitly.
 
 Required GitHub repository secret:
 
 - `CLOUDFLARE_API_TOKEN`
 
 The token should have the minimum permissions needed to deploy the `noteai-web` Worker. Runtime app secrets stay in Cloudflare and are preserved by `wrangler deploy --keep-vars`.
+
+Production is the only automatically deployed cloud environment. Preview is defined but manual-only until a separate preview Turso database and preview Worker secrets exist. Pull requests must stay local/CI-only and must not point at production Turso data before merge. See `docs/security/cloudflare-turso-environment-separation.md`.
 
 Required Cloudflare Worker secrets:
 
@@ -99,6 +101,10 @@ Optional Cloudflare Worker secrets:
 
 - `GOOGLE_ALLOWED_EMAILS`
 - `NOTEAI_API_KEY_HASHES`
+
+Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic API access uses `NOTEAI_API_KEY_HASHES`.
+
+Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` through Cloudflare Worker secrets without committing or printing values.
 
 ## macOS Deployment
 

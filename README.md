@@ -115,18 +115,21 @@ Production is deployed at: https://noteai-web.noteai-jp.workers.dev
 ```bash
 cd web
 npm run build:cf
-CLOUDFLARE_API_TOKEN=your-token npm run deploy:cf
+npx wrangler deploy --env="" --keep-vars
 ```
 
-Set secrets on Cloudflare:
+Set production secrets on Cloudflare using interactive input:
+
 ```bash
-echo "value" | npx wrangler secret put TURSO_DATABASE_URL
-echo "value" | npx wrangler secret put TURSO_AUTH_TOKEN
-echo "value" | npx wrangler secret put NOTEAI_AUTH_SECRET
-echo "value" | npx wrangler secret put GOOGLE_CLIENT_ID
-echo "value" | npx wrangler secret put GOOGLE_ALLOWED_EMAILS
-echo "value" | npx wrangler secret put NOTEAI_API_KEY_HASHES
+npx wrangler secret put TURSO_DATABASE_URL --env=""
+npx wrangler secret put TURSO_AUTH_TOKEN --env=""
+npx wrangler secret put NOTEAI_AUTH_SECRET --env=""
+npx wrangler secret put GOOGLE_CLIENT_ID --env=""
+npx wrangler secret put GOOGLE_ALLOWED_EMAILS --env=""
+npx wrangler secret put NOTEAI_API_KEY_HASHES --env=""
 ```
+
+Preview deploys must use `--env preview` and preview-only Turso values. See `docs/security/cloudflare-turso-environment-separation.md`.
 
 ### API Access
 

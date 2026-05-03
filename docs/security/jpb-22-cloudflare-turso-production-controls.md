@@ -71,9 +71,9 @@ Remediation: add a small restore runbook and record the first restore-drill evid
 
 ### Low: Worker secret inventory contains an unused legacy-looking secret
 
-Cloudflare secret inventory includes `NOTEAI_API_KEY`, while current code and docs use `NOTEAI_API_KEY_HASHES` for programmatic bearer authentication. This did not block production auth because API routes are still session-gated, but the unused secret should be either mapped to a current runtime need or removed.
+Cloudflare secret inventory included `NOTEAI_API_KEY`, while current code and docs use `NOTEAI_API_KEY_HASHES` for programmatic bearer authentication. This did not block production auth because API routes are still session-gated, but the unused secret needed to be either mapped to a current runtime need or removed.
 
-Remediation: confirm whether `NOTEAI_API_KEY` is obsolete. If obsolete, remove it from Cloudflare after confirming no deployed Worker version still needs it. If current, document its purpose and update code/docs accordingly.
+Status: resolved by JPB-81 on 2026-05-03. `NOTEAI_API_KEY` was confirmed obsolete for the active Worker and removed from Cloudflare. See `docs/security/jpb-81-worker-secret-cleanup.md`.
 
 ## Controls Confirmed
 
@@ -97,9 +97,9 @@ JPB-22 is a verification and documentation slice. The following items require ac
 2. Document or implement Cloudflare Access/WAF/rate-limit policy for the public workers.dev production route.
 3. Verify and document Turso production token scope, expiration, and rotation cadence.
 4. Decide whether to implement Turso read/write token separation or keep a single full-access server token behind app auth.
-5. Add Turso preview-vs-production database separation if preview deploys become part of the delivery workflow.
-6. Add a Turso PITR restore runbook and record the first restore drill.
-7. Remove or document the `NOTEAI_API_KEY` Worker secret.
+5. Resolved by JPB-79: `docs/security/cloudflare-turso-environment-separation.md` defines the preview-vs-production boundary and `web/wrangler.jsonc` declares `env.preview` required secrets.
+6. Resolved by JPB-80: `docs/security/turso-restore-runbook.md` documents PITR/cutover steps and the first non-production restore simulation.
+7. Resolved by JPB-81: `docs/security/jpb-81-worker-secret-cleanup.md` records removal of the legacy `NOTEAI_API_KEY` Worker secret.
 
 ## Verification Commands and Results
 

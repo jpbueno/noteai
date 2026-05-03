@@ -67,9 +67,11 @@ npm run build
 
 ```bash
 npm run build:cf
-npm run deploy:cf
+npx wrangler deploy --env="" --keep-vars
 ```
 
 The worker name is configured in `wrangler.jsonc` as `noteai-web`.
+
+Production deploys target the top-level Wrangler environment with `--env=""`. Preview deploys must use `--env preview` and preview-only Turso values; see `../docs/security/cloudflare-turso-environment-separation.md`.
 
 For programmatic REST access, send `Authorization: Bearer <raw-key>` and store only the raw key's base64 SHA-256 digest in `NOTEAI_API_KEY_HASHES`.

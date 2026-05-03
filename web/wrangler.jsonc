@@ -20,5 +20,22 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "STATIC_ASSETS"
+  },
+  "env": {
+    "preview": {
+      "workers_dev": true,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.1
+      },
+      "secrets": {
+        "required": [
+          "TURSO_DATABASE_URL",
+          "TURSO_AUTH_TOKEN",
+          "NOTEAI_AUTH_SECRET",
+          "GOOGLE_CLIENT_ID"
+        ]
+      }
+    }
   }
 }

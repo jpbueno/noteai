@@ -10,6 +10,7 @@ Use this checklist before shipping macOS or web changes.
 - From `web/`, run `npm run build`.
 - For Cloudflare releases, run `npm run build:cf`.
 - Smoke check the deployed web app with `GET /api/health` and confirm `ok: true`.
+- Confirm the environment policy in `docs/security/cloudflare-turso-environment-separation.md` still applies.
 
 ## Web Runtime Configuration
 
@@ -26,6 +27,10 @@ Optional secrets:
 - `NOTEAI_API_KEY_HASHES`
 
 Provider API keys are stored through the app settings API and must remain write-only from browser reads.
+
+Do not configure the legacy `NOTEAI_API_KEY` Worker secret. Programmatic REST access uses `NOTEAI_API_KEY_HASHES`.
+
+Preview deploys must use preview-only values for the required Worker secrets and must not target production Turso.
 
 ## Security Headers
 

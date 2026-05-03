@@ -179,14 +179,14 @@ No critical findings confirmed.
 - Remediation risk: Low.
 - Verification: `git status --ignored --short web/.env*` shows ignored local envs only; secret scanner reports no committed credentials.
 
-### SEC-012: Cloudflare Worker config keeps secrets out of `vars`, but required secrets/env separation are not declared
+### SEC-012: Cloudflare Worker config keeps secrets out of `vars`, and environment separation is documented
 
 - Severity: Informational
-- Status: Mitigated
+- Status: Fixed
 - Evidence: `web/wrangler.jsonc:1-10` has no `vars` block containing secrets.
 - Evidence: `README.md:120-126` instructs using `wrangler secret put` for Turso/auth/Google values.
-- Impact: This avoids the common Cloudflare mistake of committing secrets in Wrangler vars. However, the repo does not declare required secrets or separate preview/production bindings.
-- Recommendation: Partially completed. App-level required secret checks now fail closed for APIs, and docs include `NOTEAI_API_KEY_HASHES`. Wrangler environment separation still needs deployment/environment design.
+- Impact: This avoids the common Cloudflare mistake of committing secrets in Wrangler vars. Required Worker secrets are declared, and preview/prod separation is documented without committing secret values.
+- Recommendation: Completed for current scope. App-level required secret checks fail closed for APIs, docs include `NOTEAI_API_KEY_HASHES`, `web/wrangler.jsonc` declares required secrets, and `docs/security/cloudflare-turso-environment-separation.md` defines the preview/production boundary.
 - Remediation risk: Low.
 - Verification: Deploy/preview fails clearly when required secrets are absent, and preview cannot accidentally write production Turso unless explicitly configured.
 

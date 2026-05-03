@@ -47,7 +47,7 @@ jobs:
         run: npm run build:cf
 
       - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy --keep-vars
+        run: npx wrangler deploy --env="" --keep-vars
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 

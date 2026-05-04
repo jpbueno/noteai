@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
@@ -552,6 +553,48 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 42)
     }
 
+    func testAppearanceModeMapsToPreferredColorScheme() {
+        XCTAssertEqual(NoteAIAppearanceMode.allCases.map(\.rawValue), ["system", "dark", "light"])
+        XCTAssertNil(NoteAIAppearanceMode.system.preferredColorScheme)
+        XCTAssertEqual(NoteAIAppearanceMode.dark.preferredColorScheme, .dark)
+        XCTAssertEqual(NoteAIAppearanceMode.light.preferredColorScheme, .light)
+    }
+
+    func testCommandCenterLayoutPresetsChangeDensityAndSpacing() {
+        let compact = CommandCenterLayout.metrics(forWindowWidth: 1400, preset: .compact)
+        let balanced = CommandCenterLayout.metrics(forWindowWidth: 1400, preset: .balanced)
+        let comfortable = CommandCenterLayout.metrics(forWindowWidth: 1400, preset: .comfortable)
+
+        XCTAssertLessThan(compact.dashboardSpacing, balanced.dashboardSpacing)
+        XCTAssertLessThan(compact.panelPadding, balanced.panelPadding)
+        XCTAssertLessThan(compact.onboardingMinimumCardWidth, balanced.onboardingMinimumCardWidth)
+
+        XCTAssertGreaterThan(comfortable.dashboardSpacing, balanced.dashboardSpacing)
+        XCTAssertGreaterThan(comfortable.panelPadding, balanced.panelPadding)
+        XCTAssertGreaterThan(comfortable.onboardingMinimumCardWidth, balanced.onboardingMinimumCardWidth)
+
+        XCTAssertEqual(CommandCenterLayoutPreset.allCases.map(\.rawValue), ["compact", "balanced", "comfortable"])
+    }
+
+    func testSettingsExposeAppearanceAndLayoutControls() throws {
+        let source = try settingsSource()
+
+        XCTAssertTrue(source.contains("AppearanceSettingsView"))
+        XCTAssertTrue(source.contains("@AppStorage(\"noteai.appearanceMode\")"))
+        XCTAssertTrue(source.contains("@AppStorage(\"noteai.commandCenterLayoutPreset\")"))
+        XCTAssertTrue(source.contains("Picker(\"Appearance\""))
+        XCTAssertTrue(source.contains("Picker(\"Dashboard layout\""))
+    }
+
+    func testMainWindowAppliesSavedAppearanceAndLayoutPreset() throws {
+        let appSource = try appDelegateSource()
+        let meetingSource = try meetingLibrarySource()
+
+        XCTAssertTrue(appSource.contains(".preferredColorScheme(NoteAIAppearanceMode"))
+        XCTAssertTrue(meetingSource.contains("CommandCenterLayoutPreset(rawValue: commandCenterLayoutPresetRaw)"))
+        XCTAssertTrue(meetingSource.contains("CommandCenterLayout.metrics(forWindowWidth: proxy.size.width, preset: layoutPreset)"))
+    }
+
     func testCommandCenterSidebarBrandReservesTitlebarControls() throws {
         let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
         let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
@@ -643,6 +686,20 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let todoDetailFile = projectRoot.appendingPathComponent("NoteAI/UI/Todos/TodoDetailView.swift")
         return try String(contentsOf: todoDetailFile, encoding: .utf8)
+    }
+
+    private func settingsSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let settingsFile = projectRoot.appendingPathComponent("NoteAI/UI/Settings/SettingsView.swift")
+        return try String(contentsOf: settingsFile, encoding: .utf8)
+    }
+
+    private func appDelegateSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let appDelegateFile = projectRoot.appendingPathComponent("NoteAI/App/AppDelegate.swift")
+        return try String(contentsOf: appDelegateFile, encoding: .utf8)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

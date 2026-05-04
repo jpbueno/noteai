@@ -1,30 +1,103 @@
+import AppKit
 import SwiftUI
+
+enum NoteAIAppearanceMode: String, CaseIterable, Identifiable {
+    case system
+    case dark
+    case light
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system: return "System"
+        case .dark: return "Dark"
+        case .light: return "Light"
+        }
+    }
+
+    var preferredColorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .dark: return .dark
+        case .light: return .light
+        }
+    }
+}
+
+enum CommandCenterLayoutPreset: String, CaseIterable, Identifiable {
+    case compact
+    case balanced
+    case comfortable
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .compact: return "Compact"
+        case .balanced: return "Balanced"
+        case .comfortable: return "Comfortable"
+        }
+    }
+
+    var spacingMultiplier: CGFloat {
+        switch self {
+        case .compact: return 0.82
+        case .balanced: return 1.0
+        case .comfortable: return 1.18
+        }
+    }
+
+    var panelPaddingMultiplier: CGFloat {
+        switch self {
+        case .compact: return 0.86
+        case .balanced: return 1.0
+        case .comfortable: return 1.14
+        }
+    }
+
+    var cardWidthMultiplier: CGFloat {
+        switch self {
+        case .compact: return 0.90
+        case .balanced: return 1.0
+        case .comfortable: return 1.08
+        }
+    }
+
+    var sidebarWidthAdjustment: CGFloat {
+        switch self {
+        case .compact: return -12
+        case .balanced: return 0
+        case .comfortable: return 10
+        }
+    }
+}
 
 /// NoteAI v4 Command Center design tokens.
 enum Theme {
     // Mirrors web/src/app/globals.css.
-    static let sidebarBG = Color(hex: "10161B")
-    static let contentBG = Color(hex: "0B0F12")
-    static let hoverBG = Color(hex: "151D23")
-    static let selectedBG = Color(hex: "1B252D")
-    static let border = Color(hex: "26333D")
-    static let panelBG = Color(hex: "10161B").opacity(0.86)
-    static let rowBG = Color(hex: "0F1519")
-    static let rowBorder = Color(hex: "202D36")
+    static let sidebarBG = Color(light: "F8FAFC", dark: "10161B")
+    static let contentBG = Color(light: "F3F6F8", dark: "0B0F12")
+    static let hoverBG = Color(light: "E8EEF3", dark: "151D23")
+    static let selectedBG = Color(light: "DDEFF9", dark: "1B252D")
+    static let border = Color(light: "CFDAE3", dark: "26333D")
+    static let panelBG = Color(light: "FFFFFF", dark: "10161B").opacity(0.86)
+    static let rowBG = Color(light: "FFFFFF", dark: "0F1519")
+    static let rowBorder = Color(light: "D8E2EA", dark: "202D36")
 
     // Text
-    static let textPrimary = Color(hex: "F3F7F9")
-    static let textSecondary = Color(hex: "C4CCD2")
-    static let textTertiary = Color(hex: "84919C")
+    static let textPrimary = Color(light: "18232D", dark: "F3F7F9")
+    static let textSecondary = Color(light: "45525E", dark: "C4CCD2")
+    static let textTertiary = Color(light: "6E7C89", dark: "84919C")
 
     // Sidebar section headers
-    static let sectionHeader = Color(hex: "9BA7AF")
+    static let sectionHeader = Color(light: "5F6D79", dark: "9BA7AF")
 
     // Status
-    static let accent = Color(hex: "64D2FF")
-    static let danger = Color(hex: "FF5C66")
-    static let success = Color(hex: "4ADE80")
-    static let warning = Color(hex: "FACC15")
+    static let accent = Color(light: "0284C7", dark: "64D2FF")
+    static let danger = Color(light: "D64555", dark: "FF5C66")
+    static let success = Color(light: "168A46", dark: "4ADE80")
+    static let warning = Color(light: "B7791F", dark: "FACC15")
 
     // Content typography
     static let pageTitleSize: CGFloat = 40
@@ -50,5 +123,24 @@ extension Color {
         let g = Double((int >> 8) & 0xFF) / 255
         let b = Double(int & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+
+    init(light: String, dark: String) {
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(noteAIHex: isDark ? dark : light)
+        })
+    }
+}
+
+private extension NSColor {
+    convenience init(noteAIHex: String) {
+        let hex = noteAIHex.trimmingCharacters(in: .alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r = CGFloat((int >> 16) & 0xFF) / 255
+        let g = CGFloat((int >> 8) & 0xFF) / 255
+        let b = CGFloat(int & 0xFF) / 255
+        self.init(calibratedRed: r, green: g, blue: b, alpha: 1)
     }
 }

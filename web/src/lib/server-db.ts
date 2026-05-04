@@ -1,4 +1,5 @@
 // Turso HTTP API client using plain fetch — works on any serverless platform
+import schemaDefinition from "./turso-schema.json";
 
 function getConfig() {
   const rawUrl = process.env.TURSO_DATABASE_URL || "";
@@ -74,48 +75,27 @@ async function query(sql: string, args: (string | number | null)[] = []): Promis
   return { columns, rows };
 }
 
-// Schema
+function isBenignMigrationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate column name|already exists/i.test(message);
+}
 
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', date TEXT NOT NULL, duration REAL NOT NULL DEFAULT 0, transcript TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '{}')`,
-  `CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Untitled', content TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT)`,
-  `CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', rawInput TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, sourceMeetingID TEXT, sourceNoteID TEXT)`,
-  `CREATE TABLE IF NOT EXISTS t5tReports (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', createdDate TEXT NOT NULL, periodStart TEXT NOT NULL, periodEnd TEXT NOT NULL, meetingIDs TEXT NOT NULL DEFAULT '[]', noteIDs TEXT NOT NULL DEFAULT '[]', taskIDs TEXT NOT NULL DEFAULT '[]', dailyLogIDs TEXT NOT NULL DEFAULT '[]', sections TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft')`,
-  `CREATE TABLE IF NOT EXISTS dailyLogs (id TEXT PRIMARY KEY, date TEXT NOT NULL, sections TEXT NOT NULL DEFAULT '[]', linkedMeetingIDs TEXT NOT NULL DEFAULT '[]', createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS chatMessages (id TEXT PRIMARY KEY, role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', timestamp TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', completed INTEGER NOT NULL DEFAULT 0, dueDate TEXT, sourceMeetingID TEXT, sourceActionItemID TEXT, owner TEXT, createdDate TEXT NOT NULL, modifiedDate TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0)`,
-  `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`,
-];
+export async function migrateTursoSchema(): Promise<void> {
+  if (isLocalPersistenceEnabled()) return;
 
-const MIGRATIONS = [
-  "ALTER TABLE meetings ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE t5tReports ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE todos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE todos ADD COLUMN dueDate TEXT",
-  "ALTER TABLE todos ADD COLUMN sourceMeetingID TEXT",
-  "ALTER TABLE todos ADD COLUMN sourceActionItemID TEXT",
-  "ALTER TABLE todos ADD COLUMN owner TEXT",
-  "ALTER TABLE dailyLogs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE t5tReports ADD COLUMN dailyLogIDs TEXT NOT NULL DEFAULT '[]'",
-];
-
-let _initialized = false;
-
-async function ensureSchema(): Promise<void> {
-  if (_initialized) return;
-  if (isLocalPersistenceEnabled()) {
-    _initialized = true;
-    return;
-  }
-  for (const sql of SCHEMA) {
+  for (const sql of schemaDefinition.schema) {
     await query(sql);
   }
-  for (const sql of MIGRATIONS) {
-    try { await query(sql); } catch { /* column already exists */ }
+  for (const migration of schemaDefinition.migrations) {
+    try {
+      await query(migration.sql);
+    } catch (error) {
+      if (!isBenignMigrationError(error)) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Turso migration ${migration.id} failed: ${message}`);
+      }
+    }
   }
-  _initialized = true;
 }
 
 // JSON serialization
@@ -221,7 +201,6 @@ function localSort(table: string, rows: Record<string, unknown>[]): Record<strin
 
 export async function getAll(table: string): Promise<Record<string, unknown>[]> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
-  await ensureSchema();
   if (isLocalPersistenceEnabled()) {
     return localSort(table, Array.from(localTable(table).values())).map(copyLocalRow);
   }
@@ -237,7 +216,6 @@ export async function getAll(table: string): Promise<Record<string, unknown>[]> 
 
 export async function getById(table: string, id: string): Promise<Record<string, unknown> | undefined> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
-  await ensureSchema();
   if (isLocalPersistenceEnabled()) {
     const row = localTable(table).get(id);
     return row ? copyLocalRow(row) : undefined;
@@ -249,7 +227,6 @@ export async function getById(table: string, id: string): Promise<Record<string,
 
 export async function upsert(table: string, data: Record<string, unknown>): Promise<void> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
-  await ensureSchema();
 
   // Strip any keys not in the column whitelist (prevents SQL injection via column names)
   const safeData = stripInvalidColumns(table, data);
@@ -285,7 +262,6 @@ export async function upsert(table: string, data: Record<string, unknown>): Prom
 
 export async function remove(table: string, id: string): Promise<void> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
-  await ensureSchema();
   if (isLocalPersistenceEnabled()) {
     localTable(table).delete(id);
     return;
@@ -295,7 +271,6 @@ export async function remove(table: string, id: string): Promise<void> {
 
 export async function clearTable(table: string): Promise<void> {
   if (!VALID_TABLES.includes(table)) throw new Error(`Invalid table: ${table}`);
-  await ensureSchema();
   if (isLocalPersistenceEnabled()) {
     localTable(table).clear();
     return;
@@ -318,7 +293,7 @@ const VALID_SETTING_KEYS = [
   "tts_voice",
 ];
 
-const ENCRYPTED_KEYS = ["api_key_openrouter", "api_key_anthropic", "api_key_openai", "api_key_nvidia", "api_key_groq"];
+const ENCRYPTED_KEYS = schemaDefinition.encryptedSettingKeys;
 const ENC_PREFIX = "enc:";
 
 export function isEncryptedSettingKey(key: string): boolean {
@@ -368,19 +343,7 @@ async function decrypt(stored: string): Promise<string> {
 
 // --- Settings CRUD ---
 
-let _keysMigrated = false;
-
-async function ensureMigration(): Promise<void> {
-  if (_keysMigrated) return;
-  _keysMigrated = true;
-  await migrateEncryptSettings();
-}
-
 export async function getSettingValue(key: string): Promise<string | undefined> {
-  await ensureSchema();
-  if (ENCRYPTED_KEYS.includes(key) && !_keysMigrated) {
-    await ensureMigration();
-  }
   if (isLocalPersistenceEnabled()) {
     const raw = localTable("settings").get(key)?.value as string | undefined;
     if (!raw) return undefined;
@@ -397,7 +360,6 @@ export async function getSettingValue(key: string): Promise<string | undefined> 
 
 export async function setSettingValue(key: string, value: string): Promise<void> {
   if (!isValidSettingKey(key)) throw new Error(`Invalid setting key: ${key}`);
-  await ensureSchema();
   let stored = value;
   if (ENCRYPTED_KEYS.includes(key) && value) {
     stored = await encrypt(value);
@@ -414,7 +376,7 @@ export async function setSettingValue(key: string, value: string): Promise<void>
 
 // One-time migration: encrypt any plaintext API keys already in the DB
 export async function migrateEncryptSettings(): Promise<void> {
-  await ensureSchema();
+  await migrateTursoSchema();
   if (isLocalPersistenceEnabled()) {
     for (const key of ENCRYPTED_KEYS) {
       const row = localTable("settings").get(key);

@@ -14,6 +14,7 @@ Use this checklist before shipping macOS or web changes.
 - Confirm the GitHub `production` environment allows deployments only from `main`.
 - Confirm `CLOUDFLARE_API_TOKEN` is configured as a GitHub `production` environment secret, or record the temporary repository-secret exception in Linear.
 - Confirm the Turso production token rotation date has not passed.
+- If a web release changes Turso schema or stored encrypted settings format, run `Web Turso Migration` from `main` before the production deploy.
 
 ## Web Runtime Configuration
 
@@ -35,7 +36,7 @@ Do not configure the legacy `NOTEAI_API_KEY` Worker secret. Programmatic REST ac
 
 Preview deploys must use preview-only values for the required Worker secrets and must not target production Turso.
 
-The production Turso token is currently accepted as a single server-side write-capable token because schema initialization and CRUD share the same server path. It must be expiring and rotated on the cadence in `docs/security/turso-token-scope-rotation.md`.
+Turso schema/data migrations are explicit. Use `npm run migrate:turso` locally or the `Web Turso Migration` workflow in production with `TURSO_MIGRATION_AUTH_TOKEN`; normal request-time reads should not create tables, alter columns, or encrypt legacy plaintext settings.
 
 Cloudflare Access is not currently required in front of the whole production app. Keep this accepted-risk decision aligned with `docs/security/cloudflare-access-waf-rate-limit-policy.md`, and revisit it before moving production to a custom Cloudflare zone hostname.
 

@@ -1,0 +1,45 @@
+name: Web Turso Migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turso-production-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Run production Turso migrations
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://noteai-web.noteai-jp.workers.dev
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Turso schema and data migrations
+        run: npm run migrate:turso
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_MIGRATION_AUTH_TOKEN: ${{ secrets.TURSO_MIGRATION_AUTH_TOKEN }}
+          NOTEAI_AUTH_SECRET: ${{ secrets.NOTEAI_AUTH_SECRET }}

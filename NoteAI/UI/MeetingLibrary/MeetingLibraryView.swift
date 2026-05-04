@@ -639,6 +639,21 @@ struct MeetingLibraryView: View {
             in: RoundedRectangle(cornerRadius: 8)
         )
         .contentShape(Rectangle())
+        .contextMenu {
+            if !group.isUnassigned {
+                Button {
+                    renameNoteSpace(group.title)
+                } label: {
+                    Label("Rename Space", systemImage: "pencil")
+                }
+
+                Button(role: .destructive) {
+                    deleteNoteSpace(group.title)
+                } label: {
+                    Label("Delete Space", systemImage: "trash")
+                }
+            }
+        }
         .onDrop(
             of: [.text],
             isTargeted: Binding(
@@ -1033,27 +1048,72 @@ struct MeetingLibraryView: View {
     }
 
     private func createNewSpace() {
-        guard let rawName = promptForNoteSpaceName(),
+        guard let rawName = promptForNoteSpaceName(
+            title: "New Note Space",
+            informativeText: "Create a space to group notes by project or theme.",
+            actionTitle: "Create",
+            placeholder: "Project or theme name"
+        ),
               meetingManager.createNoteSpace(rawName) != nil
         else { return }
         collapsedSections.remove(.notes)
         meetingManager.searchQuery = ""
     }
 
-    private func promptForNoteSpaceName() -> String? {
+    private func renameNoteSpace(_ currentName: String) {
+        guard let rawName = promptForNoteSpaceName(
+            title: "Rename Note Space",
+            informativeText: "Rename this space and keep its notes grouped together.",
+            actionTitle: "Rename",
+            placeholder: "Project or theme name",
+            initialValue: currentName
+        ) else { return }
+
+        if meetingManager.renameNoteSpace(currentName, to: rawName) {
+            meetingManager.searchQuery = ""
+        }
+    }
+
+    private func deleteNoteSpace(_ name: String) {
+        guard confirmDeleteNoteSpace(name) else { return }
+
+        if meetingManager.deleteNoteSpace(name) {
+            meetingManager.searchQuery = ""
+        }
+    }
+
+    private func promptForNoteSpaceName(
+        title: String,
+        informativeText: String,
+        actionTitle: String,
+        placeholder: String,
+        initialValue: String = ""
+    ) -> String? {
         let alert = NSAlert()
-        alert.messageText = "New Note Space"
-        alert.informativeText = "Create a space to group notes by project or theme."
-        alert.addButton(withTitle: "Create")
+        alert.messageText = title
+        alert.informativeText = informativeText
+        alert.addButton(withTitle: actionTitle)
         alert.addButton(withTitle: "Cancel")
 
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        textField.placeholderString = "Project or theme name"
+        textField.placeholderString = placeholder
+        textField.stringValue = initialValue
         alert.accessoryView = textField
         alert.window.initialFirstResponder = textField
 
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         return textField.stringValue
+    }
+
+    private func confirmDeleteNoteSpace(_ name: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete Note Space?"
+        alert.informativeText = "Notes in \"\(name)\" will move to Unassigned. No notes will be deleted."
+        alert.addButton(withTitle: "Delete Space")
+        alert.addButton(withTitle: "Cancel")
+
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func handleNoteDrop(_ providers: [NSItemProvider], toSpace space: String?) -> Bool {

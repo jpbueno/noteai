@@ -8,6 +8,11 @@ struct NoteSpaceGroup: Identifiable {
     var isUnassigned: Bool { title == NoteSpaceOrganizer.unassignedTitle }
 }
 
+struct NoteSpaceMutation {
+    let spaces: [String]
+    let notes: [Note]
+}
+
 enum NoteSpaceOrganizer {
     static let unassignedTitle = "Unassigned"
 
@@ -37,6 +42,56 @@ enum NoteSpaceOrganizer {
         return titles.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
+    static func renamingSpace(
+        _ rawOldName: String,
+        to rawNewName: String,
+        spaces: [String],
+        notes: [Note]
+    ) -> NoteSpaceMutation? {
+        guard let oldName = normalized(rawOldName),
+              let newName = normalized(rawNewName),
+              !isSystemSpace(oldName),
+              !isSystemSpace(newName),
+              containsSpace(oldName, spaces: spaces, notes: notes)
+        else { return nil }
+
+        let renamedSpaces = spaces.map { existing in
+            matches(existing, oldName) ? newName : existing
+        }
+        let nextSpaces = orderedSpaceTitles(renamedSpaces + [newName])
+        let nextNotes = notes.map { note in
+            var updated = note
+            if matches(note.space, oldName) {
+                updated.space = newName
+            }
+            return updated
+        }
+
+        return NoteSpaceMutation(spaces: nextSpaces, notes: nextNotes)
+    }
+
+    static func deletingSpace(
+        _ rawName: String,
+        spaces: [String],
+        notes: [Note]
+    ) -> NoteSpaceMutation? {
+        guard let name = normalized(rawName),
+              !isSystemSpace(name),
+              containsSpace(name, spaces: spaces, notes: notes)
+        else { return nil }
+
+        let nextSpaces = orderedSpaceTitles(spaces.filter { !matches($0, name) })
+        let nextNotes = notes.map { note in
+            var updated = note
+            if matches(note.space, name) {
+                updated.space = nil
+            }
+            return updated
+        }
+
+        return NoteSpaceMutation(spaces: nextSpaces, notes: nextNotes)
+    }
+
     static func groups(
         for notes: [Note],
         explicitSpaces: [String] = [],
@@ -54,6 +109,19 @@ enum NoteSpaceOrganizer {
         return orderedTitles.map { title in
             NoteSpaceGroup(title: title, notes: grouped[title] ?? [])
         }
+    }
+
+    private static func containsSpace(_ name: String, spaces: [String], notes: [Note]) -> Bool {
+        spaces.contains { matches($0, name) } || notes.contains { matches($0.space, name) }
+    }
+
+    private static func isSystemSpace(_ name: String) -> Bool {
+        matches(name, unassignedTitle)
+    }
+
+    private static func matches(_ rawSpace: String?, _ title: String) -> Bool {
+        guard let space = normalized(rawSpace) else { return false }
+        return space.caseInsensitiveCompare(title) == .orderedSame
     }
 }
 

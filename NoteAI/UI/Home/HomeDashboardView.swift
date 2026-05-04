@@ -238,34 +238,17 @@ struct HomeDashboardView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Command Center")
-                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .textCase(.uppercase)
-                Text("Today's workspace")
-                    .font(.system(size: layout.titleFontSize, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("Keep meetings, notes, todos, and T5T follow-ups moving from one place.")
-                    .font(.system(size: layout.bodyFontSize + 1))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-
-            Spacer()
-
-            Button {
-                let todo = meetingManager.createTodo()
-                onSelectTodo(todo.id)
-            } label: {
-                Label("New Todo", systemImage: "plus")
-                    .font(.system(size: layout.bodyFontSize, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, round(14 * layout.scale))
-                    .frame(height: layout.actionButtonHeight)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Command Center")
+                .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                .foregroundStyle(Theme.textTertiary)
+                .textCase(.uppercase)
+            Text("Today's workspace")
+                .font(.system(size: layout.titleFontSize, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Keep meetings, notes, todos, and T5T follow-ups moving from one place.")
+                .font(.system(size: layout.bodyFontSize + 1))
+                .foregroundStyle(Theme.textTertiary)
         }
     }
 

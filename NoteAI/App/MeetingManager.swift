@@ -5,6 +5,8 @@ import UserNotifications
 /// Central orchestrator that coordinates audio capture, transcription, and summarization.
 @MainActor
 final class MeetingManager: ObservableObject {
+    private static let noteSpacesDefaultsKey = "noteSpaces"
+
     enum State: Equatable {
         case idle
         case recording
@@ -25,6 +27,7 @@ final class MeetingManager: ObservableObject {
 
     // Notes state
     @Published var notes: [Note] = []
+    @Published var noteSpaces: [String] = []
 
     var filteredNotes: [Note] {
         LibraryOperations.filter(meetings: meetings, notes: notes, query: searchQuery).notes
@@ -135,6 +138,7 @@ final class MeetingManager: ObservableObject {
         }
 
         loadMeetings()
+        loadNoteSpaces()
         loadNotes()
         loadT5TData()
         loadTodos()
@@ -475,10 +479,11 @@ final class MeetingManager: ObservableObject {
     // MARK: - Notes
 
     @discardableResult
-    func createNote(title: String = "Untitled", content: String = "", tags: [String] = [], sourceMeetingID: UUID? = nil) -> Note {
-        let note = Note(title: title, content: content, tags: tags, sourceMeetingID: sourceMeetingID)
+    func createNote(title: String = "Untitled", content: String = "", tags: [String] = [], space: String? = nil, sourceMeetingID: UUID? = nil) -> Note {
+        let note = Note(title: title, content: content, tags: tags, space: space, sourceMeetingID: sourceMeetingID)
         do {
             try meetingStore.saveNote(note)
+            ensureNoteSpace(note.space)
             notes.insert(note, at: 0)
         } catch {
             print("Failed to save note: \(error)")
@@ -491,12 +496,45 @@ final class MeetingManager: ObservableObject {
         updated.modifiedDate = Date()
         do {
             try meetingStore.saveNote(updated)
+            ensureNoteSpace(updated.space)
             if let index = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[index] = updated
             }
         } catch {
             print("Failed to update note: \(error)")
         }
+    }
+
+    @discardableResult
+    func createNoteSpace(_ rawName: String) -> String? {
+        guard let name = NoteSpaceOrganizer.normalized(rawName) else { return nil }
+        ensureNoteSpace(name)
+        return name
+    }
+
+    func assignNote(_ noteID: UUID, toSpace rawSpace: String?) {
+        guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return }
+        var note = notes[index]
+        note.space = NoteSpaceOrganizer.normalized(rawSpace)
+        updateNote(note)
+    }
+
+    private func ensureNoteSpace(_ rawSpace: String?) {
+        guard let space = NoteSpaceOrganizer.normalized(rawSpace) else { return }
+        guard !noteSpaces.contains(where: { $0.caseInsensitiveCompare(space) == .orderedSame }) else { return }
+        noteSpaces.append(space)
+        noteSpaces = NoteSpaceOrganizer.orderedSpaceTitles(noteSpaces)
+        saveNoteSpaces()
+    }
+
+    private func loadNoteSpaces() {
+        noteSpaces = NoteSpaceOrganizer.orderedSpaceTitles(
+            UserDefaults.standard.stringArray(forKey: Self.noteSpacesDefaultsKey) ?? []
+        )
+    }
+
+    private func saveNoteSpaces() {
+        UserDefaults.standard.set(noteSpaces, forKey: Self.noteSpacesDefaultsKey)
     }
 
     func deleteNote(_ note: Note) {

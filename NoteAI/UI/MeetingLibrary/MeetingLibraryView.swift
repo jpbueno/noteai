@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
@@ -55,6 +56,8 @@ struct MeetingLibraryView: View {
     @State private var sidebarCollapsed = false
     @State private var collapsedSections: Set<SidebarSectionID> = []
     @State private var quickFilter: CommandCenterQuickFilter?
+    @State private var targetedNoteSpace: String?
+    @State private var draggingNoteID: UUID?
     @FocusState private var searchFocused: Bool
 
     private let sidebarDividerHitWidth: CGFloat = 8
@@ -296,8 +299,14 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.notes, title: "Notes", icon: "note.text", action: createNewNote, layout: layout) {
-                        ForEach(NoteSpaceOrganizer.groups(for: visibleNotes)) { group in
+                    notesSidebarSection(layout: layout) {
+                        ForEach(
+                            NoteSpaceOrganizer.groups(
+                                for: visibleNotes,
+                                explicitSpaces: meetingManager.noteSpaces,
+                                includeEmptyUnassigned: !meetingManager.noteSpaces.isEmpty
+                            )
+                        ) { group in
                             VStack(alignment: .leading, spacing: 0) {
                                 noteSpaceHeader(group: group, layout: layout)
                                 ForEach(group.notes) { note in
@@ -583,6 +592,62 @@ struct MeetingLibraryView: View {
         }
     }
 
+    private func notesSidebarSection<Content: View>(
+        layout: CommandCenterLayout,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    toggleSection(.notes)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: collapsedSections.contains(.notes) ? "chevron.right" : "chevron.down")
+                            .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
+                        Image(systemName: "note.text")
+                            .font(.system(size: layout.smallFontSize, weight: .medium))
+                        Text("NOTES")
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.sectionHeader)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Menu {
+                    Button {
+                        createNewNote()
+                    } label: {
+                        Label("New Note", systemImage: "note.text")
+                    }
+                    Button {
+                        createNewSpace()
+                    } label: {
+                        Label("New Space", systemImage: "folder.badge.plus")
+                    }
+                } label: {
+                    Label("New", systemImage: "plus")
+                        .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.horizontal, round(7 * layout.scale))
+                        .padding(.vertical, round(4 * layout.scale))
+                        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Create a note or note space")
+            }
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.top, round(14 * layout.scale))
+            .padding(.bottom, round(5 * layout.scale))
+
+            if !collapsedSections.contains(.notes) {
+                content()
+            }
+        }
+    }
+
     private func toggleSection(_ section: SidebarSectionID) {
         if collapsedSections.contains(section) {
             collapsedSections.remove(section)
@@ -600,7 +665,11 @@ struct MeetingLibraryView: View {
     }
 
     private func noteSpaceHeader(group: NoteSpaceGroup, layout: CommandCenterLayout) -> some View {
-        HStack(spacing: 8) {
+        let dropTargetID = group.title
+        let targetSpace = group.isUnassigned ? nil : group.title
+        let isTargeted = targetedNoteSpace == dropTargetID
+
+        return HStack(spacing: 8) {
             Text(group.title)
                 .font(.system(size: max(9, layout.tinyFontSize), weight: .bold))
                 .foregroundStyle(Theme.textTertiary)
@@ -615,6 +684,21 @@ struct MeetingLibraryView: View {
         .padding(.horizontal, round(18 * layout.scale))
         .padding(.top, round(7 * layout.scale))
         .padding(.bottom, round(2 * layout.scale))
+        .background(
+            isTargeted ? Theme.accent.opacity(0.12) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [.text],
+            isTargeted: Binding(
+                get: { targetedNoteSpace == dropTargetID },
+                set: { targetedNoteSpace = $0 ? dropTargetID : nil }
+            )
+        ) { providers in
+            handleNoteDrop(providers, toSpace: targetSpace)
+        }
+        .help(group.isUnassigned ? "Drop a note here to remove it from a space" : "Drop a note here to move it to \(group.title)")
     }
 
     private func t5tSidebarRow(report: T5TReport, layout: CommandCenterLayout) -> some View {
@@ -724,6 +808,11 @@ struct MeetingLibraryView: View {
                 meetingManager.deleteNote(note)
             }
         }
+        .onDrag {
+            draggingNoteID = note.id
+            return NSItemProvider(object: note.id.uuidString as NSString)
+        }
+        .help("Drag into a note space")
     }
 
     // MARK: - Home + Todos sidebar
@@ -991,6 +1080,62 @@ struct MeetingLibraryView: View {
     private func createNewNote() {
         let note = meetingManager.createNote()
         selection = .note(note.id)
+    }
+
+    private func createNewSpace() {
+        guard let rawName = promptForNoteSpaceName(),
+              meetingManager.createNoteSpace(rawName) != nil
+        else { return }
+        collapsedSections.remove(.notes)
+        meetingManager.searchQuery = ""
+    }
+
+    private func promptForNoteSpaceName() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "New Note Space"
+        alert.informativeText = "Create a space to group notes by project or theme."
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        textField.placeholderString = "Project or theme name"
+        alert.accessoryView = textField
+        alert.window.initialFirstResponder = textField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return textField.stringValue
+    }
+
+    private func handleNoteDrop(_ providers: [NSItemProvider], toSpace space: String?) -> Bool {
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.text.identifier) }) else {
+            return false
+        }
+
+        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
+            guard let rawValue = stringValue(from: item),
+                  let noteID = UUID(uuidString: rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
+            else { return }
+
+            Task { @MainActor in
+                meetingManager.assignNote(noteID, toSpace: space)
+                draggingNoteID = nil
+                targetedNoteSpace = nil
+            }
+        }
+        return true
+    }
+
+    private func stringValue(from item: NSSecureCoding?) -> String? {
+        if let value = item as? String {
+            return value
+        }
+        if let value = item as? NSString {
+            return value as String
+        }
+        if let data = item as? Data {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
     }
 
     private var recordButtonLabel: String {

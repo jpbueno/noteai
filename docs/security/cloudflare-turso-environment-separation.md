@@ -55,16 +55,32 @@ The preview Worker must not use production Turso data.
 
 Current status as of 2026-05-03: preview is defined in config but not deployed. `npx wrangler secret list --env preview` returned `Worker "noteai-web-preview" (env: preview) not found`, which is expected until a preview Turso database and preview Worker are intentionally provisioned.
 
+Provision an empty preview Turso database and migrate its schema before deploying the preview Worker:
+
+```bash
+turso db create noteai-preview --group <turso-group> --wait
+turso db show noteai-preview --url
+turso db tokens create noteai-preview --expiration 90d
+
+cd web
+TURSO_DATABASE_URL=<preview-database-url> \
+TURSO_MIGRATION_AUTH_TOKEN=<preview-database-token> \
+NOTEAI_AUTH_SECRET=<preview-auth-secret> \
+npm run migrate:turso
+```
+
+Do not use `--from-db <production-db-name>` for the normal preview database. Preview should start empty unless a specific sanitized data-seeding task is approved and documented.
+
 Required preview Worker secrets use the same names as production but must have preview-only values:
 
 - `TURSO_DATABASE_URL`: preview Turso database URL, not the production database URL
 - `TURSO_AUTH_TOKEN`: preview database token, not the production database token
 - `NOTEAI_AUTH_SECRET`: preview-only session secret
 - `GOOGLE_CLIENT_ID`: preview OAuth client ID, or a documented decision to reuse the production OAuth client only for maintainer-only preview testing
+- `GOOGLE_ALLOWED_EMAILS`: preview-only maintainer allowlist, normally narrower than production if production broadens later
 
 Optional preview Worker secrets:
 
-- `GOOGLE_ALLOWED_EMAILS`: normally restricted to maintainers
 - `NOTEAI_API_KEY_HASHES`: only if programmatic preview API access is required
 
 Provision preview secrets with no values committed to git:
@@ -75,6 +91,7 @@ npx wrangler secret put TURSO_DATABASE_URL --env preview
 npx wrangler secret put TURSO_AUTH_TOKEN --env preview
 npx wrangler secret put NOTEAI_AUTH_SECRET --env preview
 npx wrangler secret put GOOGLE_CLIENT_ID --env preview
+npx wrangler secret put GOOGLE_ALLOWED_EMAILS --env preview
 ```
 
 Preview deployment remains manual until a separate preview Turso database exists:
@@ -84,6 +101,19 @@ cd web
 npm run build:cf
 npx wrangler deploy --env preview --keep-vars
 ```
+
+Smoke-check the preview Worker URL reported by Wrangler, normally:
+
+```bash
+curl --fail --silent --show-error https://noteai-web-preview.<workers-subdomain>.workers.dev/api/health
+curl --silent --output /dev/null --write-out '%{http_code}\n' https://noteai-web-preview.<workers-subdomain>.workers.dev/api/data/notes
+```
+
+Expected results:
+
+- `/api/health` returns `ok: true`.
+- Unauthenticated `/api/data/notes` returns `401`.
+- Any authenticated data created in preview appears only in `noteai-preview`.
 
 Because `web/wrangler.jsonc` defines a named preview environment, production deploys should pass `--env=""` explicitly to target the top-level production Worker.
 

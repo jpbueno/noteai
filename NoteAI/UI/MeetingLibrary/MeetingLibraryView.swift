@@ -363,7 +363,8 @@ struct MeetingLibraryView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, round(12 * layout.scale))
+            .padding(.leading, layout.sidebarBrandLeadingInset)
+            .padding(.trailing, round(12 * layout.scale))
             .frame(height: max(42, round(44 * layout.scale)))
         }
         .buttonStyle(.plain)

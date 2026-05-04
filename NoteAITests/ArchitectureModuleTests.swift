@@ -427,6 +427,17 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 42)
     }
 
+    func testCommandCenterSidebarBrandReservesTitlebarControls() throws {
+        let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
+        let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
+        let source = try meetingLibrarySource()
+
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandLeadingInset, 72)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, compact.sidebarWidth * 0.36)
+        XCTAssertEqual(compact.sidebarBrandLeadingInset, wide.sidebarBrandLeadingInset)
+        XCTAssertTrue(source.contains(".padding(.leading, layout.sidebarBrandLeadingInset)"))
+    }
+
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
         let source = try meetingLibrarySource()
 

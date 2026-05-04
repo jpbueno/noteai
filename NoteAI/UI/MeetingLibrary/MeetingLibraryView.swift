@@ -379,7 +379,9 @@ struct MeetingLibraryView: View {
             }
             .padding(.leading, layout.sidebarBrandLeadingInset)
             .padding(.trailing, round(12 * layout.scale))
-            .frame(height: max(42, round(44 * layout.scale)))
+            .padding(.top, layout.sidebarBrandHeaderTopPadding)
+            .padding(.bottom, layout.sidebarBrandHeaderBottomPadding)
+            .frame(height: layout.sidebarBrandHeaderHeight, alignment: .top)
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")
@@ -424,7 +426,6 @@ struct MeetingLibraryView: View {
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
                 .onDisappear { pulseAnimation = false }
             } else {
-                recordingReadinessRow(readiness, layout: layout)
                 Button {
                     meetingManager.startRecording()
                     selection = nil
@@ -446,44 +447,6 @@ struct MeetingLibraryView: View {
         }
         .padding(.horizontal, round(10 * layout.scale))
         .padding(.bottom, round(10 * layout.scale))
-    }
-
-    private func recordingReadinessRow(
-        _ readiness: MeetingRecordingReadiness,
-        layout: CommandCenterLayout
-    ) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: readiness.systemImage)
-                .font(.system(size: layout.smallFontSize, weight: .semibold))
-                .foregroundStyle(recordingReadinessColor(for: readiness.mode))
-                .frame(width: 16, height: 16)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(readiness.title)
-                        .font(.system(size: layout.smallFontSize, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text(readiness.badgeTitle)
-                        .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
-                        .foregroundStyle(recordingReadinessColor(for: readiness.mode))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            recordingReadinessColor(for: readiness.mode).opacity(0.12),
-                            in: Capsule()
-                        )
-                }
-                Text(readiness.detail)
-                    .font(.system(size: layout.tinyFontSize))
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, round(10 * layout.scale))
-        .padding(.vertical, round(8 * layout.scale))
-        .background(Theme.contentBG.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border.opacity(0.75), lineWidth: 1))
     }
 
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {
@@ -1149,21 +1112,6 @@ struct MeetingLibraryView: View {
             return "Processing..."
         case .idle:
             return meetingManager.recordingReadiness.primaryActionTitle
-        }
-    }
-
-    private func recordingReadinessColor(for mode: MeetingRecordingReadiness.Mode) -> Color {
-        switch mode {
-        case .manualFallback:
-            return Theme.textTertiary
-        case .likelyMeeting:
-            return Theme.warning
-        case .calendarArmed:
-            return Theme.accent
-        case .recording:
-            return Theme.danger
-        case .processing:
-            return Theme.textSecondary
         }
     }
 

@@ -2,15 +2,15 @@
 
 Date: 2026-05-04
 
-Related Linear issues: JPB-76, JPB-22
+Related Linear issues: JPB-76, JPB-84, JPB-22
 
 ## Decision
 
 GitHub production deployments must be restricted to the `production` environment and the `main` branch. The Cloudflare deploy credential should live as a GitHub `production` environment secret named `CLOUDFLARE_API_TOKEN`.
 
-Repository-scope storage for the current `CLOUDFLARE_API_TOKEN` is intentionally accepted for the current token lifecycle because GitHub does not reveal existing secret values for copying and local Cloudflare auth is invalid. This exception is bounded by the GitHub production environment branch policy added in this slice, the deploy workflow's `main` branch guard, read-only default Actions permissions, and the absence of deploy-on-PR behavior.
+Repository-scope storage for the previous `CLOUDFLARE_API_TOKEN` was intentionally accepted for the prior token lifecycle because GitHub does not reveal existing secret values for copying and local Cloudflare auth was invalid.
 
-At the next Cloudflare token rotation, re-enter or recreate the token as a GitHub `production` environment secret and remove the repository-scoped secret.
+Status as of JPB-84 on 2026-05-04: resolved. The deploy credential now lives only as the GitHub `production` environment secret named `CLOUDFLARE_API_TOKEN`; the repository-scoped `CLOUDFLARE_API_TOKEN` was deleted after a successful production deploy from `main`.
 
 ## GitHub Changes Applied
 
@@ -45,7 +45,7 @@ Repository Actions default workflow permissions are read-only:
 {"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}
 ```
 
-## Accepted Exception Evidence
+## Previous Accepted Exception Evidence
 
 GitHub metadata after the environment hardening still showed:
 
@@ -60,51 +60,64 @@ A request to the Cloudflare API (/accounts) failed.
 Invalid access token [code: 9109]
 ```
 
-Because the current Cloudflare token value is not readable from GitHub and the local Wrangler OAuth token is invalid, the secret cannot be moved into the environment by Codex without a fresh token value or Cloudflare re-authentication. The remaining move is a rotation task, not an unbounded hidden gap.
+Because the previous Cloudflare token value was not readable from GitHub and the local Wrangler OAuth token was invalid, the secret could not be moved into the environment by Codex without a fresh token value or Cloudflare re-authentication. This was tracked as JPB-84 and is now resolved.
 
-## Next Rotation Step
+## JPB-84 Rotation Evidence
 
-After creating or retrieving the least-privilege Cloudflare token, set it as a production environment secret:
+Completed on 2026-05-04:
+
+- Created a replacement Cloudflare User API Token named `noteai-cloudflare-production-deploy-20260504c`.
+- Token expiration: 2027-05-04T18:00:00Z.
+- Scope: user `Memberships Read`, account `Edit Cloudflare Workers` template permissions for the Cloudflare account that owns `noteai-web`.
+- Set the token as GitHub environment secret `CLOUDFLARE_API_TOKEN` on environment `production`.
+- Deleted the repository-scoped GitHub Actions secret `CLOUDFLARE_API_TOKEN`.
+- Revoked two intermediate account-owned tokens created during validation:
+  - the first was exposed in a local Playwright snapshot and immediately revoked;
+  - the second validated locally but failed GitHub deploy because Wrangler 4.85 requested `/memberships`, which requires user `Memberships Read`.
+
+GitHub metadata after rotation:
 
 ```bash
-gh secret set CLOUDFLARE_API_TOKEN --env production --repo jpbueno/noteai
-```
+gh secret list --repo jpbueno/noteai
+# no CLOUDFLARE_API_TOKEN
 
-Then delete the repository-scope secret after confirming the next production deploy succeeds:
-
-```bash
-gh secret delete CLOUDFLARE_API_TOKEN --repo jpbueno/noteai
+gh secret list --env production --repo jpbueno/noteai
+# CLOUDFLARE_API_TOKEN present, updated 2026-05-04T18:08:22Z
 ```
 
 ## Minimum Cloudflare Token Posture
 
-Use a scoped token for the Cloudflare account that owns `noteai-web`, not a global API key. The token should be limited to the Cloudflare account used for NoteAI deployment and to Workers deployment permissions needed by Wrangler.
+Use a scoped Cloudflare API token for the account that owns `noteai-web`, not a global API key. The token should be limited to the Cloudflare account used for NoteAI deployment and to Wrangler's required read/write permissions.
 
 Recommended starting point:
 
 - Cloudflare template: Edit Cloudflare Workers
+- Additional user permission: Memberships Read, required by Wrangler deploy's `/memberships` lookup
 - Resource scope: only the account that owns `noteai-web`
 - Avoid all-zone/all-account access unless Wrangler deploy fails and the extra permission is documented
 - Prefer a token with an expiration date and rotate it with the same operational discipline as Turso
 
 ## Verification
 
-After the environment secret is set and the repository secret is deleted:
+The JPB-84 rotation was verified with:
 
 ```bash
 gh api repos/jpbueno/noteai/actions/secrets --jq '.secrets[]?.name'
 gh api repos/jpbueno/noteai/environments/production/secrets --jq '.secrets[]?.name'
 gh workflow run web-deploy-cloudflare.yml --ref main
-gh run watch --exit-status
+gh run watch 25335165060 --repo jpbueno/noteai --exit-status
 curl --fail --silent --show-error https://noteai-web.noteai-jp.workers.dev/api/health
+curl --silent --output /tmp/noteai-data-notes-status.txt --write-out '%{http_code}\n' https://noteai-web.noteai-jp.workers.dev/api/data/notes
 ```
 
-Expected:
+Results:
 
 - `CLOUDFLARE_API_TOKEN` is absent from repository secrets.
 - `CLOUDFLARE_API_TOKEN` is present in production environment secrets.
-- The production deploy succeeds from `main`.
-- The health endpoint returns `ok: true`.
+- GitHub Actions run `25335165060` succeeded from `main` at commit `624dce8dac6d45e0110ba73085db90c02164b8c1`.
+- The production Cloudflare deploy and workflow health smoke check succeeded.
+- Live `/api/health` returned `ok: true`.
+- Live unauthenticated `/api/data/notes` returned `401`.
 
 ## Source References
 

@@ -25,7 +25,7 @@ No critical finding was confirmed from repository evidence. The highest risks ar
   - `npm audit --audit-level=low`: passed, 0 vulnerabilities.
   - `npm run build`: passed.
   - `npm run build:cf`: passed.
-- Not reviewed: production Cloudflare account settings, Cloudflare API token scopes, Turso token scopes/read-only status, deployed runtime headers, DNS/WAF/rate-limit settings, git history secret scanning, GitHub branch protections, CI/CD because no workflow directory was present.
+- Not reviewed in the original audit: production Cloudflare account settings, Cloudflare API token scopes, Turso token scopes/read-only status, deployed runtime headers, DNS/WAF/rate-limit settings, git history secret scanning, GitHub branch protections, and CI/CD because no workflow directory was present. Later JPB-22/76/77/78/79/80/81 follow-ups added CI/CD, deploy, environment, secret, and operations evidence in `docs/security/`.
 
 ## Critical Findings
 
@@ -100,7 +100,7 @@ No critical findings confirmed.
 - Evidence: `web/wrangler.jsonc:1-10` shows no local Worker-level rate limit or environment binding; Cloudflare account-level controls were not available.
 - Impact: A stolen session/API token or over-broad allowed user can drive provider spend and resource exhaustion.
 - Details: Authentication exists, but authenticated abuse and credential theft are realistic enough for cost-bearing endpoints.
-- Recommendation: Partially completed. Added local message count/content limits, max token caps, audio upload size limit, transcription prompt cap, and TTS text length enforcement. Per-user/per-token rate limiting and provider budget alerting remain Cloudflare/provider configuration work.
+- Recommendation: Partially completed. Added local message count/content limits, max token caps, audio upload size limit, transcription prompt cap, and TTS text length enforcement. JPB-77 documents that Cloudflare WAF/rate-limit rules should be added when NoteAI moves to a custom Cloudflare zone hostname or when traffic evidence justifies them.
 - Remediation risk: Low to Medium. Caps must be tuned to expected meeting lengths and T5T workflows.
 - Verification: `node --test web/security-regression.test.mjs`, `npm run lint`, `npx tsc --noEmit --pretty false`, and builds passed.
 
@@ -192,9 +192,9 @@ No critical findings confirmed.
 
 ## Not Assessed / Missing Evidence
 
-- Cloudflare account controls: API token scopes, Access/WAF/rate-limit rules, Pages/Workers logs, route bindings, deployment permissions, and production runtime headers were not available locally.
-- Turso controls: token scope, read-only/full-access status, expiration, org/database token separation, branch/group configuration, backups, and restore testing were not visible.
-- CI/CD: no `.github/workflows`, `.gitlab-ci.yml`, `.circleci`, or similar workflow directory was found in the repo. Branch protection and deployment approvals were not assessable.
+- Cloudflare account controls: JPB-76 added GitHub production environment branch policy evidence and JPB-77 documented Access/WAF/rate-limit policy. Cloudflare token scopes and dashboard-side WAF/rate-limit configuration still require valid Cloudflare admin auth.
+- Turso controls: JPB-78 documented token expiration metadata and rotation posture, but direct Turso account scope/read-only/full-access evidence still requires Turso CLI auth.
+- CI/CD: GitHub workflows now exist and are documented in `docs/linear-cicd.md`; main branch protection is still a separate repository-level control.
 - Git history secrets: current tracked files were searched, but full history scanning with tools such as `gitleaks` was not run.
 - Runtime security headers: `next.config.ts` was reviewed, but the deployed Cloudflare/OpenNext response headers were not fetched.
 - Native macOS distribution posture: signing, notarization, hardened runtime, sandbox entitlements, update channel, and release artifact handling were not assessed from the available files.

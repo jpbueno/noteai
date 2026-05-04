@@ -82,11 +82,13 @@ This keeps automatic deploys predictable: production changes only after `main` c
 
 The workflow `.github/workflows/web-deploy-cloudflare.yml` deploys the web app to Cloudflare Workers after a push to `main` that changes `web/**` or the deploy workflow itself. Because `web/wrangler.jsonc` also declares `env.preview`, production deploys pass `--env=""` to target the top-level production Worker explicitly.
 
-Required GitHub repository secret:
+Target GitHub production environment secret:
 
 - `CLOUDFLARE_API_TOKEN`
 
 The token should have the minimum permissions needed to deploy the `noteai-web` Worker. Runtime app secrets stay in Cloudflare and are preserved by `wrangler deploy --keep-vars`.
+
+The GitHub `production` environment must restrict deployments to `main`. Environment-scoped `CLOUDFLARE_API_TOKEN` is the target posture because environment secrets are only released to jobs that reference the environment after its protection rules pass. If only a repository-scoped `CLOUDFLARE_API_TOKEN` exists, it is accepted only as the bounded current-token exception documented in `docs/security/cloudflare-production-deploy-token-hardening.md`; move it during the next Cloudflare token rotation.
 
 Production is the only automatically deployed cloud environment. Preview is defined but manual-only until a separate preview Turso database and preview Worker secrets exist. Pull requests must stay local/CI-only and must not point at production Turso data before merge. See `docs/security/cloudflare-turso-environment-separation.md`.
 
@@ -105,6 +107,10 @@ Optional Cloudflare Worker secrets:
 Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic API access uses `NOTEAI_API_KEY_HASHES`.
 
 Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` through Cloudflare Worker secrets without committing or printing values.
+
+Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.md`. Until schema/migration work is moved out of normal request-time reads, the production app accepts one server-side write-capable Turso token behind application auth, but that token must be expiring and rotated on a 90-day cadence.
+
+Cloudflare Access/WAF/rate-limit policy lives in `docs/security/cloudflare-access-waf-rate-limit-policy.md`. The current `workers.dev` production app remains public with application auth; WAF and rate-limit rules should be added when NoteAI moves to a custom Cloudflare zone hostname or traffic evidence justifies account-level controls.
 
 ## macOS Deployment
 

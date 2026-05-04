@@ -8,6 +8,7 @@ struct NotePageView: View {
 
     @State private var newTag = ""
     @State private var showTagField = false
+    @State private var noteSpace = ""
 
     /// Debounce auto-save so we don't write to SQLite on every keystroke
     @State private var saveWork: DispatchWorkItem?
@@ -31,6 +32,12 @@ struct NotePageView: View {
             }
         }
         .background(Theme.contentBG)
+        .onAppear {
+            noteSpace = note.space ?? ""
+        }
+        .onChange(of: note.id) { _, _ in
+            noteSpace = note.space ?? ""
+        }
     }
 
     // MARK: - Header
@@ -67,7 +74,47 @@ struct NotePageView: View {
                         .lineLimit(1)
                 }
             }
+
+            spaceField
         }
+    }
+
+    private var spaceField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "folder")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+            TextField("Add to a space...", text: $noteSpace)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 7))
+                .onChange(of: noteSpace) { _, next in
+                    note.space = NoteSpaceOrganizer.normalized(next)
+                    debouncedSave()
+                }
+                .onSubmit {
+                    noteSpace = NoteSpaceOrganizer.normalized(noteSpace) ?? ""
+                    note.space = NoteSpaceOrganizer.normalized(noteSpace)
+                    saveImmediately()
+                }
+            if !noteSpace.isEmpty {
+                Button {
+                    noteSpace = ""
+                    note.space = nil
+                    saveImmediately()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: 280, alignment: .leading)
     }
 
     // MARK: - Tags

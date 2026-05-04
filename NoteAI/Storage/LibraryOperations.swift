@@ -27,7 +27,8 @@ enum LibraryOperations {
             notes: notes.filter { note in
                 note.title.lowercased().contains(query) ||
                 note.content.lowercased().contains(query) ||
-                note.tags.contains { $0.lowercased().contains(query) }
+                note.tags.contains { $0.lowercased().contains(query) } ||
+                NoteSpaceOrganizer.title(for: note.space).lowercased().contains(query)
             }
         )
     }

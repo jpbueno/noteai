@@ -84,9 +84,7 @@ struct TodoDetailView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Button {
-                meetingManager.toggleTodoCompletion(todo)
-                // Update local binding-driven state so UI reflects change immediately
-                todo.completed.toggle()
+                toggleCompletion()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
@@ -122,6 +120,10 @@ struct TodoDetailView: View {
     }
 
     // MARK: - Load + save
+
+    private func toggleCompletion() {
+        meetingManager.toggleTodoCompletion(todo)
+    }
 
     private func loadFromTodo(force: Bool = false) {
         if didLoad && !force { return }

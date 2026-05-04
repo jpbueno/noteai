@@ -8,9 +8,14 @@ Related Linear issues: JPB-78, JPB-22, JPB-80
 
 Keep a single server-side write-capable Turso database token for the current production app, but require it to be expiring and rotated on a 90-day cadence.
 
-This is accepted for the current implementation because the normal server database path does schema initialization, reads, writes, deletes, and table clears through one server-only Turso client in `web/src/lib/server-db.ts`. A read-only token cannot support the current generic CRUD and migration path.
+This is accepted for the current implementation because the normal server database path still performs authenticated reads, writes, deletes, and table clears through one server-only Turso client in `web/src/lib/server-db.ts`. A read-only token cannot support the current generic CRUD mutation path.
 
-Read/write token separation should be implemented only after schema creation and migrations move out of normal request-time read paths.
+JPB-85 moved schema creation, historical column migrations, and encrypted settings data migration out of normal request-time reads. Those now run through an explicit migration Adapter:
+
+- local/manual command: `npm run migrate:turso`
+- production workflow: `Web Turso Migration`
+- shared schema definition: `web/src/lib/turso-schema.json`
+- script: `web/scripts/migrate-turso.mjs`
 
 ## Evidence
 
@@ -39,7 +44,7 @@ A read-only HTTP metadata query using the ignored local env failed with `404`, s
 - Normal cadence: every 90 days, before the current token expires
 - Emergency trigger: suspected token exposure, unexpected Turso access, bad deploy writing corrupt data, or maintainer device compromise
 
-## Normal Rotation
+## Normal Runtime Token Rotation
 
 1. Create a replacement database token with a bounded expiration:
 
@@ -83,9 +88,33 @@ If a token is suspected compromised:
 4. Re-run application smoke checks and targeted authenticated checks.
 5. Record count-only validation and secret names in Linear.
 
+## Migration Token Path
+
+Use a separate migration token for schema and data migrations when possible:
+
+```bash
+cd web
+TURSO_DATABASE_URL=<production-url> \
+TURSO_MIGRATION_AUTH_TOKEN=<short-lived-full-access-token> \
+NOTEAI_AUTH_SECRET=<production-auth-secret> \
+npm run migrate:turso
+```
+
+For production, prefer the manual `Web Turso Migration` workflow from `main` with GitHub `production` environment secrets:
+
+- `TURSO_DATABASE_URL`
+- `TURSO_MIGRATION_AUTH_TOKEN`
+- `NOTEAI_AUTH_SECRET`
+
+The migration script runs:
+
+- `CREATE TABLE IF NOT EXISTS` statements;
+- historical `ALTER TABLE` migrations, ignoring duplicate-column/already-present errors only;
+- one-time encryption of legacy plaintext provider API key settings when `NOTEAI_AUTH_SECRET` is present.
+
 ## Deferred Improvement
 
-Implement read/write separation after extracting schema and migration work from normal request-time reads. The target design is:
+Implement read/write separation after provisioning and validating separate tokens:
 
 - migration/admin path: short-lived full-access token;
 - application read path: read-only token where possible;

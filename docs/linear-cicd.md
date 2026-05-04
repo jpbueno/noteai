@@ -82,6 +82,8 @@ This keeps automatic deploys predictable: production changes only after `main` c
 
 The workflow `.github/workflows/web-deploy-cloudflare.yml` deploys the web app to Cloudflare Workers after a push to `main` that changes `web/**` or the deploy workflow itself. Because `web/wrangler.jsonc` also declares `env.preview`, production deploys pass `--env=""` to target the top-level production Worker explicitly.
 
+The workflow `.github/workflows/web-migrate-turso.yml` runs production Turso schema/data migrations manually from `main` before a deploy that needs database shape changes. It uses the GitHub `production` environment and the `TURSO_MIGRATION_AUTH_TOKEN` environment secret so normal request-time reads do not need schema or data-migration privileges.
+
 Target GitHub production environment secret:
 
 - `CLOUDFLARE_API_TOKEN`
@@ -108,7 +110,13 @@ Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic A
 
 Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` through Cloudflare Worker secrets without committing or printing values.
 
-Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.md`. Until schema/migration work is moved out of normal request-time reads, the production app accepts one server-side write-capable Turso token behind application auth, but that token must be expiring and rotated on a 90-day cadence.
+Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.md`. Schema creation, historical column migrations, and encrypted settings migration now run through `npm run migrate:turso` or the manual `Web Turso Migration` workflow, not normal request-time reads. Configure these GitHub `production` environment secrets before running the workflow:
+
+- `TURSO_DATABASE_URL`
+- `TURSO_MIGRATION_AUTH_TOKEN`
+- `NOTEAI_AUTH_SECRET`
+
+The runtime `TURSO_AUTH_TOKEN` can be split into read/write tokens in a later slice because schema work now sits behind a separate migration Adapter.
 
 Cloudflare Access/WAF/rate-limit policy lives in `docs/security/cloudflare-access-waf-rate-limit-policy.md`. The current `workers.dev` production app remains public with application auth; WAF and rate-limit rules should be added when NoteAI moves to a custom Cloudflare zone hostname or traffic evidence justifies account-level controls.
 

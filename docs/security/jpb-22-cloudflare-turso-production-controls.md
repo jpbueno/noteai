@@ -43,7 +43,7 @@ No secret values were printed or committed. Evidence below uses configuration, G
 
 The production app uses a single `TURSO_AUTH_TOKEN` for schema creation/migrations, reads, upserts, deletes, and table clears. That may be necessary for the current generic CRUD implementation, but the token scope, authorization level, expiration, and rotation cadence were not verifiable from repo metadata or unauthenticated Turso CLI output.
 
-Status: mitigated by JPB-78 on 2026-05-04. `docs/security/turso-token-scope-rotation.md` records the accepted single-token posture, an expiring token cadence, emergency invalidation, and the deferred read/write split. Direct Turso account scope evidence still requires Turso CLI auth.
+Status: mitigated by JPB-78 and deepened by JPB-85 on 2026-05-04. `docs/security/turso-token-scope-rotation.md` records the accepted single-token posture, an expiring token cadence, emergency invalidation, and the next read/write split. JPB-85 moved schema and legacy encrypted-settings migrations out of normal request-time reads into `npm run migrate:turso` and the manual `Web Turso Migration` workflow. Direct Turso account scope evidence still requires Turso CLI auth.
 
 ### Medium: Preview and production data-plane separation is not evidenced
 
@@ -96,7 +96,7 @@ JPB-22 is a verification and documentation slice. The following items require ac
 1. Mitigated by JPB-76: GitHub `production` now only permits deployments from `main`; current repository-scoped `CLOUDFLARE_API_TOKEN` is a documented current-token exception and should move to an environment secret during the next rotation.
 2. Resolved by JPB-77: Access/WAF/rate-limit decision documented as accepted risk for public `workers.dev` with app auth, with custom-domain triggers for WAF/rate-limit rules.
 3. Mitigated by JPB-78: Turso token expiration/rotation posture documented from local metadata; direct Turso account scope evidence still requires Turso auth.
-4. Deferred by JPB-78: read/write separation should wait until schema and migration work moves out of normal request-time reads.
+4. Ready for a future split after JPB-85: schema and migration work now sits behind the explicit Turso migration Adapter, so a later slice can provision and test read/write runtime tokens.
 5. Resolved by JPB-79: `docs/security/cloudflare-turso-environment-separation.md` defines the preview-vs-production boundary and `web/wrangler.jsonc` declares `env.preview` required secrets.
 6. Resolved by JPB-80: `docs/security/turso-restore-runbook.md` documents PITR/cutover steps and the first non-production restore simulation.
 7. Resolved by JPB-81: `docs/security/jpb-81-worker-secret-cleanup.md` records removal of the legacy `NOTEAI_API_KEY` Worker secret.

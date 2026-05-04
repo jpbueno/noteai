@@ -193,7 +193,7 @@ No critical findings confirmed.
 ## Not Assessed / Missing Evidence
 
 - Cloudflare account controls: JPB-76 added GitHub production environment branch policy evidence and JPB-77 documented Access/WAF/rate-limit policy. Cloudflare token scopes and dashboard-side WAF/rate-limit configuration still require valid Cloudflare admin auth.
-- Turso controls: JPB-78 documented token expiration metadata and rotation posture, but direct Turso account scope/read-only/full-access evidence still requires Turso CLI auth.
+- Turso controls: JPB-78 documented token expiration metadata and rotation posture. JPB-85 moved schema and legacy encrypted-settings migrations out of request-time reads into an explicit migration command/workflow. Direct Turso account scope/read-only/full-access evidence still requires Turso CLI auth.
 - CI/CD: GitHub workflows now exist and are documented in `docs/linear-cicd.md`; main branch protection is still a separate repository-level control.
 - Git history secrets: current tracked files were searched, but full history scanning with tools such as `gitleaks` was not run.
 - Runtime security headers: `next.config.ts` was reviewed, but the deployed Cloudflare/OpenNext response headers were not fetched.

@@ -59,6 +59,7 @@ struct MeetingLibraryView: View {
     @State private var targetedNoteSpace: String?
     @State private var draggingNoteID: UUID?
     @FocusState private var searchFocused: Bool
+    @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
 
     private let sidebarDividerHitWidth: CGFloat = 8
 
@@ -74,7 +75,8 @@ struct MeetingLibraryView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = CommandCenterLayout.metrics(forWindowWidth: proxy.size.width)
+            let layoutPreset = CommandCenterLayoutPreset(rawValue: commandCenterLayoutPresetRaw) ?? .balanced
+            let layout = CommandCenterLayout.metrics(forWindowWidth: proxy.size.width, preset: layoutPreset)
             let effectiveSidebarWidth = resolvedSidebarWidth(for: layout)
 
             ZStack(alignment: .leading) {

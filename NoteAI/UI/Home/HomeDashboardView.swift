@@ -74,11 +74,14 @@ struct CommandCenterLayout: Equatable {
     let smallFontSize: CGFloat
     let tinyFontSize: CGFloat
 
-    static func metrics(forWindowWidth windowWidth: CGFloat) -> CommandCenterLayout {
+    static func metrics(
+        forWindowWidth windowWidth: CGFloat,
+        preset: CommandCenterLayoutPreset = .balanced
+    ) -> CommandCenterLayout {
         let width = max(760, windowWidth)
         let scale = min(1.0, max(0.88, width / 1600))
         let typeScale = min(1.0, max(0.96, width / 1700))
-        let sidebarWidth = min(280, max(228, width * 0.155))
+        let sidebarWidth = min(292, max(216, width * 0.155 + preset.sidebarWidthAdjustment))
         let contentMaxWidth = max(780, width - sidebarWidth - 80)
         let sidebarBrandLeadingInset: CGFloat = 14
 
@@ -95,10 +98,10 @@ struct CommandCenterLayout: Equatable {
             sidebarBrandHeaderBottomPadding: round(16 * scale),
             controlHeight: min(39, max(36, round(38 * scale))),
             actionButtonHeight: min(42, max(38, round(41 * scale))),
-            panelPadding: round(16 * scale),
-            dashboardSpacing: round(14 * scale),
-            onboardingMinimumCardWidth: round(236 * scale),
-            metricMinimumCardWidth: round(112 * scale),
+            panelPadding: round(16 * scale * preset.panelPaddingMultiplier),
+            dashboardSpacing: round(14 * scale * preset.spacingMultiplier),
+            onboardingMinimumCardWidth: round(236 * scale * preset.cardWidthMultiplier),
+            metricMinimumCardWidth: round(112 * scale * preset.cardWidthMultiplier),
             titleFontSize: min(32, max(31, round(32 * typeScale))),
             metricValueFontSize: min(24, max(23, round(24 * typeScale))),
             sectionTitleFontSize: min(16, max(15, round(16 * typeScale))),

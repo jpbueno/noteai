@@ -147,12 +147,16 @@ struct RootView: View {
     @ObservedObject var authManager: GoogleAuthManager
     @ObservedObject var chatManager: ChatManager
     @ObservedObject var ttsService: TextToSpeechService
+    @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
 
     var body: some View {
-        if authManager.isAuthenticated || UserDefaults.standard.bool(forKey: "skippedAuth") {
-            MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager, ttsService: ttsService)
-        } else {
-            LoginView(authManager: authManager)
+        Group {
+            if authManager.isAuthenticated || UserDefaults.standard.bool(forKey: "skippedAuth") {
+                MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager, ttsService: ttsService)
+            } else {
+                LoginView(authManager: authManager)
+            }
         }
+        .preferredColorScheme(NoteAIAppearanceMode(rawValue: appearanceModeRaw)?.preferredColorScheme)
     }
 }

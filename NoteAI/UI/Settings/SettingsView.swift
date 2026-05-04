@@ -4,10 +4,12 @@ import UserNotifications
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab
     @State private var hasChanges = false
+    @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
 
     enum SettingsTab: String, CaseIterable, Identifiable {
         case account = "Account"
         case general = "General"
+        case appearance = "Appearance"
         case ai = "AI"
         case markdown = "Markdown"
         case importData = "Import"
@@ -20,6 +22,7 @@ struct SettingsView: View {
             switch self {
             case .account: return "person.circle"
             case .general: return "gear"
+            case .appearance: return "paintpalette"
             case .ai: return "brain"
             case .markdown: return "doc.text"
             case .importData: return "square.and.arrow.down"
@@ -85,6 +88,7 @@ struct SettingsView: View {
                     switch selectedTab {
                     case .account: AccountSettingsView()
                     case .general: GeneralSettingsView()
+                    case .appearance: AppearanceSettingsView()
                     case .ai: AISettingsView()
                     case .markdown: MarkdownSettingsView()
                     case .importData: ImportSettingsView()
@@ -96,6 +100,7 @@ struct SettingsView: View {
             }
         }
         .frame(width: 680, height: 520)
+        .preferredColorScheme(NoteAIAppearanceMode(rawValue: appearanceModeRaw)?.preferredColorScheme)
     }
 }
 
@@ -220,6 +225,37 @@ struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+}
+
+// MARK: - Appearance Settings
+
+struct AppearanceSettingsView: View {
+    @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
+    @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
+
+    var body: some View {
+        Form {
+            Section("Appearance") {
+                Picker("Appearance", selection: $appearanceModeRaw) {
+                    ForEach(NoteAIAppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("Command Center") {
+                Picker("Dashboard layout", selection: $commandCenterLayoutPresetRaw) {
+                    ForEach(CommandCenterLayoutPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
         .formStyle(.grouped)

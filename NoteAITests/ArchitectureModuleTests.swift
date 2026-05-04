@@ -606,6 +606,14 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("deleteNoteSpace(group.title)"))
     }
 
+    func testTodoDetailCompletionActionDoesNotDoubleToggleBoundTodo() throws {
+        let source = try todoDetailSource()
+
+        XCTAssertTrue(source.contains("private func toggleCompletion()"))
+        XCTAssertTrue(source.contains("meetingManager.toggleTodoCompletion(todo)"))
+        XCTAssertFalse(source.contains("todo.completed.toggle()"))
+    }
+
     func testSidebarDividerIsFullHeightShellChrome() throws {
         let source = try meetingLibrarySource()
 
@@ -628,6 +636,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let dashboardFile = projectRoot.appendingPathComponent("NoteAI/UI/Home/HomeDashboardView.swift")
         return try String(contentsOf: dashboardFile, encoding: .utf8)
+    }
+
+    private func todoDetailSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let todoDetailFile = projectRoot.appendingPathComponent("NoteAI/UI/Todos/TodoDetailView.swift")
+        return try String(contentsOf: todoDetailFile, encoding: .utf8)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

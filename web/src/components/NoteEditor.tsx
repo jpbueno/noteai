@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Tag, X, Loader2, Code2 } from "lucide-react";
+import { Folder, Tag, X, Loader2, Code2 } from "lucide-react";
 import type { Note, SidebarSelection } from "@/lib/types";
 import { db } from "@/lib/db";
 import { formatDateTime, triggerRefresh } from "@/lib/hooks";
@@ -12,6 +12,7 @@ import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
 import { ResizableImage } from "@/components/extensions/ResizableImage";
 import { mdToHtml, htmlToMd, htmlToPlainText } from "@/lib/content-utils";
+import { normalizeNoteSpace } from "@/lib/note-spaces";
 import { readSelectedTextForReadAloud } from "@/lib/read-aloud-selection";
 import EditorToolbar from "@/components/EditorToolbar";
 
@@ -24,6 +25,7 @@ export default function NoteEditor({ note }: NoteEditorProps) {
   const tts = useTTS();
   const [title, setTitle] = useState(note.title);
   const [tags, setTags] = useState(note.tags);
+  const [space, setSpace] = useState(note.space ?? "");
   const [tagInput, setTagInput] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -35,6 +37,7 @@ export default function NoteEditor({ note }: NoteEditorProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleRef = useRef(title);
   const tagsRef = useRef(tags);
+  const spaceRef = useRef(space);
   const insertImageRef = useRef<(file: File) => void>(() => {});
 
   useEffect(() => {
@@ -43,6 +46,9 @@ export default function NoteEditor({ note }: NoteEditorProps) {
   useEffect(() => {
     tagsRef.current = tags;
   }, [tags]);
+  useEffect(() => {
+    spaceRef.current = space;
+  }, [space]);
 
   // Convert editor HTML → markdown, then persist
   const performSave = useCallback(async (editorHtml: string) => {
@@ -53,6 +59,7 @@ export default function NoteEditor({ note }: NoteEditorProps) {
         title: titleRef.current,
         content: markdown,
         tags: tagsRef.current,
+        space: normalizeNoteSpace(spaceRef.current),
         modifiedDate: new Date().toISOString(),
       });
       triggerRefresh();
@@ -157,12 +164,13 @@ export default function NoteEditor({ note }: NoteEditorProps) {
       });
       setTitle(note.title);
       setTags(note.tags);
+      setSpace(note.space ?? "");
       setDirty(false);
       setSaving(false);
       setShowSource(false);
       prevIdRef.current = note.id;
     }
-  }, [editor, note.id, note.title, note.content, note.tags]);
+  }, [editor, note.id, note.title, note.content, note.tags, note.space]);
 
   useEffect(() => {
     return () => {
@@ -194,6 +202,17 @@ export default function NoteEditor({ note }: NoteEditorProps) {
     tagsRef.current = next;
     setDirty(true);
     if (editor) scheduleSave(editor.getHTML());
+  };
+
+  const handleSpaceChange = (value: string) => {
+    setSpace(value);
+    spaceRef.current = value;
+    setDirty(true);
+    if (editor) scheduleSave(editor.getHTML());
+  };
+
+  const clearSpace = () => {
+    handleSpaceChange("");
   };
 
   const handleInsertImage = () => {
@@ -260,32 +279,59 @@ export default function NoteEditor({ note }: NoteEditorProps) {
           <span>Modified {formatDateTime(note.modifiedDate)}</span>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap mb-4">
-          <Tag className="w-3 h-3 text-text-tertiary" />
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-hover text-xs text-text-secondary"
-            >
-              {tag}
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Folder className="h-3.5 w-3.5 text-text-tertiary" />
+            <input
+              type="text"
+              value={space}
+              onChange={(e) => handleSpaceChange(e.target.value)}
+              onBlur={(e) => handleSpaceChange(normalizeNoteSpace(e.target.value) ?? "")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="Add to a space..."
+              className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-content/40 px-2 text-xs font-medium text-text-secondary outline-none transition-colors placeholder:text-text-tertiary focus:border-accent/45 focus:text-text-primary"
+            />
+            {space && (
               <button
-                onClick={() => removeTag(tag)}
-                className="text-text-tertiary hover:text-danger"
+                type="button"
+                onClick={clearSpace}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-tertiary transition-colors hover:border-danger/40 hover:text-danger"
+                title="Clear note space"
               >
-                <X className="w-2.5 h-2.5" />
+                <X className="h-3.5 w-3.5" />
               </button>
-            </span>
-          ))}
-          <input
-            type="text"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addTag();
-            }}
-            placeholder="Add tag..."
-            className="bg-transparent border-none text-xs text-text-secondary outline-none w-20 p-0"
-          />
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Tag className="w-3 h-3 text-text-tertiary" />
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-hover text-xs text-text-secondary"
+              >
+                {tag}
+                <button
+                  onClick={() => removeTag(tag)}
+                  className="text-text-tertiary hover:text-danger"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            ))}
+            <input
+              type="text"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addTag();
+              }}
+              placeholder="Add tag..."
+              className="bg-transparent border-none text-xs text-text-secondary outline-none w-20 p-0"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2 mb-2">

@@ -137,7 +137,7 @@ function deserializeRow(table: string, colNames: string[], values: (string | num
 
 const TABLE_COLUMNS: Record<string, string[]> = {
   meetings: ["id", "title", "date", "duration", "transcript", "summary", "pinned"],
-  notes: ["id", "title", "content", "tags", "createdDate", "modifiedDate", "sourceMeetingID", "pinned"],
+  notes: ["id", "title", "content", "tags", "space", "createdDate", "modifiedDate", "sourceMeetingID", "pinned"],
   tasks: ["id", "title", "description", "rawInput", "tags", "status", "createdDate", "modifiedDate", "sourceMeetingID", "sourceNoteID", "pinned"],
   t5tReports: ["id", "title", "createdDate", "periodStart", "periodEnd", "meetingIDs", "noteIDs", "taskIDs", "dailyLogIDs", "sections", "status", "pinned"],
   dailyLogs: ["id", "date", "sections", "linkedMeetingIDs", "createdDate", "modifiedDate", "pinned"],

@@ -28,6 +28,7 @@ import type {
 import { type RecordingState } from "@/lib/audio";
 import { formatDuration, formatDate, parseDueDate } from "@/lib/hooks";
 import { resolveRecordingReadiness, type RecordingReadinessMode } from "@/lib/recording-lifecycle";
+import { groupNotesBySpace } from "@/lib/note-spaces";
 import type { LibraryQuickFilter } from "@/lib/search";
 import type { RecordingSourceId, RecordingSourceOption } from "@/lib/recording-sources";
 
@@ -115,6 +116,7 @@ export default function Sidebar({
 
   const isSelected = (type: string, id: string) =>
     selection?.type === type && "id" in selection && selection.id === id;
+  const noteSpaceGroups = groupNotesBySpace(notes);
 
   const toggleSection = (section: CollapsibleSection) => {
     setCollapsedSections((prev) => ({
@@ -325,15 +327,20 @@ export default function Sidebar({
           collapsed={collapsedSections.notes}
           onToggle={() => toggleSection("notes")}
         >
-          {notes.map((n) => (
-            <SidebarItem
-              key={n.id}
-              icon={<StickyNote className="w-[13px] h-[13px] text-text-tertiary" />}
-              label={`${formatDate(n.createdDate)} ${n.title}`}
-              selected={isSelected("note", n.id)}
-              onClick={() => onSelect({ type: "note", id: n.id })}
-              onDelete={() => onDeleteNote(n.id)}
-            />
+          {noteSpaceGroups.map((group) => (
+            <div key={group.isUnassigned ? "__unassigned__" : group.space}>
+              <NoteSpaceHeader label={group.space} count={group.notes.length} />
+              {group.notes.map((n) => (
+                <SidebarItem
+                  key={n.id}
+                  icon={<StickyNote className="w-[13px] h-[13px] text-text-tertiary" />}
+                  label={`${formatDate(n.createdDate)} ${n.title}`}
+                  selected={isSelected("note", n.id)}
+                  onClick={() => onSelect({ type: "note", id: n.id })}
+                  onDelete={() => onDeleteNote(n.id)}
+                />
+              ))}
+            </div>
           ))}
           {notes.length === 0 && !searchQuery && <EmptyHint text="No notes yet" />}
         </SidebarSection>
@@ -570,6 +577,19 @@ function SidebarItem({
           <X className="w-3 h-3" />
         </button>
       </div>
+    </div>
+  );
+}
+
+function NoteSpaceHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-5 pb-1 pt-2">
+      <span className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-[0.12em] text-text-tertiary">
+        {label}
+      </span>
+      <span className="text-[10px] font-semibold text-text-tertiary">
+        {count}
+      </span>
     </div>
   );
 }

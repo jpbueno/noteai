@@ -2,6 +2,43 @@ import XCTest
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
+    func testLegacyNoteDecodesWithoutSpace() throws {
+        let data = """
+        {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","content":"Existing note","tags":["account"],"createdDate":0,"modifiedDate":0,"sourceMeetingID":null}
+        """.data(using: .utf8)!
+
+        let note = try JSONDecoder().decode(Note.self, from: data)
+
+        XCTAssertNil(note.space)
+    }
+
+    func testNoteSpaceOrganizerGroupsNotesByNormalizedSpaceAndKeepsUnassignedVisible() {
+        let projectNote = Note(
+            title: "Project brief",
+            content: "Blackwell rollout",
+            space: "  Blackwell Launch  ",
+            modifiedDate: Date(timeIntervalSince1970: 30)
+        )
+        let unassignedNote = Note(
+            title: "Loose thought",
+            content: "No current project",
+            space: nil,
+            modifiedDate: Date(timeIntervalSince1970: 20)
+        )
+        let blankSpaceNote = Note(
+            title: "Blank space",
+            content: "Whitespace should be unassigned",
+            space: "   ",
+            modifiedDate: Date(timeIntervalSince1970: 10)
+        )
+
+        let groups = NoteSpaceOrganizer.groups(for: [projectNote, unassignedNote, blankSpaceNote])
+
+        XCTAssertEqual(groups.map(\.title), ["Blackwell Launch", "Unassigned"])
+        XCTAssertEqual(groups[0].notes.map(\.id), [projectNote.id])
+        XCTAssertEqual(groups[1].notes.map(\.id), [unassignedNote.id, blankSpaceNote.id])
+    }
+
     func testLibraryOperationsFilterAcrossMeetingsAndNotes() {
         let meeting = Meeting(
             id: UUID(),
@@ -20,6 +57,23 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertEqual(result.meetings.map(\.id), [meeting.id])
         XCTAssertEqual(result.notes.count, 0)
+    }
+
+    func testLibraryOperationsFilterMatchesNoteSpace() {
+        let note = Note(
+            title: "Customer Notes",
+            content: "Blackwell rollout",
+            tags: ["account"],
+            space: "Customer Success"
+        )
+
+        let result = LibraryOperations.filter(
+            meetings: [],
+            notes: [note],
+            query: "success"
+        )
+
+        XCTAssertEqual(result.notes.map(\.id), [note.id])
     }
 
     func testMeetingCaptureWorkflowFormatsTranscriptAndFallbackSummary() {

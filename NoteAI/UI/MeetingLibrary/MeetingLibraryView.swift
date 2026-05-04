@@ -297,8 +297,13 @@ struct MeetingLibraryView: View {
                     }
 
                     sidebarSection(.notes, title: "Notes", icon: "note.text", action: createNewNote, layout: layout) {
-                        ForEach(visibleNotes) { note in
-                            noteSidebarRow(note: note, layout: layout)
+                        ForEach(NoteSpaceOrganizer.groups(for: visibleNotes)) { group in
+                            VStack(alignment: .leading, spacing: 0) {
+                                noteSpaceHeader(group: group, layout: layout)
+                                ForEach(group.notes) { note in
+                                    noteSidebarRow(note: note, layout: layout)
+                                }
+                            }
                         }
                         if visibleNotes.isEmpty && meetingManager.searchQuery.isEmpty {
                             emptyHint("No notes yet", layout: layout)
@@ -592,6 +597,24 @@ struct MeetingLibraryView: View {
             .foregroundStyle(Theme.textTertiary)
             .padding(.horizontal, round(18 * layout.scale))
             .padding(.vertical, round(5 * layout.scale))
+    }
+
+    private func noteSpaceHeader(group: NoteSpaceGroup, layout: CommandCenterLayout) -> some View {
+        HStack(spacing: 8) {
+            Text(group.title)
+                .font(.system(size: max(9, layout.tinyFontSize), weight: .bold))
+                .foregroundStyle(Theme.textTertiary)
+                .textCase(.uppercase)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            Text("\(group.notes.count)")
+                .font(.system(size: max(9, layout.tinyFontSize), weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .padding(.horizontal, round(18 * layout.scale))
+        .padding(.top, round(7 * layout.scale))
+        .padding(.bottom, round(2 * layout.scale))
     }
 
     private func t5tSidebarRow(report: T5TReport, layout: CommandCenterLayout) -> some View {

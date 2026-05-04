@@ -169,6 +169,7 @@ export interface Note {
   title: string;
   content: string;
   tags: string[];
+  space?: string | null;
   createdDate: string;
   modifiedDate: string;
   sourceMeetingID: string | null;

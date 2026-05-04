@@ -23,10 +23,10 @@ No secret values were printed or committed. Evidence below uses configuration, G
 | Runtime auth | `web/src/lib/api-auth.ts` fails closed when production browser auth is not configured and requires session or programmatic bearer auth for data APIs. |
 | Turso client | `web/src/lib/server-db.ts` reads `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` only on the server side, uses parameterized Turso HTTP pipeline calls, and whitelists tables/columns before dynamic SQL. |
 | Release docs | `docs/linear-cicd.md` and `docs/release-checklist.md` list required Cloudflare Worker secrets and deploy verification expectations. |
-| GitHub metadata | Repository secret metadata showed `CLOUDFLARE_API_TOKEN` present. The `production` GitHub environment exists but has no protection rules and no environment-level secrets. |
+| GitHub metadata | Repository secret metadata showed `CLOUDFLARE_API_TOKEN` present. JPB-76 added a `production` environment branch policy that permits deployments only from `main` and documented the current repository-secret exception until the next Cloudflare token rotation. |
 | Cloudflare metadata | `wrangler secret list --name noteai-web` showed these Worker secrets: `GOOGLE_ALLOWED_EMAILS`, `GOOGLE_CLIENT_ID`, `NOTEAI_API_KEY`, `NOTEAI_AUTH_SECRET`, `TURSO_AUTH_TOKEN`, `TURSO_DATABASE_URL`. |
 | Live smoke | `GET /api/health` returned `ok: true`; unauthenticated `GET /api/data/notes` returned `401`; production root included CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`. |
-| Turso CLI | `turso` CLI is installed, but not authenticated, so database inventory, token scope, and restore settings could not be verified directly. |
+| Turso CLI | `turso` CLI is installed, but not authenticated, so database inventory, token scope, and restore settings could not be verified directly. JPB-78 decoded ignored local token metadata without printing values and documented token rotation. |
 
 ## External References
 
@@ -39,11 +39,11 @@ No secret values were printed or committed. Evidence below uses configuration, G
 
 ## Findings
 
-### Medium: Turso token least privilege is not evidenced
+### Medium: Turso token least privilege is not fully evidenced
 
 The production app uses a single `TURSO_AUTH_TOKEN` for schema creation/migrations, reads, upserts, deletes, and table clears. That may be necessary for the current generic CRUD implementation, but the token scope, authorization level, expiration, and rotation cadence were not verifiable from repo metadata or unauthenticated Turso CLI output.
 
-Remediation: verify the current production token in Turso, document whether it is database-scoped or group-scoped, confirm its expiration/rotation posture, and decide whether read/write separation is worth the added implementation depth.
+Status: mitigated by JPB-78 on 2026-05-04. `docs/security/turso-token-scope-rotation.md` records the accepted single-token posture, an expiring token cadence, emergency invalidation, and the deferred read/write split. Direct Turso account scope evidence still requires Turso CLI auth.
 
 ### Medium: Preview and production data-plane separation is not evidenced
 
@@ -55,13 +55,13 @@ Remediation: create a documented preview environment before testing production-l
 
 The GitHub repository has `CLOUDFLARE_API_TOKEN` as a repository secret. The `production` environment exists but has no environment-level secrets or protection rules. The workflow uses `environment: production`, but the deploy credential is available as a repo secret to any workflow that can reference it. Manual dispatch is now guarded to `refs/heads/main`, which prevents accidental production deploys from feature branches, but it does not replace environment-scoped credential storage.
 
-Remediation: move `CLOUDFLARE_API_TOKEN` to the `production` environment, add the minimum viable environment protection, and confirm the token itself is scoped to the `noteai-web` Worker/account permissions required for deploy.
+Status: mitigated by JPB-76 on 2026-05-04. The GitHub `production` environment now has a custom branch policy allowing deployment only from `main`. `docs/security/cloudflare-production-deploy-token-hardening.md` accepts the current repository-scoped token for this token lifecycle, records why it cannot be copied automatically, and requires moving it to an environment secret during the next token rotation.
 
 ### Low: Cloudflare Access/WAF/rate-limit policy is not evidenced
 
 The production app currently runs on the public workers.dev route. Application APIs are auth-gated, but no Cloudflare Access app, WAF rule, or rate-limit rule was found in repo configuration, and those account-level controls were not available through the local evidence path.
 
-Remediation: decide whether NoteAI should remain a public workers.dev app protected by application auth only, or add Cloudflare Access/rate limiting for production routes. Record the chosen policy and evidence.
+Status: accepted risk by JPB-77 on 2026-05-04. `docs/security/cloudflare-access-waf-rate-limit-policy.md` keeps the current `workers.dev` app public with application auth, records log/alert posture, and defines the trigger to add WAF/rate-limit controls when a custom Cloudflare zone hostname or traffic evidence exists.
 
 ### Low: Turso backup/restore drill is not documented
 
@@ -93,10 +93,10 @@ Status: resolved by JPB-81 on 2026-05-03. `NOTEAI_API_KEY` was confirmed obsolet
 
 JPB-22 is a verification and documentation slice. The following items require account-level action or product/security policy choices and should be tracked separately:
 
-1. Move the Cloudflare deploy token into the GitHub `production` environment and document its minimum Cloudflare API scopes.
-2. Document or implement Cloudflare Access/WAF/rate-limit policy for the public workers.dev production route.
-3. Verify and document Turso production token scope, expiration, and rotation cadence.
-4. Decide whether to implement Turso read/write token separation or keep a single full-access server token behind app auth.
+1. Mitigated by JPB-76: GitHub `production` now only permits deployments from `main`; current repository-scoped `CLOUDFLARE_API_TOKEN` is a documented current-token exception and should move to an environment secret during the next rotation.
+2. Resolved by JPB-77: Access/WAF/rate-limit decision documented as accepted risk for public `workers.dev` with app auth, with custom-domain triggers for WAF/rate-limit rules.
+3. Mitigated by JPB-78: Turso token expiration/rotation posture documented from local metadata; direct Turso account scope evidence still requires Turso auth.
+4. Deferred by JPB-78: read/write separation should wait until schema and migration work moves out of normal request-time reads.
 5. Resolved by JPB-79: `docs/security/cloudflare-turso-environment-separation.md` defines the preview-vs-production boundary and `web/wrangler.jsonc` declares `env.preview` required secrets.
 6. Resolved by JPB-80: `docs/security/turso-restore-runbook.md` documents PITR/cutover steps and the first non-production restore simulation.
 7. Resolved by JPB-81: `docs/security/jpb-81-worker-secret-cleanup.md` records removal of the legacy `NOTEAI_API_KEY` Worker secret.

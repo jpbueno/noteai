@@ -519,6 +519,55 @@ final class MeetingManager: ObservableObject {
         updateNote(note)
     }
 
+    @discardableResult
+    func renameNoteSpace(_ oldName: String, to newName: String) -> Bool {
+        guard let mutation = NoteSpaceOrganizer.renamingSpace(
+            oldName,
+            to: newName,
+            spaces: noteSpaces,
+            notes: notes
+        ) else { return false }
+
+        return applyNoteSpaceMutation(mutation)
+    }
+
+    @discardableResult
+    func deleteNoteSpace(_ name: String) -> Bool {
+        guard let mutation = NoteSpaceOrganizer.deletingSpace(
+            name,
+            spaces: noteSpaces,
+            notes: notes
+        ) else { return false }
+
+        return applyNoteSpaceMutation(mutation)
+    }
+
+    private func applyNoteSpaceMutation(_ mutation: NoteSpaceMutation) -> Bool {
+        let currentNotesByID = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
+        let now = Date()
+        var updatedNotes = mutation.notes
+        var changedNotes: [Note] = []
+
+        for index in updatedNotes.indices {
+            guard currentNotesByID[updatedNotes[index].id]?.space != updatedNotes[index].space else { continue }
+            updatedNotes[index].modifiedDate = now
+            changedNotes.append(updatedNotes[index])
+        }
+
+        do {
+            for note in changedNotes {
+                try meetingStore.saveNote(note)
+            }
+            notes = updatedNotes
+            noteSpaces = mutation.spaces
+            saveNoteSpaces()
+            return true
+        } catch {
+            print("Failed to update note space: \(error)")
+            return false
+        }
+    }
+
     private func ensureNoteSpace(_ rawSpace: String?) {
         guard let space = NoteSpaceOrganizer.normalized(rawSpace) else { return }
         guard !noteSpaces.contains(where: { $0.caseInsensitiveCompare(space) == .orderedSame }) else { return }

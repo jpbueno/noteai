@@ -72,6 +72,44 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(titles, ["customer success", "Roadmap"])
     }
 
+    func testNoteSpaceOrganizerRenamesSpaceAndMergesExistingTarget() throws {
+        let roadmapNote = Note(title: "Roadmap", content: "Plan", space: "Roadmap")
+        let lowercasedRoadmapNote = Note(title: "Roadmap 2", content: "Plan", space: "roadmap")
+        let customerNote = Note(title: "Customer", content: "Account", space: "Customer Success")
+        let unassignedNote = Note(title: "Loose", content: "Idea", space: nil)
+
+        let mutation = try XCTUnwrap(NoteSpaceOrganizer.renamingSpace(
+            "  Roadmap ",
+            to: "Customer Success",
+            spaces: ["Roadmap", "Customer Success", "Parking Lot"],
+            notes: [roadmapNote, lowercasedRoadmapNote, customerNote, unassignedNote]
+        ))
+
+        XCTAssertEqual(mutation.spaces, ["Customer Success", "Parking Lot"])
+        XCTAssertEqual(mutation.notes.map(\.space), [
+            "Customer Success",
+            "Customer Success",
+            "Customer Success",
+            nil,
+        ])
+    }
+
+    func testNoteSpaceOrganizerDeletesSpaceWithoutDeletingNotes() throws {
+        let roadmapNote = Note(title: "Roadmap", content: "Plan", space: "Roadmap")
+        let customerNote = Note(title: "Customer", content: "Account", space: "Customer Success")
+
+        let mutation = try XCTUnwrap(NoteSpaceOrganizer.deletingSpace(
+            "roadmap",
+            spaces: ["Roadmap", "Customer Success"],
+            notes: [roadmapNote, customerNote]
+        ))
+
+        XCTAssertEqual(mutation.spaces, ["Customer Success"])
+        XCTAssertEqual(mutation.notes.map(\.id), [roadmapNote.id, customerNote.id])
+        XCTAssertEqual(mutation.notes.map(\.space), [nil, "Customer Success"])
+        XCTAssertNil(NoteSpaceOrganizer.deletingSpace(NoteSpaceOrganizer.unassignedTitle, spaces: ["Roadmap"], notes: [roadmapNote]))
+    }
+
     func testLibraryOperationsFilterAcrossMeetingsAndNotes() {
         let meeting = Meeting(
             id: UUID(),
@@ -554,6 +592,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(meetingSource.contains("Label(\"AI copilot\""))
         XCTAssertTrue(meetingSource.contains("notesSidebarSection(layout: layout)"))
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
+    }
+
+    func testNoteSpaceHeadersExposeRenameAndDeleteContextMenuForCustomSpaces() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("private func noteSpaceHeader"))
+        XCTAssertTrue(source.contains("if !group.isUnassigned"))
+        XCTAssertTrue(source.contains(".contextMenu"))
+        XCTAssertTrue(source.contains("Label(\"Rename Space\""))
+        XCTAssertTrue(source.contains("renameNoteSpace(group.title)"))
+        XCTAssertTrue(source.contains("Label(\"Delete Space\""))
+        XCTAssertTrue(source.contains("deleteNoteSpace(group.title)"))
     }
 
     func testSidebarDividerIsFullHeightShellChrome() throws {

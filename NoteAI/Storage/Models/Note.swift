@@ -5,6 +5,7 @@ struct NoteSpaceGroup: Identifiable {
     let notes: [Note]
 
     var id: String { title }
+    var isUnassigned: Bool { title == NoteSpaceOrganizer.unassignedTitle }
 }
 
 enum NoteSpaceOrganizer {
@@ -21,14 +22,34 @@ enum NoteSpaceOrganizer {
         normalized(space) ?? unassignedTitle
     }
 
-    static func groups(for notes: [Note]) -> [NoteSpaceGroup] {
+    static func orderedSpaceTitles(_ spaces: [String]) -> [String] {
+        var seen: Set<String> = []
+        var titles: [String] = []
+
+        for space in spaces {
+            guard let normalized = normalized(space) else { continue }
+            let key = normalized.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            titles.append(normalized)
+        }
+
+        return titles.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    static func groups(
+        for notes: [Note],
+        explicitSpaces: [String] = [],
+        includeEmptyUnassigned: Bool = false
+    ) -> [NoteSpaceGroup] {
         let grouped = Dictionary(grouping: notes) { note in
             title(for: note.space)
         }
-        let assignedTitles = grouped.keys
-            .filter { $0 != unassignedTitle }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        let orderedTitles = assignedTitles + (grouped[unassignedTitle] == nil ? [] : [unassignedTitle])
+        let assignedTitles = orderedSpaceTitles(
+            explicitSpaces + grouped.keys.filter { $0 != unassignedTitle }
+        )
+        let shouldShowUnassigned = includeEmptyUnassigned || grouped[unassignedTitle] != nil
+        let orderedTitles = assignedTitles + (shouldShowUnassigned ? [unassignedTitle] : [])
 
         return orderedTitles.map { title in
             NoteSpaceGroup(title: title, notes: grouped[title] ?? [])

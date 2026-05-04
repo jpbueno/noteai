@@ -39,6 +39,39 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(groups[1].notes.map(\.id), [unassignedNote.id, blankSpaceNote.id])
     }
 
+    func testNoteSpaceOrganizerKeepsExplicitEmptySpacesVisible() {
+        let projectNote = Note(
+            title: "Project brief",
+            content: "Blackwell rollout",
+            space: "  Roadmap  "
+        )
+
+        let groups = NoteSpaceOrganizer.groups(
+            for: [projectNote],
+            explicitSpaces: ["Customer Success", "Parking Lot", "  Customer Success  "],
+            includeEmptyUnassigned: true
+        )
+
+        XCTAssertEqual(groups.map(\.title), ["Customer Success", "Parking Lot", "Roadmap", "Unassigned"])
+        XCTAssertEqual(groups[0].notes.count, 0)
+        XCTAssertEqual(groups[1].notes.count, 0)
+        XCTAssertEqual(groups[2].notes.map(\.id), [projectNote.id])
+        XCTAssertTrue(groups[3].isUnassigned)
+        XCTAssertEqual(groups[3].notes.count, 0)
+    }
+
+    func testNoteSpaceOrganizerOrdersAndDeduplicatesSpaceTitles() {
+        let titles = NoteSpaceOrganizer.orderedSpaceTitles([
+            "  Roadmap  ",
+            "customer success",
+            "",
+            "ROADMAP",
+            "Customer Success"
+        ])
+
+        XCTAssertEqual(titles, ["customer success", "Roadmap"])
+    }
+
     func testLibraryOperationsFilterAcrossMeetingsAndNotes() {
         let meeting = Meeting(
             id: UUID(),

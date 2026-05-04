@@ -233,19 +233,6 @@ struct MeetingLibraryView: View {
             Spacer()
 
             Button {
-                createNewNote()
-            } label: {
-                Label("New note", systemImage: "plus")
-                    .font(.system(size: layout.bodyFontSize, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(height: layout.controlHeight)
-                    .padding(.horizontal, round(12 * layout.scale))
-                    .background(Theme.sidebarBG.opacity(0.70), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-
-            Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     showChatDrawer.toggle()
                 }

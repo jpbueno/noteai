@@ -545,6 +545,17 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("meetingManager.startRecording()"))
     }
 
+    func testCommandCenterDoesNotRenderRedundantTopLevelCreationButtons() throws {
+        let meetingSource = try meetingLibrarySource()
+        let homeSource = try homeDashboardSource()
+
+        XCTAssertFalse(meetingSource.contains("Label(\"New note\""))
+        XCTAssertFalse(homeSource.contains("Label(\"New Todo\""))
+        XCTAssertTrue(meetingSource.contains("Label(\"AI copilot\""))
+        XCTAssertTrue(meetingSource.contains("notesSidebarSection(layout: layout)"))
+        XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
+    }
+
     func testSidebarDividerIsFullHeightShellChrome() throws {
         let source = try meetingLibrarySource()
 
@@ -560,6 +571,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
         return try String(contentsOf: sidebarFile, encoding: .utf8)
+    }
+
+    private func homeDashboardSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let dashboardFile = projectRoot.appendingPathComponent("NoteAI/UI/Home/HomeDashboardView.swift")
+        return try String(contentsOf: dashboardFile, encoding: .utf8)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

@@ -519,10 +519,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
         let source = try meetingLibrarySource()
 
-        XCTAssertGreaterThanOrEqual(compact.sidebarBrandLeadingInset, 72)
-        XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, compact.sidebarWidth * 0.36)
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandLeadingInset, 12)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, 18)
         XCTAssertEqual(compact.sidebarBrandLeadingInset, wide.sidebarBrandLeadingInset)
         XCTAssertTrue(source.contains(".padding(.leading, layout.sidebarBrandLeadingInset)"))
+        XCTAssertTrue(source.contains(".padding(.top, layout.sidebarBrandHeaderTopPadding)"))
+        XCTAssertTrue(source.contains(".padding(.bottom, layout.sidebarBrandHeaderBottomPadding)"))
+        XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight"))
     }
 
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
@@ -531,14 +534,15 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("recordingSourceCard("))
         XCTAssertFalse(source.contains("Native capture"))
         XCTAssertFalse(source.contains("subtitle: \"Ready\""))
+        XCTAssertFalse(source.contains("recordingReadinessRow(readiness"))
+        XCTAssertFalse(source.contains("private func recordingReadinessRow"))
     }
 
-    func testSidebarRecordingControlsSurfaceReadinessState() throws {
+    func testSidebarRecordingControlsUsesReadinessOnlyForPrimaryActionLabel() throws {
         let source = try meetingLibrarySource()
 
-        XCTAssertTrue(source.contains("meetingManager.recordingReadiness"))
-        XCTAssertTrue(source.contains("recordingReadinessRow"))
         XCTAssertTrue(source.contains("recordingReadiness.primaryActionTitle"))
+        XCTAssertTrue(source.contains("meetingManager.startRecording()"))
     }
 
     func testSidebarDividerIsFullHeightShellChrome() throws {

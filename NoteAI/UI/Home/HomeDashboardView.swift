@@ -58,6 +58,9 @@ struct CommandCenterLayout: Equatable {
     let contentMaxWidth: CGFloat
     let commandSearchMaxWidth: CGFloat
     let sidebarBrandLeadingInset: CGFloat
+    let sidebarBrandHeaderHeight: CGFloat
+    let sidebarBrandHeaderTopPadding: CGFloat
+    let sidebarBrandHeaderBottomPadding: CGFloat
     let controlHeight: CGFloat
     let actionButtonHeight: CGFloat
     let panelPadding: CGFloat
@@ -77,7 +80,7 @@ struct CommandCenterLayout: Equatable {
         let typeScale = min(1.0, max(0.96, width / 1700))
         let sidebarWidth = min(280, max(228, width * 0.155))
         let contentMaxWidth = max(780, width - sidebarWidth - 80)
-        let sidebarBrandLeadingInset: CGFloat = 72
+        let sidebarBrandLeadingInset: CGFloat = 14
 
         return CommandCenterLayout(
             scale: scale,
@@ -87,6 +90,9 @@ struct CommandCenterLayout: Equatable {
             contentMaxWidth: contentMaxWidth,
             commandSearchMaxWidth: min(520, max(360, width * 0.30)),
             sidebarBrandLeadingInset: sidebarBrandLeadingInset,
+            sidebarBrandHeaderHeight: round(78 * scale),
+            sidebarBrandHeaderTopPadding: round(28 * scale),
+            sidebarBrandHeaderBottomPadding: round(16 * scale),
             controlHeight: min(39, max(36, round(38 * scale))),
             actionButtonHeight: min(42, max(38, round(41 * scale))),
             panelPadding: round(16 * scale),

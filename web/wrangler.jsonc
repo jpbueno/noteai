@@ -33,7 +33,8 @@
           "TURSO_DATABASE_URL",
           "TURSO_AUTH_TOKEN",
           "NOTEAI_AUTH_SECRET",
-          "GOOGLE_CLIENT_ID"
+          "GOOGLE_CLIENT_ID",
+          "GOOGLE_ALLOWED_EMAILS"
         ]
       }
     }

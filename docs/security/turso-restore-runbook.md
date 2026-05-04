@@ -137,6 +137,84 @@ What this proves:
 - No production secret values are needed in the runbook.
 - The remaining real Turso PITR drill requires Turso authentication and a non-production Turso database.
 
+## Authenticated Non-Production PITR Drill
+
+Use this flow for the first real Turso drill. It must use disposable or preview-only Turso databases and must not copy production data.
+
+1. Create a disposable source database.
+
+   ```bash
+   turso db create noteai-pitr-drill-source-YYYYMMDD --group <turso-group> --wait
+   turso db show noteai-pitr-drill-source-YYYYMMDD --url
+   turso db tokens create noteai-pitr-drill-source-YYYYMMDD --expiration 1d
+   ```
+
+2. Apply the NoteAI schema to the disposable source database.
+
+   ```bash
+   cd web
+   TURSO_DATABASE_URL=<drill-source-url> \
+   TURSO_MIGRATION_AUTH_TOKEN=<drill-source-token> \
+   NOTEAI_AUTH_SECRET=<drill-auth-secret> \
+   npm run migrate:turso
+   ```
+
+3. Insert a pre-restore marker row, wait for PITR availability, then capture the restore timestamp.
+
+   ```bash
+   turso db shell noteai-pitr-drill-source-YYYYMMDD \
+     "INSERT INTO notes (id, title, content, tags, createdDate, modifiedDate) VALUES ('pitr-before', 'PITR before marker', '', '[]', datetime('now'), datetime('now'));"
+   sleep 20
+   RESTORE_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+   ```
+
+4. Insert a post-restore marker row that should not exist in the restored database.
+
+   ```bash
+   turso db shell noteai-pitr-drill-source-YYYYMMDD \
+     "INSERT INTO notes (id, title, content, tags, createdDate, modifiedDate) VALUES ('pitr-after', 'PITR after marker', '', '[]', datetime('now'), datetime('now'));"
+   ```
+
+5. Restore to a new disposable database from the captured timestamp.
+
+   ```bash
+   turso db create noteai-pitr-drill-restore-YYYYMMDD --from-db noteai-pitr-drill-source-YYYYMMDD --timestamp "$RESTORE_TS" --wait
+   ```
+
+6. Validate count-only results.
+
+   ```bash
+   turso db shell noteai-pitr-drill-restore-YYYYMMDD "SELECT COUNT(*) FROM notes WHERE id = 'pitr-before';"
+   turso db shell noteai-pitr-drill-restore-YYYYMMDD "SELECT COUNT(*) FROM notes WHERE id = 'pitr-after';"
+   ```
+
+   Expected results:
+
+   - `pitr-before` count is `1`.
+   - `pitr-after` count is `0`.
+
+7. Create a restored database token only if the drill includes application cutover testing.
+
+   ```bash
+   turso db tokens create noteai-pitr-drill-restore-YYYYMMDD --expiration 1d
+   ```
+
+8. Record drill evidence in Linear and this runbook without secrets:
+
+   - source database name;
+   - restored database name;
+   - restore timestamp;
+   - RTO from restore command start to validation complete;
+   - count-only validation results;
+   - whether Cloudflare secret cutover was intentionally skipped or tested against a preview Worker.
+
+9. Destroy disposable drill databases only after recording the evidence and confirming no preview Worker still points at them.
+
+   ```bash
+   turso db destroy noteai-pitr-drill-restore-YYYYMMDD
+   turso db destroy noteai-pitr-drill-source-YYYYMMDD
+   ```
+
 ## Source References
 
 - Turso point-in-time recovery creates a new database, requires updating the app connection string, and requires a new token for the restored database: https://docs.turso.tech/features/point-in-time-recovery

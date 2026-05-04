@@ -163,6 +163,37 @@ test("web app exposes a lightweight release health endpoint", () => {
   assert.doesNotMatch(healthRoute, /requireApiAuth/);
 });
 
+test("preview Cloudflare Worker requires preview-only auth and data secrets", () => {
+  const wranglerConfig = JSON.parse(read("./wrangler.jsonc"));
+  const required = new Set(wranglerConfig.env?.preview?.secrets?.required || []);
+  const separationRunbook = read("../docs/security/cloudflare-turso-environment-separation.md");
+
+  assert.equal(wranglerConfig.name, "noteai-web");
+  assert.ok(wranglerConfig.env?.preview, "preview environment should be declared");
+  for (const secret of [
+    "TURSO_DATABASE_URL",
+    "TURSO_AUTH_TOKEN",
+    "NOTEAI_AUTH_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_ALLOWED_EMAILS",
+  ]) {
+    assert.equal(required.has(secret), true, `preview should require ${secret}`);
+  }
+  assert.match(separationRunbook, /turso db create noteai-preview/);
+  assert.match(separationRunbook, /Do not use `--from-db <production-db-name>`/);
+  assert.match(separationRunbook, /npx wrangler secret put GOOGLE_ALLOWED_EMAILS --env preview/);
+});
+
+test("Turso PITR runbook includes an authenticated non-production drill", () => {
+  const runbook = read("../docs/security/turso-restore-runbook.md");
+
+  assert.match(runbook, /Authenticated Non-Production PITR Drill/);
+  assert.match(runbook, /noteai-pitr-drill-source-YYYYMMDD/);
+  assert.match(runbook, /--from-db noteai-pitr-drill-source-YYYYMMDD --timestamp "\$RESTORE_TS"/);
+  assert.match(runbook, /pitr-before` count is `1`/);
+  assert.match(runbook, /pitr-after` count is `0`/);
+});
+
 test("web API auth avoids unsupported Next request interception on Cloudflare", () => {
   const apiAuth = read("./src/lib/api-auth.ts");
   const dataRoute = read("./src/app/api/data/[table]/route.ts");

@@ -244,6 +244,10 @@ class RichEditorTextView: NSTextView {
     }
 }
 
+private enum RichMarkdownEditorTheme {
+    static let background = Theme.contentBGNSColor
+}
+
 /// Fixed toolbar with Notion-style SF Symbol icons. Uses refusesFirstResponder
 /// so the NSTextView keeps focus and selection when toolbar buttons are clicked.
 final class EditorFixedToolbar: NSView {
@@ -253,7 +257,7 @@ final class EditorFixedToolbar: NSView {
         self.coordinator = coordinator
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.122, green: 0.122, blue: 0.122, alpha: 1).cgColor
+        applyTheme()
 
         let stack = NSStackView()
         stack.orientation = .horizontal
@@ -310,6 +314,17 @@ final class EditorFixedToolbar: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyTheme()
+    }
+
+    private func applyTheme() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = RichMarkdownEditorTheme.background.cgColor
+        }
+    }
 
     private struct BtnDef {
         let style: MarkdownTransformStyle
@@ -378,6 +393,8 @@ struct RichMarkdownEditor: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = RichMarkdownEditorTheme.background
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(scrollView)
 
@@ -411,7 +428,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.backgroundColor = NSColor(red: 0.122, green: 0.122, blue: 0.122, alpha: 1)
+        textView.backgroundColor = RichMarkdownEditorTheme.background
         textView.insertionPointColor = .white
         textView.textContainerInset = NSSize(width: 4, height: 8)
         textView.allowsUndo = true
@@ -432,6 +449,8 @@ struct RichMarkdownEditor: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let scrollView = nsView.subviews.compactMap({ $0 as? NSScrollView }).first,
               let textView = scrollView.documentView as? NSTextView else { return }
+        scrollView.backgroundColor = RichMarkdownEditorTheme.background
+        textView.backgroundColor = RichMarkdownEditorTheme.background
         if context.coordinator.currentMarkdown(from: textView) != text {
             let selectedRange = textView.selectedRange()
             textView.string = text

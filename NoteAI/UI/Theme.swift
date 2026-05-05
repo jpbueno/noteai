@@ -78,6 +78,7 @@ enum Theme {
     // Mirrors web/src/app/globals.css.
     static let sidebarBG = Color(light: "F8FAFC", dark: "10161B")
     static let contentBG = Color(light: "F3F6F8", dark: "0B0F12")
+    static let contentBGNSColor = NSColor(noteAIAdaptiveHexLight: "F3F6F8", dark: "0B0F12")
     static let hoverBG = Color(light: "E8EEF3", dark: "151D23")
     static let selectedBG = Color(light: "DDEFF9", dark: "1B252D")
     static let border = Color(light: "CFDAE3", dark: "26333D")
@@ -134,6 +135,13 @@ extension Color {
 }
 
 private extension NSColor {
+    convenience init(noteAIAdaptiveHexLight light: String, dark: String) {
+        self.init(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(noteAIHex: isDark ? dark : light)
+        }
+    }
+
     convenience init(noteAIHex: String) {
         let hex = noteAIHex.trimmingCharacters(in: .alphanumerics.inverted)
         var int: UInt64 = 0

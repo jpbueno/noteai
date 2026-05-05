@@ -633,7 +633,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(meetingSource.contains("Label(\"New note\""))
         XCTAssertFalse(homeSource.contains("Label(\"New Todo\""))
         XCTAssertTrue(meetingSource.contains("Label(\"AI copilot\""))
-        XCTAssertTrue(meetingSource.contains("notesSidebarSection(layout: layout)"))
+        XCTAssertTrue(meetingSource.contains("notesSidebarSection(selectionTarget: .notesList, layout: layout)"))
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
 
@@ -665,6 +665,36 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("sidebarLimitedContent"))
         XCTAssertTrue(source.contains("sidebarListToggleRow"))
         XCTAssertTrue(source.contains("sidebarExpansionID(forNoteSpace title:"))
+    }
+
+    func testSidebarSectionHeadersSelectCollectionListViews() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("case t5tList"))
+        XCTAssertTrue(source.contains("case notesList"))
+        XCTAssertTrue(source.contains("case todosList"))
+        XCTAssertTrue(source.contains("case meetingsList"))
+        XCTAssertTrue(source.contains("selectionTarget: .t5tList"))
+        XCTAssertTrue(source.contains("notesSidebarSection(selectionTarget: .notesList"))
+        XCTAssertTrue(source.contains("selectionTarget: .todosList"))
+        XCTAssertTrue(source.contains("selectionTarget: .meetingsList"))
+        XCTAssertTrue(source.contains("private func sidebarSectionHeaderButton"))
+        XCTAssertTrue(source.contains("selection = selectionTarget"))
+    }
+
+    func testCollectionListDestinationsRenderInMainDetailArea() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("case .t5tList = selection"))
+        XCTAssertTrue(source.contains("t5tReportsListPage"))
+        XCTAssertTrue(source.contains("case .notesList = selection"))
+        XCTAssertTrue(source.contains("notesListPage"))
+        XCTAssertTrue(source.contains("case .todosList = selection"))
+        XCTAssertTrue(source.contains("todosListPage"))
+        XCTAssertTrue(source.contains("case .meetingsList = selection"))
+        XCTAssertTrue(source.contains("meetingsListPage"))
+        XCTAssertTrue(source.contains("private func collectionListPage"))
+        XCTAssertTrue(source.contains("private func collectionListRow"))
     }
 
     func testNoteSpaceHeadersExposeRenameAndDeleteContextMenuForCustomSpaces() throws {

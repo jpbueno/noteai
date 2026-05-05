@@ -6,6 +6,10 @@ import UniformTypeIdentifiers
 
 enum SidebarSelection: Hashable {
     case home
+    case t5tList
+    case notesList
+    case todosList
+    case meetingsList
     case meeting(UUID)
     case t5tReport(UUID)
     case newT5T
@@ -309,7 +313,7 @@ struct MeetingLibraryView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     homeSidebarRow(layout: layout)
 
-                    sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", action: createNewT5T, layout: layout) {
+                    sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", selectionTarget: .t5tList, action: createNewT5T, layout: layout) {
                         sidebarLimitedContent(
                             meetingManager.t5tReports,
                             expansionID: sidebarExpansionID(for: .t5t),
@@ -322,7 +326,7 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    notesSidebarSection(layout: layout) {
+                    notesSidebarSection(selectionTarget: .notesList, layout: layout) {
                         ForEach(
                             NoteSpaceOrganizer.groups(
                                 for: visibleNotes,
@@ -346,7 +350,7 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.todos, title: "Todos", icon: "checkmark.square", action: createNewTodo, layout: layout) {
+                    sidebarSection(.todos, title: "Todos", icon: "checkmark.square", selectionTarget: .todosList, action: createNewTodo, layout: layout) {
                         sidebarLimitedContent(
                             visibleTodos,
                             expansionID: sidebarExpansionID(for: .todos),
@@ -359,7 +363,7 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.meetings, title: "Meetings", icon: "waveform", action: nil, layout: layout) {
+                    sidebarSection(.meetings, title: "Meetings", icon: "waveform", selectionTarget: .meetingsList, action: nil, layout: layout) {
                         sidebarLimitedContent(
                             visibleMeetings,
                             expansionID: sidebarExpansionID(for: .meetings),
@@ -640,6 +644,7 @@ struct MeetingLibraryView: View {
         _ id: SidebarSectionID,
         title: String,
         icon: String,
+        selectionTarget: SidebarSelection,
         action: (() -> Void)?,
         layout: CommandCenterLayout,
         @ViewBuilder content: () -> Content
@@ -649,17 +654,20 @@ struct MeetingLibraryView: View {
                 Button {
                     toggleSection(id)
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: collapsedSections.contains(id) ? "chevron.right" : "chevron.down")
-                            .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
-                        Image(systemName: icon)
-                            .font(.system(size: layout.smallFontSize, weight: .medium))
-                        Text(title.uppercased())
-                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
-                    }
-                    .foregroundStyle(Theme.sectionHeader)
+                    Image(systemName: collapsedSections.contains(id) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
+                        .foregroundStyle(Theme.sectionHeader)
+                        .frame(width: round(12 * layout.scale), height: round(18 * layout.scale))
                 }
                 .buttonStyle(.plain)
+                .help(collapsedSections.contains(id) ? "Expand \(title)" : "Collapse \(title)")
+
+                sidebarSectionHeaderButton(
+                    title: title,
+                    icon: icon,
+                    selectionTarget: selectionTarget,
+                    layout: layout
+                )
 
                 Spacer()
 
@@ -686,6 +694,7 @@ struct MeetingLibraryView: View {
     }
 
     private func notesSidebarSection<Content: View>(
+        selectionTarget: SidebarSelection,
         layout: CommandCenterLayout,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -694,17 +703,20 @@ struct MeetingLibraryView: View {
                 Button {
                     toggleSection(.notes)
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: collapsedSections.contains(.notes) ? "chevron.right" : "chevron.down")
-                            .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
-                        Image(systemName: "note.text")
-                            .font(.system(size: layout.smallFontSize, weight: .medium))
-                        Text("NOTES")
-                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
-                    }
-                    .foregroundStyle(Theme.sectionHeader)
+                    Image(systemName: collapsedSections.contains(.notes) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
+                        .foregroundStyle(Theme.sectionHeader)
+                        .frame(width: round(12 * layout.scale), height: round(18 * layout.scale))
                 }
                 .buttonStyle(.plain)
+                .help(collapsedSections.contains(.notes) ? "Expand Notes" : "Collapse Notes")
+
+                sidebarSectionHeaderButton(
+                    title: "Notes",
+                    icon: "note.text",
+                    selectionTarget: selectionTarget,
+                    layout: layout
+                )
 
                 Spacer()
 
@@ -739,6 +751,31 @@ struct MeetingLibraryView: View {
                 content()
             }
         }
+    }
+
+    private func sidebarSectionHeaderButton(
+        title: String,
+        icon: String,
+        selectionTarget: SidebarSelection,
+        layout: CommandCenterLayout
+    ) -> some View {
+        let isSelected = selection == selectionTarget
+
+        return Button {
+            selection = selectionTarget
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: layout.smallFontSize, weight: .medium))
+                Text(title.uppercased())
+                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? Theme.accent : Theme.sectionHeader)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show \(title)")
     }
 
     private func toggleSection(_ section: SidebarSectionID) {
@@ -1074,6 +1111,14 @@ struct MeetingLibraryView: View {
                 onSelectTodo: { id in selection = .todo(id) },
                 onOnboardingAction: handleOnboardingAction
             )
+        } else if case .t5tList = selection {
+            t5tReportsListPage
+        } else if case .notesList = selection {
+            notesListPage
+        } else if case .todosList = selection {
+            todosListPage
+        } else if case .meetingsList = selection {
+            meetingsListPage
         } else if case .todo(let id) = selection,
                   let index = meetingManager.todos.firstIndex(where: { $0.id == id }) {
             TodoDetailView(
@@ -1113,6 +1158,237 @@ struct MeetingLibraryView: View {
                 onOnboardingAction: handleOnboardingAction
             )
         }
+    }
+
+    private var t5tReportsListPage: some View {
+        collectionListPage(
+            eyebrow: "T5T reports",
+            title: "T5T Reports",
+            subtitle: "\(meetingManager.t5tReports.count) reports",
+            isEmpty: meetingManager.t5tReports.isEmpty,
+            emptyTitle: "No T5T reports yet",
+            emptySubtitle: "Create a T5T report from the sidebar when you are ready to prepare an update."
+        ) {
+            ForEach(meetingManager.t5tReports) { report in
+                collectionListRow(
+                    icon: "list.bullet.rectangle",
+                    tint: report.status == .draft ? Color.orange : Theme.textTertiary,
+                    title: "\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)",
+                    metadata: "\(report.status.rawValue.capitalized) • \(report.meetingIDs.count) meetings",
+                    detail: report.title
+                ) {
+                    selection = .t5tReport(report.id)
+                }
+            }
+        }
+    }
+
+    private var notesListPage: some View {
+        let groups = NoteSpaceOrganizer.groups(
+            for: visibleNotes,
+            explicitSpaces: meetingManager.noteSpaces,
+            includeEmptyUnassigned: !meetingManager.noteSpaces.isEmpty
+        ).filter { !$0.notes.isEmpty }
+
+        return collectionListPage(
+            eyebrow: "Notes",
+            title: "Notes",
+            subtitle: "\(visibleNotes.count) notes",
+            isEmpty: visibleNotes.isEmpty,
+            emptyTitle: meetingManager.searchQuery.isEmpty ? "No notes yet" : "No matching notes",
+            emptySubtitle: meetingManager.searchQuery.isEmpty
+                ? "Create a note from the sidebar to start capturing reusable context."
+                : "Try a different search term or clear the workspace search."
+        ) {
+            ForEach(groups) { group in
+                if groups.count > 1 {
+                    collectionGroupHeader(group.title, count: group.notes.count)
+                }
+                ForEach(group.notes) { note in
+                    collectionListRow(
+                        icon: "note.text",
+                        tint: Theme.textTertiary,
+                        title: "\(datePrefix(note.createdDate)) \(note.title)",
+                        metadata: "Modified \(note.formattedModifiedDate)",
+                        detail: notePreview(note)
+                    ) {
+                        selection = .note(note.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private var todosListPage: some View {
+        collectionListPage(
+            eyebrow: "Todos",
+            title: quickFilter == .openTodos ? "Open Todos" : "Todos",
+            subtitle: "\(visibleTodos.filter { !$0.completed }.count) open • \(visibleTodos.filter(\.completed).count) completed",
+            isEmpty: visibleTodos.isEmpty,
+            emptyTitle: meetingManager.searchQuery.isEmpty ? "No todos yet" : "No matching todos",
+            emptySubtitle: meetingManager.searchQuery.isEmpty
+                ? "Create a todo from the sidebar when work needs a clear next action."
+                : "Try a different search term or clear the workspace search."
+        ) {
+            ForEach(visibleTodos) { todo in
+                collectionListRow(
+                    icon: todo.completed ? "checkmark.circle.fill" : "circle",
+                    tint: todo.completed ? Theme.success : dueLabelColor(for: todo),
+                    title: todo.title.isEmpty ? "Untitled todo" : todo.title,
+                    metadata: todo.completed ? "Completed" : (todo.dueDateLabel ?? "No due date"),
+                    detail: todo.description.isEmpty ? nil : todo.description
+                ) {
+                    selection = .todo(todo.id)
+                }
+            }
+        }
+    }
+
+    private var meetingsListPage: some View {
+        collectionListPage(
+            eyebrow: "Meetings",
+            title: quickFilter == .unreviewed ? "Unreviewed Meetings" : "Meetings",
+            subtitle: "\(visibleMeetings.count) meetings",
+            isEmpty: visibleMeetings.isEmpty,
+            emptyTitle: meetingManager.searchQuery.isEmpty ? "No meetings yet" : "No matching meetings",
+            emptySubtitle: meetingManager.searchQuery.isEmpty
+                ? "Record a meeting to start building your meeting library."
+                : "Try a different search term or clear the workspace search."
+        ) {
+            ForEach(visibleMeetings) { meeting in
+                collectionListRow(
+                    icon: "doc.text",
+                    tint: meeting.summary.wasSummarized ? Theme.textTertiary : Theme.warning,
+                    title: "\(datePrefix(meeting.date)) \(meeting.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams"))",
+                    metadata: "\(meeting.date.formatted(date: .abbreviated, time: .shortened)) • \(meeting.formattedDuration)",
+                    detail: meeting.summary.wasSummarized ? nil : "Summary needs review"
+                ) {
+                    selection = .meeting(meeting.id)
+                }
+            }
+        }
+    }
+
+    private func collectionListPage<Content: View>(
+        eyebrow: String,
+        title: String,
+        subtitle: String,
+        isEmpty: Bool,
+        emptyTitle: String,
+        emptySubtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(eyebrow.uppercased())
+                        .font(.system(size: Theme.smallSize, weight: .bold))
+                        .foregroundStyle(Theme.sectionHeader)
+                    Text(title)
+                        .font(.system(size: Theme.pageTitleSize, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(subtitle)
+                        .font(.system(size: Theme.bodySize))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+
+                if isEmpty {
+                    collectionEmptyState(title: emptyTitle, subtitle: emptySubtitle)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        content()
+                    }
+                }
+            }
+            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
+            .padding(.horizontal, Theme.pagePadding)
+            .padding(.vertical, 42)
+        }
+        .background(Theme.contentBG)
+    }
+
+    private func collectionGroupHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: Theme.smallSize, weight: .bold))
+                .foregroundStyle(Theme.textTertiary)
+            Text("\(count)")
+                .font(.system(size: Theme.smallSize, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            Spacer()
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+
+    private func collectionListRow(
+        icon: String,
+        tint: Color,
+        title: String,
+        metadata: String,
+        detail: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: Theme.bodySize, weight: .medium))
+                    .foregroundStyle(tint)
+                    .frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(.system(size: Theme.bodySize, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(metadata)
+                        .font(.system(size: Theme.smallSize))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                    if let detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: Theme.smallSize))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 12)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: Theme.smallSize, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, 3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.85), lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func collectionEmptyState(title: String, subtitle: String) -> some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: Theme.bodySize, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            Text(subtitle)
+                .font(.system(size: Theme.smallSize))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+        }
+        .frame(maxWidth: .infinity, minHeight: 180)
+        .background(Theme.sidebarBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.70), lineWidth: 1))
+    }
+
+    private func notePreview(_ note: Note) -> String? {
+        let preview = note.content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return preview.isEmpty ? nil : preview
     }
 
     private var newT5TPlaceholder: some View {

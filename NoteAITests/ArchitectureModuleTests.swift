@@ -637,6 +637,36 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
 
+    func testSidebarListLimiterShowsInitialItemsAndCountsHiddenItems() {
+        let items = Array(1...8)
+
+        let collapsed = SidebarListLimiter.slice(items, expanded: false, searchActive: false, limit: 5)
+        XCTAssertEqual(collapsed.items, [1, 2, 3, 4, 5])
+        XCTAssertEqual(collapsed.hiddenCount, 3)
+        XCTAssertTrue(collapsed.canToggle)
+
+        let expanded = SidebarListLimiter.slice(items, expanded: true, searchActive: false, limit: 5)
+        XCTAssertEqual(expanded.items, items)
+        XCTAssertEqual(expanded.hiddenCount, 0)
+        XCTAssertTrue(expanded.canToggle)
+
+        let searching = SidebarListLimiter.slice(items, expanded: false, searchActive: true, limit: 5)
+        XCTAssertEqual(searching.items, items)
+        XCTAssertEqual(searching.hiddenCount, 0)
+        XCTAssertFalse(searching.canToggle)
+    }
+
+    func testSidebarShowMoreAffordanceIsPersistedAndScoped() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("@AppStorage(\"noteai.sidebarExpandedLists.v1\")"))
+        XCTAssertTrue(source.contains("Show more"))
+        XCTAssertTrue(source.contains("Show less"))
+        XCTAssertTrue(source.contains("sidebarLimitedContent"))
+        XCTAssertTrue(source.contains("sidebarListToggleRow"))
+        XCTAssertTrue(source.contains("sidebarExpansionID(forNoteSpace title:"))
+    }
+
     func testNoteSpaceHeadersExposeRenameAndDeleteContextMenuForCustomSpaces() throws {
         let source = try meetingLibrarySource()
 

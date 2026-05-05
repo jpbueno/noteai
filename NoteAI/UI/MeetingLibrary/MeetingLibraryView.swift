@@ -20,6 +20,34 @@ private enum SidebarSectionID: Hashable {
     case meetings
 }
 
+struct SidebarListSlice<Element> {
+    let items: [Element]
+    let hiddenCount: Int
+    let canToggle: Bool
+}
+
+enum SidebarListLimiter {
+    static func slice<Element>(
+        _ items: [Element],
+        expanded: Bool,
+        searchActive: Bool,
+        limit: Int
+    ) -> SidebarListSlice<Element> {
+        let visibleLimit = max(0, limit)
+        let canToggle = !searchActive && items.count > visibleLimit
+
+        guard canToggle, !expanded else {
+            return SidebarListSlice(items: items, hiddenCount: 0, canToggle: canToggle)
+        }
+
+        return SidebarListSlice(
+            items: Array(items.prefix(visibleLimit)),
+            hiddenCount: max(0, items.count - visibleLimit),
+            canToggle: true
+        )
+    }
+}
+
 private enum CommandCenterQuickFilter: CaseIterable, Hashable {
     case recent
     case openTodos
@@ -60,8 +88,10 @@ struct MeetingLibraryView: View {
     @State private var draggingNoteID: UUID?
     @FocusState private var searchFocused: Bool
     @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
+    @AppStorage("noteai.sidebarExpandedLists.v1") private var sidebarExpandedListsRaw = ""
 
     private let sidebarDividerHitWidth: CGFloat = 8
+    private let sidebarDefaultVisibleCount = 5
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter()
@@ -280,7 +310,11 @@ struct MeetingLibraryView: View {
                     homeSidebarRow(layout: layout)
 
                     sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", action: createNewT5T, layout: layout) {
-                        ForEach(meetingManager.t5tReports) { report in
+                        sidebarLimitedContent(
+                            meetingManager.t5tReports,
+                            expansionID: sidebarExpansionID(for: .t5t),
+                            layout: layout
+                        ) { report in
                             t5tSidebarRow(report: report, layout: layout)
                         }
                         if meetingManager.t5tReports.isEmpty {
@@ -298,7 +332,11 @@ struct MeetingLibraryView: View {
                         ) { group in
                             VStack(alignment: .leading, spacing: 0) {
                                 noteSpaceHeader(group: group, layout: layout)
-                                ForEach(group.notes) { note in
+                                sidebarLimitedContent(
+                                    group.notes,
+                                    expansionID: sidebarExpansionID(forNoteSpace: group.title),
+                                    layout: layout
+                                ) { note in
                                     noteSidebarRow(note: note, layout: layout)
                                 }
                             }
@@ -309,7 +347,11 @@ struct MeetingLibraryView: View {
                     }
 
                     sidebarSection(.todos, title: "Todos", icon: "checkmark.square", action: createNewTodo, layout: layout) {
-                        ForEach(visibleTodos) { todo in
+                        sidebarLimitedContent(
+                            visibleTodos,
+                            expansionID: sidebarExpansionID(for: .todos),
+                            layout: layout
+                        ) { todo in
                             todoSidebarRow(todo: todo, layout: layout)
                         }
                         if visibleTodos.isEmpty && meetingManager.searchQuery.isEmpty {
@@ -318,7 +360,11 @@ struct MeetingLibraryView: View {
                     }
 
                     sidebarSection(.meetings, title: "Meetings", icon: "waveform", action: nil, layout: layout) {
-                        ForEach(visibleMeetings) { meeting in
+                        sidebarLimitedContent(
+                            visibleMeetings,
+                            expansionID: sidebarExpansionID(for: .meetings),
+                            layout: layout
+                        ) { meeting in
                             sidebarRow(meeting: meeting, layout: layout)
                         }
                         if visibleMeetings.isEmpty {
@@ -346,6 +392,101 @@ struct MeetingLibraryView: View {
             .padding(.vertical, 4)
         }
         .background(Theme.sidebarBG)
+    }
+
+    private var searchIsActive: Bool {
+        !meetingManager.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var expandedSidebarListIDs: Set<String> {
+        Set(sidebarExpandedListsRaw.split(separator: "\n").map(String.init))
+    }
+
+    private func isSidebarListExpanded(_ id: String) -> Bool {
+        expandedSidebarListIDs.contains(id)
+    }
+
+    private func toggleSidebarListExpansion(_ id: String) {
+        var ids = expandedSidebarListIDs
+        if ids.contains(id) {
+            ids.remove(id)
+        } else {
+            ids.insert(id)
+        }
+        sidebarExpandedListsRaw = ids.sorted().joined(separator: "\n")
+    }
+
+    private func sidebarExpansionID(for section: SidebarSectionID) -> String {
+        switch section {
+        case .t5t: return "t5t"
+        case .notes: return "notes"
+        case .todos: return "todos"
+        case .meetings: return "meetings"
+        }
+    }
+
+    private func sidebarExpansionID(forNoteSpace title: String) -> String {
+        "notespace:" + title.unicodeScalars.map { String($0.value, radix: 16) }.joined(separator: "-")
+    }
+
+    @ViewBuilder
+    private func sidebarLimitedContent<Item: Identifiable, Row: View>(
+        _ items: [Item],
+        expansionID: String,
+        layout: CommandCenterLayout,
+        @ViewBuilder row: @escaping (Item) -> Row
+    ) -> some View {
+        let expanded = isSidebarListExpanded(expansionID)
+        let slice = SidebarListLimiter.slice(
+            items,
+            expanded: expanded,
+            searchActive: searchIsActive,
+            limit: sidebarDefaultVisibleCount
+        )
+
+        ForEach(slice.items) { item in
+            row(item)
+        }
+
+        if slice.canToggle {
+            sidebarListToggleRow(
+                expansionID: expansionID,
+                isExpanded: expanded,
+                hiddenCount: slice.hiddenCount,
+                layout: layout
+            )
+        }
+    }
+
+    private func sidebarListToggleRow(
+        expansionID: String,
+        isExpanded: Bool,
+        hiddenCount: Int,
+        layout: CommandCenterLayout
+    ) -> some View {
+        Button {
+            toggleSidebarListExpansion(expansionID)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: max(8, layout.tinyFontSize - 1), weight: .semibold))
+                Text(isExpanded ? "Show less" : "Show more")
+                    .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
+                if !isExpanded {
+                    Text("\(hiddenCount)")
+                        .font(.system(size: max(8, layout.tinyFontSize), weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary.opacity(0.80))
+                }
+            }
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(5 * layout.scale))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .help(isExpanded ? "Hide older items" : "Show older items")
     }
 
     private func brandHeader(layout: CommandCenterLayout) -> some View {
@@ -834,7 +975,7 @@ struct MeetingLibraryView: View {
             }
         }
         let sortedCompleted = completed.sorted { $0.modifiedDate > $1.modifiedDate }
-        return sortedPending + sortedCompleted.prefix(5)
+        return sortedPending + sortedCompleted
     }
 
     private var visibleNotes: [Note] {

@@ -727,6 +727,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("Rectangle()\n                        .fill(Theme.border)\n                        .frame(width: 1)\n                        .contentShape(Rectangle())"))
     }
 
+    func testRichMarkdownEditorUsesAppContentBackground() throws {
+        let editorSource = try richMarkdownEditorSource()
+        let themeSource = try themeSource()
+
+        XCTAssertTrue(themeSource.contains("static let contentBGNSColor"))
+        XCTAssertTrue(editorSource.contains("RichMarkdownEditorTheme.background"))
+        XCTAssertTrue(editorSource.contains("textView.backgroundColor = RichMarkdownEditorTheme.background"))
+        XCTAssertTrue(editorSource.contains("scrollView.backgroundColor = RichMarkdownEditorTheme.background"))
+        XCTAssertFalse(editorSource.contains("textView.backgroundColor = NSColor(red: 0.122"))
+        XCTAssertFalse(editorSource.contains("layer?.backgroundColor = NSColor(red: 0.122"))
+    }
+
     private func meetingLibrarySource() throws -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
@@ -760,6 +772,20 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let appDelegateFile = projectRoot.appendingPathComponent("NoteAI/App/AppDelegate.swift")
         return try String(contentsOf: appDelegateFile, encoding: .utf8)
+    }
+
+    private func richMarkdownEditorSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let editorFile = projectRoot.appendingPathComponent("NoteAI/UI/MarkdownEditor/RichMarkdownEditor.swift")
+        return try String(contentsOf: editorFile, encoding: .utf8)
+    }
+
+    private func themeSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let themeFile = projectRoot.appendingPathComponent("NoteAI/UI/Theme.swift")
+        return try String(contentsOf: themeFile, encoding: .utf8)
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {

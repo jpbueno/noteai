@@ -136,12 +136,19 @@ struct DashboardPanelColumns: Equatable {
 }
 
 enum CommandCenterPanelOrder {
+    private static let versionPrefix = "v2:"
+
     static func orderedIDs(availableIDs: [DashboardPanelID], rawValue: String) -> [DashboardPanelID] {
+        guard rawValue.hasPrefix(versionPrefix) else {
+            return availableIDs
+        }
+
+        let savedOrder = rawValue.dropFirst(versionPrefix.count)
         let validIDs = Set(availableIDs)
         var seen: Set<DashboardPanelID> = []
         var result: [DashboardPanelID] = []
 
-        for rawID in rawValue.split(separator: ",") {
+        for rawID in savedOrder.split(separator: ",") {
             guard let id = DashboardPanelID(rawValue: String(rawID)),
                   validIDs.contains(id),
                   !seen.contains(id) else {
@@ -195,7 +202,7 @@ enum CommandCenterPanelOrder {
     }
 
     static func rawValue(for ids: [DashboardPanelID]) -> String {
-        ids.map(\.rawValue).joined(separator: ",")
+        versionPrefix + ids.map(\.rawValue).joined(separator: ",")
     }
 }
 
@@ -367,12 +374,6 @@ struct HomeDashboardView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
-                Text("v4")
-                    .font(.system(size: layout.smallFontSize, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Theme.accent.opacity(0.12), in: Capsule())
                 dashboardPanelDragHandle(for: id)
             }
 

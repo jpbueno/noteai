@@ -198,7 +198,7 @@ struct MarkdownRendererView: View {
                     .foregroundStyle(.pink)
                     .padding(12)
             }
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 8))
             .padding(.vertical, 4)
 
         case .image(let alt, let src):

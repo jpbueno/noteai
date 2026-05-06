@@ -739,6 +739,21 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(editorSource.contains("layer?.backgroundColor = NSColor(red: 0.122"))
     }
 
+    func testRichMarkdownEditorCodeBlocksUseAppContentBackground() throws {
+        let editorSource = try richMarkdownEditorSource()
+
+        XCTAssertTrue(editorSource.contains("static let codeBlockBackground = Theme.contentBGNSColor"))
+        XCTAssertTrue(editorSource.contains("storage.addAttribute(.backgroundColor, value: RichMarkdownEditorTheme.codeBlockBackground"))
+        XCTAssertFalse(editorSource.contains("let codeBG = NSColor(white: 0.15"))
+    }
+
+    func testMarkdownRendererCodeBlocksUseAppContentBackground() throws {
+        let rendererSource = try markdownRendererSource()
+
+        XCTAssertTrue(rendererSource.contains(".background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 8))"))
+        XCTAssertFalse(rendererSource.contains(".background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))"))
+    }
+
     private func meetingLibrarySource() throws -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
@@ -779,6 +794,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let editorFile = projectRoot.appendingPathComponent("NoteAI/UI/MarkdownEditor/RichMarkdownEditor.swift")
         return try String(contentsOf: editorFile, encoding: .utf8)
+    }
+
+    private func markdownRendererSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let rendererFile = projectRoot.appendingPathComponent("NoteAI/UI/MarkdownEditor/MarkdownRendererView.swift")
+        return try String(contentsOf: rendererFile, encoding: .utf8)
     }
 
     private func themeSource() throws -> String {

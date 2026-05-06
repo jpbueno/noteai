@@ -246,6 +246,7 @@ class RichEditorTextView: NSTextView {
 
 private enum RichMarkdownEditorTheme {
     static let background = Theme.contentBGNSColor
+    static let codeBlockBackground = Theme.contentBGNSColor
 }
 
 /// Fixed toolbar with Notion-style SF Symbol icons. Uses refusesFirstResponder
@@ -903,10 +904,9 @@ struct RichMarkdownEditor: NSViewRepresentable {
                     let contentRange = match.range(at: 1)
 
                     let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-                    let codeBG = NSColor(white: 0.15, alpha: 1)
                     storage.addAttribute(.font, value: codeFont, range: contentRange)
                     storage.addAttribute(.foregroundColor, value: NSColor.systemPink, range: contentRange)
-                    storage.addAttribute(.backgroundColor, value: codeBG, range: contentRange)
+                    storage.addAttribute(.backgroundColor, value: RichMarkdownEditorTheme.codeBlockBackground, range: contentRange)
 
                     let codeParagraph = NSMutableParagraphStyle()
                     codeParagraph.lineSpacing = 3

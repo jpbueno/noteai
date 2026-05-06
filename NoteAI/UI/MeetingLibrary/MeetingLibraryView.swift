@@ -505,7 +505,7 @@ struct MeetingLibraryView: View {
                     Text("NoteAI")
                         .font(.system(size: layout.sectionTitleFontSize + 1, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("v4.0 Command Center")
+                    Text("v4.0")
                         .font(.system(size: layout.tinyFontSize, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }

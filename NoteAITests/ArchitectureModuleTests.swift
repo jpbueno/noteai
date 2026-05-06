@@ -811,7 +811,7 @@ final class ArchitectureModuleTests: XCTestCase {
     }
 
     func testCommandCenterPanelOrderAppliesSavedOrderAndAppendsMissingPanels() {
-        let rawOrder = "upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
+        let rawOrder = "v2:upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
 
         let ordered = CommandCenterPanelOrder.orderedIDs(
             availableIDs: DashboardPanelID.defaultOrder,
@@ -826,6 +826,17 @@ final class ArchitectureModuleTests: XCTestCase {
             .recentlyCompleted,
             .setupChecklist,
         ])
+    }
+
+    func testCommandCenterPanelOrderIgnoresLegacyUnversionedSavedOrder() {
+        let rawOrder = "upcoming,operationalSnapshot,focusQueue"
+
+        let ordered = CommandCenterPanelOrder.orderedIDs(
+            availableIDs: DashboardPanelID.defaultOrder,
+            rawValue: rawOrder
+        )
+
+        XCTAssertEqual(ordered, DashboardPanelID.defaultOrder)
     }
 
     func testCommandCenterPanelColumnsUseCopilotLikeTwoColumnStacks() {
@@ -860,7 +871,7 @@ final class ArchitectureModuleTests: XCTestCase {
         ])
         XCTAssertEqual(
             CommandCenterPanelOrder.rawValue(for: moved),
-            "suggestedNextMove,focusQueue,upcoming,operationalSnapshot,recentlyCompleted,setupChecklist"
+            "v2:suggestedNextMove,focusQueue,upcoming,operationalSnapshot,recentlyCompleted,setupChecklist"
         )
     }
 

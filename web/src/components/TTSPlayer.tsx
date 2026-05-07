@@ -101,6 +101,7 @@ export function ReadAloudButton({ state, onSpeak, onStop }: ReadAloudButtonProps
   return (
     <button
       onClick={active ? onStop : onSpeak}
+      onMouseDown={(event) => event.preventDefault()}
       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
         active
           ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30"

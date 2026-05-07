@@ -23,7 +23,7 @@ struct TodoDetailView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
                         .tracking(0.5)
-                    TextField("Untitled task", text: $titleDraft)
+                    TextField("Untitled todo", text: $titleDraft)
                         .textFieldStyle(.plain)
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)

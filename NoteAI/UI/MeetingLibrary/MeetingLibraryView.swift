@@ -1,3 +1,5 @@
+import AVFoundation
+import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -7,7 +9,6 @@ enum SidebarSelection: Hashable {
     case t5tReport(UUID)
     case newT5T
     case note(UUID)
-    case task(UUID)
     case todo(UUID)
 }
 
@@ -15,7 +16,6 @@ private enum SidebarSectionID: Hashable {
     case t5t
     case notes
     case todos
-    case tasks
     case meetings
 }
 
@@ -133,14 +133,15 @@ struct MeetingLibraryView: View {
                 selection = .meeting(link.id)
             case .note:
                 selection = .note(link.id)
-            case .task:
-                selection = .task(link.id)
             case .t5t:
                 selection = .t5tReport(link.id)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleChatPanel)) { _ in
             showChatDrawer.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            meetingManager.refreshOnboardingChecklistState()
         }
         .sheet(isPresented: $meetingManager.showMeetingNamePrompt) {
             MeetingNamePromptView(
@@ -184,7 +185,7 @@ struct MeetingLibraryView: View {
                     .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                 TextField(
-                    quickFilter?.commandBarLabel ?? "Command + K  Search meetings, notes, tasks...",
+                    quickFilter?.commandBarLabel ?? "Command + K  Search meetings, notes, todos...",
                     text: $meetingManager.searchQuery
                 )
                 .textFieldStyle(.plain)
@@ -285,15 +286,6 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.tasks, title: "Tasks", icon: "checkmark.circle", action: createNewTask, layout: layout) {
-                        ForEach(visibleTasks) { task in
-                            taskSidebarRow(task: task, layout: layout)
-                        }
-                        if visibleTasks.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No tasks yet", layout: layout)
-                        }
-                    }
-
                     sidebarSection(.meetings, title: "Meetings", icon: "waveform", action: nil, layout: layout) {
                         ForEach(visibleMeetings) { meeting in
                             sidebarRow(meeting: meeting, layout: layout)
@@ -337,14 +329,17 @@ struct MeetingLibraryView: View {
                     Text("NoteAI")
                         .font(.system(size: round(18 * layout.scale), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("v4.0 Command Center")
+                    Text("v4.0")
                         .font(.system(size: layout.tinyFontSize, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
             }
-            .padding(.horizontal, round(14 * layout.scale))
-            .frame(height: round(52 * layout.scale))
+            .padding(.leading, layout.sidebarBrandLeadingInset)
+            .padding(.trailing, round(14 * layout.scale))
+            .padding(.top, layout.sidebarBrandHeaderTopPadding)
+            .padding(.bottom, layout.sidebarBrandHeaderBottomPadding)
+            .frame(height: layout.sidebarBrandHeaderHeight, alignment: .top)
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")
@@ -388,11 +383,6 @@ struct MeetingLibraryView: View {
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
                 .onDisappear { pulseAnimation = false }
             } else {
-                HStack(spacing: 6) {
-                    recordingSourceCard(icon: "waveform", title: "System", subtitle: "Native capture", active: true, layout: layout)
-                    recordingSourceCard(icon: "mic", title: "Mic", subtitle: "Ready", active: false, layout: layout)
-                }
-
                 Button {
                     meetingManager.startRecording()
                     selection = nil
@@ -401,10 +391,10 @@ struct MeetingLibraryView: View {
                         .font(.system(size: layout.bodyFontSize, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: layout.actionButtonHeight)
+                        .frame(height: layout.sidebarRecordButtonHeight)
                         .background(
                             LinearGradient(colors: [Theme.danger, Color(hex: "FF8A5C")], startPoint: .leading, endPoint: .trailing),
-                            in: RoundedRectangle(cornerRadius: 12)
+                            in: RoundedRectangle(cornerRadius: 10)
                         )
                 }
                 .buttonStyle(.plain)
@@ -414,29 +404,6 @@ struct MeetingLibraryView: View {
         }
         .padding(.horizontal, round(12 * layout.scale))
         .padding(.bottom, round(12 * layout.scale))
-    }
-
-    private func recordingSourceCard(icon: String, title: String, subtitle: String, active: Bool, layout: CommandCenterLayout) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: layout.smallFontSize, weight: .semibold))
-                Text(title)
-                    .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
-                    .lineLimit(1)
-            }
-            Text(subtitle)
-                .font(.system(size: layout.tinyFontSize))
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-        }
-        .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-        .padding(.horizontal, round(10 * layout.scale))
-        .padding(.vertical, round(8 * layout.scale))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: round(48 * layout.scale))
-        .background(active ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
     }
 
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {
@@ -626,10 +593,6 @@ struct MeetingLibraryView: View {
                 let note = meetingManager.createNoteFromMeeting(meeting)
                 selection = .note(note.id)
             }
-            Button("Create Task") {
-                let task = meetingManager.createTaskFromMeeting(meeting)
-                selection = .task(task.id)
-            }
             Button("Export as Markdown") { exportMeeting(meeting) }
             Button("Export as PDF") { exportMeetingPDF(meeting) }
             Divider()
@@ -667,55 +630,9 @@ struct MeetingLibraryView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 4)
         .contextMenu {
-            Button("Create Task") {
-                let task = meetingManager.createTaskFromNote(note)
-                selection = .task(task.id)
-            }
-            Divider()
             Button("Delete", role: .destructive) {
                 if selection == .note(note.id) { selection = nil }
                 meetingManager.deleteNote(note)
-            }
-        }
-    }
-
-    private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View {
-        Button {
-            selection = .task(task.id)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: task.status == .completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(task.status == .completed ? Theme.success : Theme.textTertiary)
-                Text(task.title.isEmpty ? "New Task" : "\(datePrefix(task.createdDate)) \(task.title)")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(task.status == .completed ? Theme.textTertiary : Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .strikethrough(task.status == .completed)
-            }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.vertical, round(6 * layout.scale))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selection == .task(task.id)
-                    ? Theme.selectedBG
-                    : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-        .contextMenu {
-            Button(task.status == .completed ? "Mark Pending" : "Mark Complete") {
-                var updated = task
-                updated.status = task.status == .completed ? .pending : .completed
-                meetingManager.updateTask(updated)
-            }
-            Divider()
-            Button("Delete", role: .destructive) {
-                if selection == .task(task.id) { selection = nil }
-                meetingManager.deleteTask(task)
             }
         }
     }
@@ -779,14 +696,6 @@ struct MeetingLibraryView: View {
         meetingManager.filteredNotes
     }
 
-    private var visibleTasks: [TaskItem] {
-        let tasks = meetingManager.filteredTasks
-        if quickFilter == .openTodos {
-            return tasks.filter { $0.status != .completed }
-        }
-        return tasks
-    }
-
     private var visibleMeetings: [Meeting] {
         var meetings = meetingManager.filteredMeetings
         if quickFilter == .unreviewed {
@@ -806,7 +715,7 @@ struct MeetingLibraryView: View {
                 Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
-                Text(todo.title.isEmpty ? "Untitled task" : todo.title)
+                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
                     .strikethrough(todo.completed)
@@ -904,14 +813,6 @@ struct MeetingLibraryView: View {
                 ttsService: ttsService
             )
             .id(id)
-        } else if case .task(let id) = selection,
-                  let index = meetingManager.tasks.firstIndex(where: { $0.id == id }) {
-            TaskDetailView(
-                task: $meetingManager.tasks[index],
-                meetingManager: meetingManager,
-                ttsService: ttsService
-            )
-            .id(id)
         } else if case .meeting(let id) = selection,
                   let meeting = meetingManager.meetings.first(where: { $0.id == id }) {
             NotionPageView(meeting: meeting, summarizationStatus: meetingManager.summarizationStatus, meetingManager: meetingManager, ttsService: ttsService)
@@ -993,11 +894,6 @@ struct MeetingLibraryView: View {
         selection = .t5tReport(report.id)
     }
 
-    private func createNewTask() {
-        let task = meetingManager.createTask()
-        selection = .task(task.id)
-    }
-
     private func createNewTodo() {
         let todo = meetingManager.createTodo()
         selection = .todo(todo.id)
@@ -1033,10 +929,23 @@ struct MeetingLibraryView: View {
         switch item.actionTarget {
         case .startRecording:
             meetingManager.startRecording()
-        case .openGeneralSettings:
-            if item.id == .notifications {
-                meetingManager.requestNotificationPermissionForOnboarding()
+        case .requestMicrophonePermission:
+            requestMicrophonePermissionForOnboarding()
+        case .openMicrophonePrivacySettings:
+            if openSystemSettings(path: "com.apple.preference.security?Privacy_Microphone") {
+                meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
             }
+        case .requestScreenRecordingPermission:
+            requestScreenRecordingPermissionForOnboarding()
+        case .openScreenRecordingPrivacySettings:
+            if openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture") {
+                meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
+            }
+        case .requestNotificationPermission:
+            meetingManager.requestNotificationPermissionForOnboarding()
+        case .openNotificationSettings:
+            openNotificationSettings()
+        case .openGeneralSettings:
             openSettings(initialTab: .general)
         case .openAISettings:
             openSettings(initialTab: .ai)
@@ -1044,10 +953,31 @@ struct MeetingLibraryView: View {
             openSettings(initialTab: .account)
         case .openPrivacySettings:
             openSettings(initialTab: .privacy)
-        case .openSystemPrivacySettings:
-            openSystemPrivacySettings()
         case .none:
             break
+        }
+    }
+
+    private func requestMicrophonePermissionForOnboarding() {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            Task { @MainActor in
+                meetingManager.refreshOnboardingChecklistState()
+            }
+        }
+    }
+
+    private func requestScreenRecordingPermissionForOnboarding() {
+        let granted = CGRequestScreenCaptureAccess()
+        if granted {
+            RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(true)
+            meetingManager.refreshOnboardingChecklistState()
+            return
+        }
+
+        if openSystemSettings(path: "com.apple.preference.security?Privacy_ScreenCapture") {
+            meetingManager.refreshOnboardingChecklistStateAfterExternalPermissionChange()
+        } else {
+            meetingManager.refreshOnboardingChecklistState()
         }
     }
 
@@ -1071,11 +1001,24 @@ struct MeetingLibraryView: View {
         settingsWindow = window
     }
 
-    private func openSystemPrivacySettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-        if let url {
-            NSWorkspace.shared.open(url)
+    private func openNotificationSettings() {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.noteai.app"
+        let paths = [
+            "com.apple.Notifications-Settings.extension?id=\(bundleIdentifier)",
+            "com.apple.preference.notifications",
+        ]
+
+        for path in paths where openSystemSettings(path: path) {
+            return
         }
+    }
+
+    @discardableResult
+    private func openSystemSettings(path: String) -> Bool {
+        guard let url = URL(string: "x-apple.systempreferences:\(path)") else {
+            return false
+        }
+        return NSWorkspace.shared.open(url)
     }
 
     private func exportMeeting(_ meeting: Meeting) {

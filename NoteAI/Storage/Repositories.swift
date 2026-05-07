@@ -13,12 +13,6 @@ protocol NoteRepository {
     func deleteNote(id: UUID) throws
 }
 
-protocol TaskRepository {
-    func saveTask(_ task: TaskItem) throws
-    func fetchAllTasks() throws -> [TaskItem]
-    func deleteTask(id: UUID) throws
-}
-
 protocol T5TRepository {
     func saveT5TReport(_ report: T5TReport) throws
     func fetchAllT5TReports() throws -> [T5TReport]
@@ -27,9 +21,8 @@ protocol T5TRepository {
     func loadT5TConfig() throws -> T5TConfig?
 }
 
-extension MeetingStore: MeetingRepository, NoteRepository, TaskRepository, T5TRepository {
+extension MeetingStore: MeetingRepository, NoteRepository, T5TRepository {
     func fetchAllMeetings() throws -> [Meeting] {
         try fetchAll()
     }
 }
-

@@ -383,13 +383,10 @@ final class LocalCaptureHelperServer {
 
     private func handle(clientFD: Int32) {
         queue.async { [weak self] in
-            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-            let count = recv(clientFD, &buffer, buffer.count, 0)
-            guard let self, count > 0 else {
+            guard let self, let data = Self.readRequestData(from: clientFD) else {
                 close(clientFD)
                 return
             }
-            let data = Data(buffer.prefix(count))
             guard let request = Self.parseRequest(data) else {
                 close(clientFD)
                 return
@@ -398,9 +395,58 @@ final class LocalCaptureHelperServer {
             Task {
                 let response = await self.router.route(request)
                 Self.sendAll(Self.serialize(response), to: clientFD)
-                close(clientFD)
+                Self.closeAfterResponse(clientFD)
             }
         }
+    }
+
+    private static func readRequestData(from fd: Int32) -> Data? {
+        var timeout = timeval(tv_sec: 1, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while data.count < 64 * 1024 {
+            let count = recv(fd, &buffer, buffer.count, 0)
+            if count > 0 {
+                data.append(buffer, count: count)
+                if requestHeadersAreComplete(data) {
+                    return data
+                }
+                continue
+            }
+            if count == 0 {
+                break
+            }
+            if errno == EINTR {
+                continue
+            }
+            break
+        }
+
+        return requestHeadersAreComplete(data) ? data : nil
+    }
+
+    private static func requestHeadersAreComplete(_ data: Data) -> Bool {
+        guard let raw = String(data: data, encoding: .utf8),
+              let headerEnd = raw.range(of: "\r\n\r\n") else {
+            return false
+        }
+
+        let headerText = String(raw[..<headerEnd.lowerBound])
+        let bodyStart = raw.distance(from: raw.startIndex, to: headerEnd.upperBound)
+        let contentLength = headerText
+            .components(separatedBy: "\r\n")
+            .compactMap { line -> Int? in
+                let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2, parts[0].caseInsensitiveCompare("Content-Length") == .orderedSame else {
+                    return nil
+                }
+                return Int(parts[1].trimmingCharacters(in: .whitespaces))
+            }
+            .first ?? 0
+
+        return data.count >= bodyStart + contentLength
     }
 
     private static func sendAll(_ data: Data, to fd: Int32) {
@@ -413,6 +459,23 @@ final class LocalCaptureHelperServer {
                 sent += result
             }
         }
+    }
+
+    private static func closeAfterResponse(_ fd: Int32) {
+        _ = shutdown(fd, SHUT_WR)
+
+        let currentFlags = fcntl(fd, F_GETFL, 0)
+        if currentFlags >= 0 {
+            _ = fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK)
+        }
+
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while recv(fd, &buffer, buffer.count, 0) > 0 {}
+
+        if currentFlags >= 0 {
+            _ = fcntl(fd, F_SETFL, currentFlags)
+        }
+        close(fd)
     }
 
     private static func parseRequest(_ data: Data) -> LocalCaptureHTTPRouterRequest? {

@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum ChatPanelPerformancePolicy {
+    static let messageTextSelectionEnabled = false
+    static let animatedAutoScrollEnabled = false
+}
+
 /// Floating AI assistant chat panel.
 struct ChatPanelView: View {
     @ObservedObject var chatManager: ChatManager
@@ -62,11 +67,7 @@ struct ChatPanelView: View {
                     .padding(.vertical, 12)
                 }
                 .onChange(of: chatManager.messages.count) { _, _ in
-                    withAnimation {
-                        if let lastID = chatManager.messages.last?.id {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    }
-                    }
+                    scrollToLatestMessage(using: proxy)
                 }
             }
 
@@ -105,7 +106,7 @@ struct ChatPanelView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .padding(10)
                     .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-                    .textSelection(.enabled)
+                    .chatMessageTextSelection()
             } else if message.role == .system {
                 Image(systemName: "gear")
                     .font(.system(size: 11))
@@ -116,7 +117,7 @@ struct ChatPanelView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .padding(8)
                     .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 8))
-                    .textSelection(.enabled)
+                    .chatMessageTextSelection()
                 Spacer(minLength: 20)
             } else {
                 Image(systemName: "brain.head.profile")
@@ -136,7 +137,7 @@ struct ChatPanelView: View {
             Text(content)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
-                .textSelection(.enabled)
+                .chatMessageTextSelection()
 
             if !sourceLinks.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -166,6 +167,22 @@ struct ChatPanelView: View {
         chatManager.send(text)
     }
 
+    private func scrollToLatestMessage(using proxy: ScrollViewProxy) {
+        guard let lastID = chatManager.messages.last?.id else { return }
+
+        if ChatPanelPerformancePolicy.animatedAutoScrollEnabled {
+            withAnimation {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        } else {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        }
+    }
+
     private func extractSourceLinks(from content: String) -> [SourceChip] {
         let pattern = #"\[([^\]]+)\]\((noteai://[^)]+)\)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -187,5 +204,16 @@ struct ChatPanelView: View {
     private struct SourceChip {
         let label: String
         let urlString: String
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func chatMessageTextSelection() -> some View {
+        if ChatPanelPerformancePolicy.messageTextSelectionEnabled {
+            textSelection(.enabled)
+        } else {
+            self
+        }
     }
 }

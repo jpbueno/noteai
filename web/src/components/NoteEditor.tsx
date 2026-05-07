@@ -12,6 +12,7 @@ import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
 import { ResizableImage } from "@/components/extensions/ResizableImage";
 import { mdToHtml, htmlToMd, htmlToPlainText } from "@/lib/content-utils";
+import { readSelectedTextForReadAloud } from "@/lib/read-aloud-selection";
 import EditorToolbar from "@/components/EditorToolbar";
 
 interface NoteEditorProps {
@@ -30,6 +31,7 @@ export default function NoteEditor({ note }: NoteEditorProps) {
   const [sourceMd, setSourceMd] = useState("");
 
   const prevIdRef = useRef(note.id);
+  const readAloudRootRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleRef = useRef(title);
   const tagsRef = useRef(tags);
@@ -239,7 +241,7 @@ export default function NoteEditor({ note }: NoteEditorProps) {
   }, [handleManualSave]);
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={readAloudRootRef} className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-12 py-10">
         <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">
           Note
@@ -296,8 +298,12 @@ export default function NoteEditor({ note }: NoteEditorProps) {
           <ReadAloudButton
             state={tts.state}
             onSpeak={() => {
+              const selectedText = readSelectedTextForReadAloud({
+                root: readAloudRootRef.current,
+                editor,
+              });
               const text = editor ? htmlToPlainText(editor.getHTML()) : "";
-              tts.speak(text);
+              tts.speak(selectedText ?? text);
             }}
             onStop={tts.stop}
           />

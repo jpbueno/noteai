@@ -2,7 +2,7 @@ import XCTest
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
-    func testLibraryOperationsFilterAcrossMeetingsNotesAndTasks() {
+    func testLibraryOperationsFilterAcrossMeetingsAndNotes() {
         let meeting = Meeting(
             id: UUID(),
             title: "Roadmap Sync",
@@ -12,18 +12,15 @@ final class ArchitectureModuleTests: XCTestCase {
             summary: MeetingSummary(decisions: ["Ship preview"], topics: ["Inference"])
         )
         let note = Note(title: "Customer Notes", content: "Blackwell rollout", tags: ["account"])
-        let task = TaskItem(title: "Draft follow-up", rawInput: "Send Grace notes", tags: ["email"])
 
         let result = LibraryOperations.filter(
             meetings: [meeting],
             notes: [note],
-            tasks: [task],
             query: "grace"
         )
 
         XCTAssertEqual(result.meetings.map(\.id), [meeting.id])
         XCTAssertEqual(result.notes.count, 0)
-        XCTAssertEqual(result.tasks.map(\.id), [task.id])
     }
 
     func testMeetingCaptureWorkflowFormatsTranscriptAndFallbackSummary() {
@@ -84,7 +81,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.pendingCount, 4)
         XCTAssertEqual(snapshot.completed.count, 2)
         XCTAssertEqual(snapshot.upcoming.map(\.id), [upcoming.id])
-        XCTAssertEqual(snapshot.nextTask?.id, overdue.id)
+        XCTAssertEqual(snapshot.nextTodo?.id, overdue.id)
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
@@ -108,6 +105,121 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide.tinyFontSize, 10)
         XCTAssertLessThanOrEqual(wide.controlHeight, 42)
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 44)
+        XCTAssertLessThanOrEqual(wide.sidebarRecordButtonHeight, 38)
+        XCTAssertLessThan(wide.sidebarRecordButtonHeight, wide.actionButtonHeight)
+    }
+
+    func testCommandCenterSidebarBrandAlignsWithSidebarContent() {
+        let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
+        let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
+
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandLeadingInset, 12)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, 16)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, compact.sidebarWidth * 0.36)
+        XCTAssertEqual(compact.sidebarBrandLeadingInset, wide.sidebarBrandLeadingInset)
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandHeaderTopPadding, 26)
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandHeaderBottomPadding, 15)
+        XCTAssertGreaterThanOrEqual(compact.sidebarBrandHeaderHeight, 74)
+    }
+
+    func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertFalse(source.contains("recordingSourceCard("))
+        XCTAssertFalse(source.contains("Native capture"))
+        XCTAssertFalse(source.contains("subtitle: \"Ready\""))
+    }
+
+    func testCommandCenterPanelOrderIgnoresLegacySavedOrderAndUsesOrganizedDefault() {
+        let rawOrder = "upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
+
+        let ordered = CommandCenterPanelOrder.orderedIDs(
+            availableIDs: DashboardPanelID.defaultOrder,
+            rawValue: rawOrder
+        )
+
+        XCTAssertEqual(ordered, [
+            .operationalSnapshot,
+            .suggestedNextMove,
+            .focusQueue,
+            .upcoming,
+            .recentlyCompleted,
+            .setupChecklist,
+        ])
+    }
+
+    func testCommandCenterPanelOrderAppliesCurrentSavedOrderAndAppendsMissingPanels() {
+        let rawOrder = "v2:upcoming,operationalSnapshot,unknown,upcoming,focusQueue"
+
+        let ordered = CommandCenterPanelOrder.orderedIDs(
+            availableIDs: DashboardPanelID.defaultOrder,
+            rawValue: rawOrder
+        )
+
+        XCTAssertEqual(ordered, [
+            .upcoming,
+            .operationalSnapshot,
+            .focusQueue,
+            .suggestedNextMove,
+            .recentlyCompleted,
+            .setupChecklist,
+        ])
+    }
+
+    func testCommandCenterPanelRowsKeepSetupPanelAtBottomFullWidth() {
+        let rows = CommandCenterPanelOrder.rows(for: [
+            .setupChecklist,
+            .operationalSnapshot,
+            .suggestedNextMove,
+            .focusQueue,
+            .upcoming,
+            .recentlyCompleted,
+        ])
+
+        XCTAssertEqual(rows, [
+            [.operationalSnapshot, .suggestedNextMove],
+            [.focusQueue, .upcoming],
+            [.recentlyCompleted],
+            [.setupChecklist],
+        ])
+    }
+
+    func testCommandCenterPanelDropMovesDraggedPanelAfterLaterTarget() {
+        let moved = CommandCenterPanelOrder.moveForDrop(
+            .operationalSnapshot,
+            onto: .upcoming,
+            in: DashboardPanelID.defaultOrder
+        )
+
+        XCTAssertEqual(moved, [
+            .suggestedNextMove,
+            .focusQueue,
+            .upcoming,
+            .operationalSnapshot,
+            .recentlyCompleted,
+            .setupChecklist,
+        ])
+        XCTAssertEqual(
+            CommandCenterPanelOrder.rawValue(for: moved),
+            "v2:suggestedNextMove,focusQueue,upcoming,operationalSnapshot,recentlyCompleted,setupChecklist"
+        )
+    }
+
+    func testCommandCenterPanelDropMovesDraggedPanelBeforeEarlierTarget() {
+        let moved = CommandCenterPanelOrder.moveForDrop(
+            .upcoming,
+            onto: .suggestedNextMove,
+            in: DashboardPanelID.defaultOrder
+        )
+
+        XCTAssertEqual(moved, [
+            .operationalSnapshot,
+            .upcoming,
+            .suggestedNextMove,
+            .focusQueue,
+            .recentlyCompleted,
+            .setupChecklist,
+        ])
     }
 
     func testOAuthCallbackRequiresExpectedState() {
@@ -118,5 +230,32 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(OAuthCallbackParser.authorizationCode(from: valid, expectedState: "state-1"), "abc123")
         XCTAssertNil(OAuthCallbackParser.authorizationCode(from: missingState, expectedState: "state-1"))
         XCTAssertNil(OAuthCallbackParser.authorizationCode(from: wrongState, expectedState: "state-1"))
+    }
+
+    func testReadAloudTextResolverPrefersSelectedText() {
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { " selected sentence " },
+            "selected sentence"
+        )
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { "   \n" },
+            "Read the whole note"
+        )
+        XCTAssertEqual(
+            ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { nil },
+            "Read the whole note"
+        )
+    }
+
+    func testAssistantDrawerUsesNonInteractiveMessageRendering() {
+        XCTAssertFalse(ChatPanelPerformancePolicy.messageTextSelectionEnabled)
+        XCTAssertFalse(ChatPanelPerformancePolicy.animatedAutoScrollEnabled)
+    }
+
+    private func meetingLibrarySource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
+        return try String(contentsOf: sidebarFile, encoding: .utf8)
     }
 }

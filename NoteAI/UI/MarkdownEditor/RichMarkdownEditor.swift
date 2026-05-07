@@ -363,6 +363,10 @@ struct RichMarkdownEditor: NSViewRepresentable {
         Coordinator.activeCoordinator?.execute(command: command)
     }
 
+    static func selectedText() -> String? {
+        Coordinator.activeCoordinator?.selectedMarkdownText()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let wrapper = NSView()
         wrapper.wantsLayer = true
@@ -482,6 +486,7 @@ struct RichMarkdownEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            savedSelection = textView.selectedRange()
             Self.lastActiveTextView = textView
             Self.activeCoordinator = self
         }
@@ -1096,6 +1101,23 @@ struct RichMarkdownEditor: NSViewRepresentable {
                 mutable.replaceCharacters(in: range, with: replacement)
             }
             return String(mutable)
+        }
+
+        func selectedMarkdownText() -> String? {
+            guard let textView = boundTextView else { return nil }
+            let ranges = [
+                textView.selectedRange(),
+                (textView as? RichEditorTextView)?.savedSelectedRange ?? NSRange(location: 0, length: 0),
+                savedSelection,
+            ]
+
+            for range in ranges {
+                if let selected = ReadAloudTextResolver.selectedText(in: textView.string, range: range) {
+                    return selected
+                }
+            }
+
+            return nil
         }
 
         func resizeNearestImage(factor: CGFloat) {

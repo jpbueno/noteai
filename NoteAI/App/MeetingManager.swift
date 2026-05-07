@@ -27,15 +27,7 @@ final class MeetingManager: ObservableObject {
     @Published var notes: [Note] = []
 
     var filteredNotes: [Note] {
-        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).notes
-    }
-
-    // Tasks state
-    @Published var tasks: [TaskItem] = []
-    @Published var taskSummarizing = false
-
-    var filteredTasks: [TaskItem] {
-        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).tasks
+        LibraryOperations.filter(meetings: meetings, notes: notes, query: searchQuery).notes
     }
 
     // Todos state (lightweight, with optional due date — mirrors web TodoItem)
@@ -68,7 +60,7 @@ final class MeetingManager: ObservableObject {
     }
 
     var filteredMeetings: [Meeting] {
-        LibraryOperations.filter(meetings: meetings, notes: notes, tasks: tasks, query: searchQuery).meetings
+        LibraryOperations.filter(meetings: meetings, notes: notes, query: searchQuery).meetings
     }
     @Published var autoDetectEnabled: Bool {
         didSet {
@@ -108,6 +100,7 @@ final class MeetingManager: ObservableObject {
     private var coachLastAnalyzedSegmentCount = 0
     private var coachLastAnalyzedTime: Date?
     private var cancellables = Set<AnyCancellable>()
+    private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
 
     init() {
         self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
@@ -120,7 +113,6 @@ final class MeetingManager: ObservableObject {
 
         loadMeetings()
         loadNotes()
-        loadTasks()
         loadT5TData()
         loadTodos()
         refreshOnboardingChecklistState()
@@ -130,7 +122,7 @@ final class MeetingManager: ObservableObject {
     }
 
     var onboardingChecklist: OnboardingChecklist {
-        let permissions = RecordingDiagnosticsSnapshot.currentPermissions().permissions
+        let permissions = recordingDiagnostics.permissions
         let providerRaw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
         let provider = LLMProviderType(rawValue: providerRaw) ?? .openRouter
 
@@ -147,6 +139,7 @@ final class MeetingManager: ObservableObject {
 
     func refreshOnboardingChecklistState() {
         recordingDiagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             let status: OnboardingPermissionStatus
             switch settings.authorizationStatus {
@@ -161,6 +154,21 @@ final class MeetingManager: ObservableObject {
             }
             Task { @MainActor in
                 self?.onboardingNotificationPermission = status
+            }
+        }
+    }
+
+    func refreshOnboardingChecklistStateAfterExternalPermissionChange() {
+        onboardingPermissionRefreshSequenceTask?.cancel()
+        onboardingPermissionRefreshSequenceTask = Task { [weak self] in
+            for delay in [UInt64(0), 500_000_000, 1_500_000_000, 3_000_000_000] {
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.refreshOnboardingChecklistState()
+                }
             }
         }
     }
@@ -441,68 +449,6 @@ final class MeetingManager: ObservableObject {
         }
     }
 
-    // MARK: - Tasks
-
-    @discardableResult
-    func createTask(title: String = "", rawInput: String = "", tags: [String] = [], sourceMeetingID: UUID? = nil, sourceNoteID: UUID? = nil) -> TaskItem {
-        let task = TaskItem(title: title, rawInput: rawInput, tags: tags, sourceMeetingID: sourceMeetingID, sourceNoteID: sourceNoteID)
-        do {
-            try meetingStore.saveTask(task)
-            tasks.insert(task, at: 0)
-        } catch {
-            print("Failed to save task: \(error)")
-        }
-        return task
-    }
-
-    func updateTask(_ task: TaskItem) {
-        var updated = task
-        updated.modifiedDate = Date()
-        do {
-            try meetingStore.saveTask(updated)
-            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-                tasks[index] = updated
-            }
-        } catch {
-            print("Failed to update task: \(error)")
-        }
-    }
-
-    func deleteTask(_ task: TaskItem) {
-        do {
-            try meetingStore.deleteTask(id: task.id)
-            tasks.removeAll { $0.id == task.id }
-        } catch {
-            print("Failed to delete task: \(error)")
-        }
-    }
-
-    func createTaskFromMeeting(_ meeting: Meeting) -> TaskItem {
-        let summaryText = meeting.summary.decisions.joined(separator: ". ")
-        let title = meeting.title
-        return createTask(title: title, rawInput: summaryText, tags: meeting.summary.topics.prefix(3).map { $0 }, sourceMeetingID: meeting.id)
-    }
-
-    func createTaskFromNote(_ note: Note) -> TaskItem {
-        return createTask(title: note.title, rawInput: String(note.content.prefix(500)), tags: note.tags, sourceNoteID: note.id)
-    }
-
-    func summarizeTaskInput(_ text: String) async throws -> String {
-        try await summarizationEngine.summarizeTaskInput(text: text)
-    }
-
-    func tasksInRange(start: Date, end: Date) -> [TaskItem] {
-        LibraryOperations.tasksInRange(tasks, start: start, end: end)
-    }
-
-    private func loadTasks() {
-        do {
-            tasks = try meetingStore.fetchAllTasks()
-        } catch {
-            print("Failed to load tasks: \(error)")
-        }
-    }
-
     // MARK: - Todos
 
     @discardableResult
@@ -564,12 +510,11 @@ final class MeetingManager: ObservableObject {
         LibraryOperations.meetingsInRange(meetings, start: start, end: end)
     }
 
-    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], taskIDs: [UUID] = [], todoIDs: [UUID] = []) async throws -> T5TReport {
+    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], todoIDs: [UUID] = []) async throws -> T5TReport {
         let selectedMeetings = meetings.filter { meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { noteIDs.contains($0.id) }
-        let selectedTasks = tasks.filter { taskIDs.contains($0.id) }
         let selectedTodos = todos.filter { todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty || !selectedTodos.isEmpty else {
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTodos.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -581,7 +526,6 @@ final class MeetingManager: ObservableObject {
             sections = try await summarizationEngine.generateT5T(
                 meetings: selectedMeetings,
                 notes: selectedNotes,
-                tasks: selectedTasks,
                 todos: selectedTodos,
                 config: t5tConfig,
                 periodStart: periodStart,
@@ -601,7 +545,6 @@ final class MeetingManager: ObservableObject {
             periodEnd: periodEnd,
             meetingIDs: meetingIDs,
             noteIDs: noteIDs,
-            taskIDs: taskIDs,
             todoIDs: todoIDs,
             sections: sections,
             status: .draft
@@ -644,9 +587,8 @@ final class MeetingManager: ObservableObject {
     func regenerateT5T(report: T5TReport) async throws -> T5TReport {
         let selectedMeetings = meetings.filter { report.meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { report.noteIDs.contains($0.id) }
-        let selectedTasks = tasks.filter { report.taskIDs.contains($0.id) }
         let selectedTodos = todos.filter { report.todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty || !selectedTodos.isEmpty else {
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTodos.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -658,7 +600,6 @@ final class MeetingManager: ObservableObject {
             sections = try await summarizationEngine.generateT5T(
                 meetings: selectedMeetings,
                 notes: selectedNotes,
-                tasks: selectedTasks,
                 todos: selectedTodos,
                 config: t5tConfig,
                 periodStart: report.periodStart,

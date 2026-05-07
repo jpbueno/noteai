@@ -22,4 +22,5 @@ final class RecordingDiagnosticsTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.microphone.level.updatedAt.timeIntervalSince1970, 0)
         XCTAssertEqual(snapshot.microphone.status, .capturing)
     }
+
 }

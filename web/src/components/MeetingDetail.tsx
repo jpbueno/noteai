@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Clock,
   Calendar,
@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { generateMeetingMarkdown, meetingMarkdownFilename, printMeetingPdf } from "@/lib/exports";
 import { useTTS } from "@/lib/tts";
 import { TTSPlayer, ReadAloudButton } from "@/components/TTSPlayer";
+import { readSelectedTextForReadAloud } from "@/lib/read-aloud-selection";
 
 type Tab = "summary" | "transcript" | "raw";
 
@@ -32,6 +33,7 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
   const hasSummary = summary.wasSummarized && !summaryEmpty(summary);
   const [activeTab, setActiveTab] = useState<Tab>(hasSummary ? "summary" : "transcript");
   const tts = useTTS();
+  const readAloudRootRef = useRef<HTMLDivElement>(null);
 
   const readableText = hasSummary
     ? [
@@ -86,7 +88,7 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
   ];
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={readAloudRootRef} className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl px-8 py-8">
         {/* Title */}
         <div className="v4-panel mb-6 p-6">
@@ -145,7 +147,12 @@ export default function MeetingDetail({ meeting }: MeetingDetailProps) {
             </button>
             <ReadAloudButton
               state={tts.state}
-              onSpeak={() => tts.speak(readableText)}
+              onSpeak={() => {
+                const selectedText = readSelectedTextForReadAloud({
+                  root: readAloudRootRef.current,
+                });
+                tts.speak(selectedText ?? readableText);
+              }}
               onStop={tts.stop}
             />
           </div>

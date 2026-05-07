@@ -53,6 +53,8 @@ struct RecordingSourceDiagnostic: Equatable {
 }
 
 struct RecordingDiagnosticsSnapshot: Equatable {
+    private static let systemAudioAccessConfirmedKey = "noteai.systemAudioAccessConfirmed"
+
     var microphone = RecordingSourceDiagnostic()
     var systemAudio = RecordingSourceDiagnostic()
     var permissions: [RecordingPermissionKind: RecordingPermissionStatus] = [
@@ -136,9 +138,11 @@ struct RecordingDiagnosticsSnapshot: Equatable {
             snapshot.updatePermission(.microphone, status: .unavailable("Unknown authorization status"))
         }
 
+        let hasScreenCaptureAccess = CGPreflightScreenCaptureAccess()
+        let hasConfirmedSystemAudioAccess = UserDefaults.standard.bool(forKey: systemAudioAccessConfirmedKey)
         snapshot.updatePermission(
             .screenRecording,
-            status: CGPreflightScreenCaptureAccess() ? .granted : .denied
+            status: hasScreenCaptureAccess || hasConfirmedSystemAudioAccess ? .granted : .denied
         )
 
         if #available(macOS 14.2, *) {
@@ -148,6 +152,10 @@ struct RecordingDiagnosticsSnapshot: Equatable {
         }
 
         return snapshot
+    }
+
+    static func recordSystemAudioAccessConfirmed(_ confirmed: Bool) {
+        UserDefaults.standard.set(confirmed, forKey: systemAudioAccessConfirmedKey)
     }
 }
 
@@ -171,4 +179,3 @@ extension RecordingPermissionStatus {
         }
     }
 }
-

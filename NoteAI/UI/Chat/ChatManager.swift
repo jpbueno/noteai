@@ -17,7 +17,7 @@ final class ChatManager: ObservableObject {
     }
 
     private let systemPrompt = """
-    You are NoteAI Assistant, an AI helper embedded in a macOS productivity app. You help the user manage meetings, notes, tasks, and T5T (Top 5 Things) reports.
+    You are NoteAI Assistant, an AI helper embedded in a macOS productivity app. You help the user manage meetings, notes, todos, and T5T (Top 5 Things) reports.
 
     When the user asks you to perform an action, include a JSON action block in your response like this:
     ```json
@@ -26,16 +26,12 @@ final class ChatManager: ObservableObject {
 
     Available actions:
     - create_note: {"action":"create_note", "title":"...", "content":"...", "tags":["..."]}
-    - create_task: {"action":"create_task", "title":"...", "description":"...", "tags":["..."]}
     - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
-    - toggle_task: {"action":"toggle_task", "title":"..."} — marks a task complete or pending
-    - search: {"action":"search", "query":"..."} — searches meetings, notes, and tasks
+    - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
     - list_notes: {"action":"list_notes"} — shows recent notes
-    - list_tasks: {"action":"list_tasks"} — shows all tasks
     - list_t5t: {"action":"list_t5t"} — shows T5T reports
     - delete_note: {"action":"delete_note", "title":"..."}
-    - delete_task: {"action":"delete_task", "title":"..."}
     - delete_meeting: {"action":"delete_meeting", "title":"..."}
 
     Rules:
@@ -45,12 +41,11 @@ final class ChatManager: ObservableObject {
     - For search, show matching results
     - If no action is needed, just chat normally
     - When asked to create a T5T report, use create_t5t (NOT create_note)
-    - When asked to create a task, use create_task (NOT create_note)
     - Be concise and helpful
     """
 
     init() {
-        messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, tasks, T5T reports, search your meetings, and more."))
+        messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, T5T reports, search your meetings, and more."))
     }
 
     func send(_ text: String) {
@@ -67,7 +62,6 @@ final class ChatManager: ObservableObject {
                     ChatSourceContext.build(
                         meetings: $0.meetings,
                         notes: $0.notes,
-                        tasks: $0.tasks,
                         t5tReports: $0.t5tReports
                     )
                 } ?? ""
@@ -154,13 +148,6 @@ final class ChatManager: ObservableObject {
             NotificationCenter.default.post(name: .navigateToNote, object: note.id)
             return "Created note: \(title)"
 
-        case "create_task":
-            let title = json["title"] as? String ?? ""
-            let description = json["description"] as? String ?? ""
-            let tags = json["tags"] as? [String] ?? []
-            manager.createTask(title: title, rawInput: description, tags: tags)
-            return "Created task: \(title)"
-
         case "create_t5t":
             let inputText = json["input"] as? String ?? ""
             let end = Date()
@@ -168,13 +155,13 @@ final class ChatManager: ObservableObject {
 
             let meetings = manager.meetingsInRange(start: start, end: end)
             let notes = manager.notes
-            let tasks = manager.tasks
+            let todos = manager.todos
 
             do {
                 let sections = try await summarizationEngine.generateT5T(
                     meetings: meetings,
                     notes: inputText.isEmpty ? notes : [Note(title: "Input", content: inputText)],
-                    tasks: tasks,
+                    todos: todos,
                     config: manager.t5tConfig,
                     periodStart: start,
                     periodEnd: end
@@ -209,25 +196,13 @@ final class ChatManager: ObservableObject {
             }
             return "Meeting not found: \(title)"
 
-        case "toggle_task":
-            let title = (json["title"] as? String ?? "").lowercased()
-            if let task = manager.tasks.first(where: { $0.title.lowercased().contains(title) }) {
-                var updated = task
-                updated.status = task.status == .completed ? .pending : .completed
-                manager.updateTask(updated)
-                return "Toggled task '\(task.title)' to \(updated.status.rawValue)"
-            }
-            return "Task not found: \(title)"
-
         case "search":
             let query = (json["query"] as? String ?? "").lowercased()
             var results: [String] = []
             let matchingMeetings = manager.meetings.filter { $0.title.lowercased().contains(query) }
             let matchingNotes = manager.notes.filter { $0.title.lowercased().contains(query) || $0.content.lowercased().contains(query) }
-            let matchingTasks = manager.tasks.filter { $0.title.lowercased().contains(query) }
             for m in matchingMeetings.prefix(5) { results.append("Meeting: \(m.title)") }
             for n in matchingNotes.prefix(5) { results.append("Note: \(n.title)") }
-            for t in matchingTasks.prefix(5) { results.append("Task: \(t.title)") }
             return results.isEmpty ? "No results for '\(query)'" : results.joined(separator: "\n")
 
         case "list_meetings":
@@ -238,10 +213,6 @@ final class ChatManager: ObservableObject {
             let items = manager.notes.prefix(10).map { $0.title }
             return items.isEmpty ? "No notes yet." : items.joined(separator: "\n")
 
-        case "list_tasks":
-            let items = manager.tasks.map { "\($0.status == .completed ? "done" : "pending") \($0.title)" }
-            return items.isEmpty ? "No tasks yet." : items.joined(separator: "\n")
-
         case "delete_note":
             let title = (json["title"] as? String ?? "").lowercased()
             if let note = manager.notes.first(where: { $0.title.lowercased().contains(title) }) {
@@ -249,14 +220,6 @@ final class ChatManager: ObservableObject {
                 return "Deleted note: \(note.title)"
             }
             return "Note not found: \(title)"
-
-        case "delete_task":
-            let title = (json["title"] as? String ?? "").lowercased()
-            if let task = manager.tasks.first(where: { $0.title.lowercased().contains(title) }) {
-                manager.deleteTask(task)
-                return "Deleted task: \(task.title)"
-            }
-            return "Task not found: \(title)"
 
         default:
             return nil

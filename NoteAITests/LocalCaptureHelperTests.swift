@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import NoteAI
 
@@ -106,20 +107,16 @@ final class LocalCaptureHelperTests: XCTestCase {
             pairingStore: LocalCaptureHelperPairingStore(trustedClientStore: InMemoryTrustedClientStore()),
             allowedOrigins: ["http://localhost:3000"]
         )
-        let server = LocalCaptureHelperServer(router: router, port: 47491)
+        let testPort: UInt16 = 47591
+        let server = LocalCaptureHelperServer(router: router, port: testPort)
         try server.start()
         defer { server.stop() }
 
-        let url = URL(string: "http://127.0.0.1:47491/v1/health")!
-        var request = URLRequest(url: url)
-        request.setValue("127.0.0.1:47491", forHTTPHeaderField: "Host")
-        request.setValue("http://localhost:3000", forHTTPHeaderField: "Origin")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let response = try Self.rawHTTPGet(port: testPort, path: "/v1/health", origin: "http://localhost:3000")
 
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-        let body = String(decoding: data, as: UTF8.self)
-        XCTAssertTrue(body.contains("\"status\":\"ready\""))
-        XCTAssertTrue(body.contains("\"captureControl\":false"))
+        XCTAssertTrue(response.contains("HTTP/1.1 200 OK"), response)
+        XCTAssertTrue(response.contains("\"status\":\"ready\""), response)
+        XCTAssertTrue(response.contains("\"captureControl\":false"), response)
     }
 
     func testStatusRequiresPairedBearerToken() async throws {
@@ -243,5 +240,61 @@ final class LocalCaptureHelperTests: XCTestCase {
         XCTAssertTrue(controller.stopCalled)
         XCTAssertTrue(response.bodyText.contains("\"captureState\":\"stopped\""))
         XCTAssertTrue(response.bodyText.contains("Hello from Teams."))
+    }
+
+    private static func rawHTTPGet(port: UInt16, path: String, origin: String) throws -> String {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw posixError(errno) }
+        defer { close(fd) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
+            throw POSIXError(.EADDRNOTAVAIL)
+        }
+
+        let connectResult = withUnsafePointer(to: &address) { pointer -> Int32 in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connectResult == 0 else { throw posixError(errno) }
+
+        let request = "GET \(path) HTTP/1.1\r\n" +
+            "Host: 127.0.0.1:\(port)\r\n" +
+            "Origin: \(origin)\r\n" +
+            "Connection: close\r\n" +
+            "\r\n"
+        let requestBytes = Array(request.utf8)
+        try requestBytes.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var sent = 0
+            while sent < requestBytes.count {
+                let result = send(fd, baseAddress.advanced(by: sent), requestBytes.count - sent, 0)
+                guard result > 0 else { throw posixError(errno) }
+                sent += result
+            }
+        }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(fd, &buffer, buffer.count, 0)
+            if count > 0 {
+                data.append(buffer, count: count)
+                continue
+            }
+            if count == 0 { break }
+            if errno == EINTR { continue }
+            throw posixError(errno)
+        }
+
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func posixError(_ code: Int32) -> POSIXError {
+        POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
     }
 }

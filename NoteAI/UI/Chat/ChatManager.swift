@@ -28,6 +28,7 @@ final class ChatManager: ObservableObject {
     Available actions:
     - create_note: {"action":"create_note", "title":"...", "content":"...", "tags":["..."]}
     - create_todo: {"action":"create_todo", "title":"...", "description":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
+    - list_todos: {"action":"list_todos", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true} — lists todos/tasks as copy-ready Markdown with title and description content
     - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
@@ -44,6 +45,7 @@ final class ChatManager: ObservableObject {
     - If no action is needed, just chat normally
     - When asked to create a T5T report, use create_t5t (NOT create_note)
     - When asked to create a task or todo, use create_todo (NOT create_note); task/todo requests belong in the Todo area
+    - When asked to list tasks or todos, use list_todos; until NoteAI separates tasks from todos, task list requests read from the Todo area
     - Be concise and helpful
     """
 
@@ -64,6 +66,11 @@ final class ChatManager: ObservableObject {
         }
 
         messages.append(ChatMessage(role: .user, content: trimmed))
+
+        if handleLocalTodoListRequest(trimmed) {
+            return
+        }
+
         isTyping = true
         lastError = nil
 
@@ -178,6 +185,10 @@ final class ChatManager: ObservableObject {
             }
             return "Created todo: \(title)"
 
+        case "list_todos":
+            let filters = AssistantTodoListFormatter.filters(from: json)
+            return AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
+
         case "create_t5t":
             let inputText = json["input"] as? String ?? ""
             let end = Date()
@@ -261,6 +272,20 @@ final class ChatManager: ObservableObject {
         return title.isEmpty ? "Untitled todo" : title
     }
 
+    private func handleLocalTodoListRequest(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        let isListRequest = lowercased.contains("list") || lowercased.contains("show")
+        let asksForTodos = lowercased.contains("todo") || lowercased.contains("task")
+        guard isListRequest, asksForTodos, let manager = meetingManager else {
+            return false
+        }
+
+        let filters = AssistantTodoListFormatter.filters(fromPrompt: text)
+        let output = AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
+        messages.append(ChatMessage(role: .assistant, content: output))
+        return true
+    }
+
     private func parseTodoDueDate(_ value: String?) -> Date? {
         guard let value, !value.isEmpty else { return nil }
 
@@ -281,5 +306,195 @@ final class ChatManager: ObservableObject {
     private func selectedProvider() -> LLMProviderType {
         let raw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
         return LLMProviderType(rawValue: raw) ?? .openRouter
+    }
+}
+
+enum AssistantTodoListFormatter {
+    enum Status: String, Equatable {
+        case open
+        case completed
+        case all
+    }
+
+    struct Filters: Equatable {
+        var after: Date?
+        var before: Date?
+        var status: Status = .all
+    }
+
+    static func filters(from json: [String: Any]) -> Filters {
+        let after = parseDate(json["after"] as? String)
+        let before = parseDate(json["before"] as? String)
+        let status = status(
+            from: json["status"] as? String,
+            includeCompleted: json["include_completed"] as? Bool
+        )
+        return Filters(after: after, before: before, status: status)
+    }
+
+    static func filters(fromPrompt prompt: String) -> Filters {
+        let after = firstDate(in: prompt, afterKeyword: "after")
+        let before = firstDate(in: prompt, afterKeyword: "before")
+        let lowercased = prompt.lowercased()
+        let status: Status
+        if lowercased.contains("open") || lowercased.contains("incomplete") || lowercased.contains("pending") {
+            status = .open
+        } else if lowercased.contains("completed") || lowercased.contains("done") {
+            status = .completed
+        } else {
+            status = .all
+        }
+        return Filters(after: after, before: before, status: status)
+    }
+
+    static func format(todos: [TodoItem], filters: Filters) -> String {
+        let filteredTodos = todos
+            .filter { matches($0, filters: filters) }
+            .sorted { activityDate(for: $0) > activityDate(for: $1) }
+
+        let title = header(for: filters)
+        guard !filteredTodos.isEmpty else {
+            return "No \(title.lowercased()) found."
+        }
+
+        let entries = filteredTodos.map(formatTodo).joined(separator: "\n")
+        return "\(title)\n\n\(entries)"
+    }
+
+    private static func formatTodo(_ todo: TodoItem) -> String {
+        let title = todo.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Untitled todo"
+            : todo.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        var line = "- \(title)"
+        var metadata: [String] = []
+        if todo.completed {
+            metadata.append("completed")
+        }
+        if let dueLabel = todo.dueDateLabel {
+            metadata.append(dueLabel)
+        }
+        if !metadata.isEmpty {
+            line += " (\(metadata.joined(separator: ", ")))"
+        }
+
+        let descriptionLines = todo.description
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { "  \($0)" }
+
+        if descriptionLines.isEmpty {
+            return line
+        }
+        return ([line] + descriptionLines).joined(separator: "\n")
+    }
+
+    private static func matches(_ todo: TodoItem, filters: Filters) -> Bool {
+        switch filters.status {
+        case .open where todo.completed:
+            return false
+        case .completed where !todo.completed:
+            return false
+        default:
+            break
+        }
+
+        let activity = activityDate(for: todo)
+        if let after = filters.after, activity < Calendar.current.startOfDay(for: after) {
+            return false
+        }
+        if let before = filters.before, activity > endOfDay(for: before) {
+            return false
+        }
+        return true
+    }
+
+    private static func activityDate(for todo: TodoItem) -> Date {
+        max(todo.createdDate, todo.modifiedDate)
+    }
+
+    private static func header(for filters: Filters) -> String {
+        var parts: [String] = []
+        switch filters.status {
+        case .open:
+            parts.append("Open tasks")
+        case .completed:
+            parts.append("Completed tasks")
+        case .all:
+            parts.append("Tasks")
+        }
+        if let after = filters.after {
+            parts.append("after \(displayDate(after))")
+        }
+        if let before = filters.before {
+            parts.append("before \(displayDate(before))")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func status(from value: String?, includeCompleted: Bool?) -> Status {
+        if includeCompleted == true {
+            return .all
+        }
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !value.isEmpty else {
+            return includeCompleted == false ? .open : .all
+        }
+        switch value {
+        case "open", "pending", "incomplete":
+            return .open
+        case "completed", "complete", "done":
+            return .completed
+        default:
+            return .all
+        }
+    }
+
+    private static func firstDate(in prompt: String, afterKeyword keyword: String) -> Date? {
+        let pattern = "(?i)\\b\(keyword)\\s+([0-9]{1,2}/[0-9]{1,2}/[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: prompt, range: NSRange(prompt.startIndex..., in: prompt)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: prompt) else {
+            return nil
+        }
+        return parseDate(String(prompt[range]))
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+            return nil
+        }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: rawValue) {
+            return date
+        }
+
+        for format in ["yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy"] {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .current
+            formatter.dateFormat = format
+            formatter.isLenient = false
+            if let date = formatter.date(from: rawValue) {
+                return date
+            }
+        }
+        return nil
+    }
+
+    private static func displayDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
+    private static func endOfDay(for date: Date) -> Date {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        return calendar.date(byAdding: DateComponents(day: 1, second: -1), to: start) ?? date
     }
 }

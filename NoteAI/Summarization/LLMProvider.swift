@@ -117,6 +117,7 @@ enum OpenRouterModels {
     /// Models available via NVIDIA Enterprise Inference Hub (inference-api.nvidia.com)
     static let nvidiaNIM: [LLMModel] = [
         // Anthropic (via Azure/AWS)
+        LLMModel(id: "aws/anthropic/bedrock-claude-opus-4-7", name: "Claude Opus 4.7", provider: .nvidia, contextWindow: 1_000_000, costPer1MInput: nil, costPer1MOutput: nil),
         LLMModel(id: "azure/anthropic/claude-opus-4-6", name: "Claude Opus 4.6", provider: .nvidia, contextWindow: 200_000, costPer1MInput: nil, costPer1MOutput: nil),
         LLMModel(id: "azure/anthropic/claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: .nvidia, contextWindow: 200_000, costPer1MInput: nil, costPer1MOutput: nil),
         LLMModel(id: "azure/anthropic/claude-opus-4-5", name: "Claude Opus 4.5", provider: .nvidia, contextWindow: 200_000, costPer1MInput: nil, costPer1MOutput: nil),

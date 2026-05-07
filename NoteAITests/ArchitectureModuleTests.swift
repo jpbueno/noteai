@@ -3,6 +3,17 @@ import SwiftUI
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
+    func testNVIDIAModelCatalogIncludesOpus47BeforeOpus46() throws {
+        let models = OpenRouterModels.models(for: .nvidia)
+
+        let opus47Index = try XCTUnwrap(models.firstIndex { $0.id == "aws/anthropic/bedrock-claude-opus-4-7" })
+        let opus46Index = try XCTUnwrap(models.firstIndex { $0.id == "azure/anthropic/claude-opus-4-6" })
+
+        XCTAssertEqual(models[opus47Index].name, "Claude Opus 4.7")
+        XCTAssertEqual(models[opus47Index].contextWindow, 1_000_000)
+        XCTAssertLessThan(opus47Index, opus46Index)
+    }
+
     func testProcessTapProviderTranslatesPIDToCoreAudioProcessObjectID() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/ProcessTapProvider.swift"))

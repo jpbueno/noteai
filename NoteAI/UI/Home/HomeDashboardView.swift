@@ -375,16 +375,11 @@ struct HomeDashboardView: View {
 
     private func operationalSnapshotPanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
         CommandCenterPanel {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Operational snapshot")
-                        .font(.system(size: layout.sectionTitleFontSize + 2, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")")
-                        .font(.system(size: layout.bodyFontSize))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Spacer()
+            DashboardPanelHeader(
+                title: "Operational snapshot",
+                subtitle: "\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")",
+                tone: .neutralAccent
+            ) {
                 dashboardPanelDragHandle(for: id)
             }
 
@@ -400,14 +395,11 @@ struct HomeDashboardView: View {
 
     private func suggestedNextMovePanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
         CommandCenterPanel {
-            HStack {
-                Text("Suggested next move")
-                    .font(.system(size: layout.sectionTitleFontSize, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 10, height: 10)
+            DashboardPanelHeader(
+                title: "Suggested next move",
+                subtitle: snapshot.nextTodo == nil ? "Nothing needs attention" : "Highest-priority todo",
+                tone: .accent
+            ) {
                 dashboardPanelDragHandle(for: id)
             }
 
@@ -444,16 +436,11 @@ struct HomeDashboardView: View {
         let checklist = meetingManager.onboardingChecklist
         let isCollapsed = setupChecklistCollapsed && checklist.canCollapse
         return CommandCenterPanel {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Setup checklist")
-                        .font(.system(size: layout.sectionTitleFontSize, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("\(checklist.completedCount)/\(checklist.totalCount) complete\(checklist.requiredReady ? " - ready for capture" : " - finish required items before the first recording")")
-                        .font(.system(size: layout.smallFontSize))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Spacer()
+            DashboardPanelHeader(
+                title: "Setup checklist",
+                subtitle: "\(checklist.completedCount)/\(checklist.totalCount) complete\(checklist.requiredReady ? " - ready for capture" : " - finish required items before the first recording")",
+                tone: checklist.requiredReady ? .done : .warning
+            ) {
                 Text(checklist.requiredReady ? "Ready" : "Setup needed")
                     .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                     .foregroundStyle(checklist.requiredReady ? Theme.success : Theme.warning)
@@ -463,7 +450,6 @@ struct HomeDashboardView: View {
                         (checklist.requiredReady ? Theme.success : Theme.warning).opacity(0.13),
                         in: Capsule()
                     )
-                dashboardPanelDragHandle(for: id)
                 if checklist.canCollapse {
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
@@ -480,6 +466,7 @@ struct HomeDashboardView: View {
                     .buttonStyle(.plain)
                     .help(isCollapsed ? "Expand setup checklist" : "Collapse setup checklist")
                 }
+                dashboardPanelDragHandle(for: id)
             }
 
             if !isCollapsed {
@@ -742,6 +729,75 @@ private struct CommandCenterPanel<Content: View>: View {
     }
 }
 
+private enum DashboardPanelTone {
+    case neutralAccent
+    case accent
+    case danger
+    case done
+    case warning
+
+    var color: Color {
+        switch self {
+        case .neutralAccent:
+            return Color(hex: "60A5FA")
+        case .accent:
+            return Theme.accent
+        case .danger:
+            return Theme.danger
+        case .done:
+            return Theme.success
+        case .warning:
+            return Theme.warning
+        }
+    }
+}
+
+private struct DashboardPanelHeader<Accessory: View>: View {
+    @Environment(\.commandCenterLayout) private var layout
+    let title: String
+    let subtitle: String
+    let tone: DashboardPanelTone
+    let accessory: Accessory
+
+    init(
+        title: String,
+        subtitle: String,
+        tone: DashboardPanelTone,
+        @ViewBuilder accessory: () -> Accessory
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.tone = tone
+        self.accessory = accessory()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(tone.color)
+                .frame(width: 10, height: 10)
+                .padding(.top, 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: layout.smallFontSize))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                accessory
+            }
+        }
+        .padding(.bottom, 12)
+    }
+}
+
 private struct MetricTile: View {
     @Environment(\.commandCenterLayout) private var layout
     let icon: String
@@ -774,22 +830,16 @@ private struct MetricTile: View {
 private struct TodoColumn<Accessory: View, Content: View>: View {
     @Environment(\.commandCenterLayout) private var layout
 
-    enum Tone {
-        case danger
-        case accent
-        case done
-    }
-
     let title: String
     let subtitle: String
-    let tone: Tone
+    let tone: DashboardPanelTone
     let accessory: Accessory
     let content: Content
 
     init(
         title: String,
         subtitle: String,
-        tone: Tone,
+        tone: DashboardPanelTone,
         @ViewBuilder accessory: () -> Accessory,
         @ViewBuilder content: () -> Content
     ) {
@@ -800,35 +850,11 @@ private struct TodoColumn<Accessory: View, Content: View>: View {
         self.content = content()
     }
 
-    private var color: Color {
-        switch tone {
-        case .danger:
-            return Theme.danger
-        case .accent:
-            return Theme.accent
-        case .done:
-            return Theme.success
-        }
-    }
-
     var body: some View {
         CommandCenterPanel {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(subtitle)
-                        .font(.system(size: layout.smallFontSize))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                Spacer(minLength: 0)
+            DashboardPanelHeader(title: title, subtitle: subtitle, tone: tone) {
                 accessory
             }
-            .padding(.bottom, 12)
 
             VStack(spacing: 8) {
                 content

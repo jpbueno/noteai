@@ -665,6 +665,21 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
 
+    func testDashboardPanelsUseSharedDotFirstHeaderTonesAndKeepSetupItemIcons() throws {
+        let source = try homeDashboardSource()
+
+        XCTAssertTrue(source.contains("enum DashboardPanelTone"))
+        XCTAssertTrue(source.contains("private struct DashboardPanelHeader<Accessory: View>: View"))
+        XCTAssertEqual(source.components(separatedBy: "DashboardPanelHeader(").count - 1, 4)
+        XCTAssertTrue(source.contains("tone: .neutralAccent"))
+        XCTAssertTrue(source.contains("tone: checklist.requiredReady ? .done : .warning"))
+        XCTAssertTrue(source.contains("TodoColumn(title: \"Focus Queue\", subtitle: \"Overdue and due today\", tone: .danger)"))
+        XCTAssertTrue(source.contains("TodoColumn(title: \"Upcoming\", subtitle: \"Next work to prepare\", tone: .accent)"))
+        XCTAssertTrue(source.contains("TodoColumn(title: \"Recently Completed\", subtitle: \"Latest closed loops\", tone: .done)"))
+        XCTAssertTrue(source.contains("dashboardPanelDragHandle(for: id)"))
+        XCTAssertTrue(source.contains("Image(systemName: onboardingIcon(for: item.status))"))
+    }
+
     func testSidebarListLimiterShowsInitialItemsAndCountsHiddenItems() {
         let items = Array(1...8)
 

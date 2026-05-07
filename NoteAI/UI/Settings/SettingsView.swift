@@ -594,7 +594,7 @@ struct AISettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .nvidia:
-            Text("NVIDIA Enterprise Inference Hub — access Claude Opus 4.6, Nemotron, Llama, and more via inference.nvidia.com.")
+            Text("NVIDIA Enterprise Inference Hub — access Claude Opus, Nemotron, Llama, and more via inference.nvidia.com.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

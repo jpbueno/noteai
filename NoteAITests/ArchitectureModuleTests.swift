@@ -887,18 +887,14 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(ordered, DashboardPanelID.defaultOrder)
     }
 
-    func testCommandCenterPanelColumnsUseCopilotLikeTwoColumnStacks() {
-        let columns = CommandCenterPanelOrder.columns(for: DashboardPanelID.defaultOrder)
+    func testCommandCenterPanelRowsUseCopilotLikePairsWithSetupPinnedFullWidth() {
+        let rows = CommandCenterPanelOrder.rows(for: DashboardPanelID.defaultOrder)
 
-        XCTAssertEqual(columns.leading, [
-            .operationalSnapshot,
-            .focusQueue,
-            .recentlyCompleted,
-        ])
-        XCTAssertEqual(columns.trailing, [
-            .suggestedNextMove,
-            .upcoming,
-            .setupChecklist,
+        XCTAssertEqual(rows, [
+            [.operationalSnapshot, .suggestedNextMove],
+            [.focusQueue, .upcoming],
+            [.recentlyCompleted],
+            [.setupChecklist],
         ])
     }
 

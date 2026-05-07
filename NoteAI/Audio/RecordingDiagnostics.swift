@@ -73,7 +73,7 @@ struct RecordingDiagnosticsSnapshot: Equatable {
         if permissions[.screenRecording]?.isWarning == true {
             result.append("Screen Recording permission is unavailable.")
         }
-        if case .unavailable(let reason) = permissions[.processTap] {
+        if case .unavailable(let reason) = permissions[.processTap], !systemAudio.status.isCapturing {
             result.append("Process tap access is unavailable: \(reason).")
         }
         if case .unavailable(let reason) = microphone.status {

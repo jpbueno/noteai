@@ -22,4 +22,13 @@ final class RecordingDiagnosticsTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.microphone.level.updatedAt.timeIntervalSince1970, 0)
         XCTAssertEqual(snapshot.microphone.status, .capturing)
     }
+
+    func testProcessTapWarningIsSuppressedWhenSystemAudioIsCapturing() {
+        var snapshot = RecordingDiagnosticsSnapshot()
+        snapshot.updatePermission(.processTap, status: .unavailable("Failed to create process tap"))
+        snapshot.updateCapture(.systemAudio, status: .capturing)
+
+        XCTAssertFalse(snapshot.warnings.contains { $0.contains("Process tap access is unavailable") })
+        XCTAssertTrue(snapshot.warnings.isEmpty)
+    }
 }

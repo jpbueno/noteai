@@ -13,8 +13,8 @@ final class ProcessTapProvider {
     func startTap(processID: pid_t, onBuffer: @escaping (AVAudioPCMBuffer) -> Void) throws {
         self.onBuffer = onBuffer
 
-        // Create a process tap description targeting the specific PID
-        var description = CATapDescription(stereoMixdownOfProcesses: [AudioObjectID(bitPattern: processID)])
+        let processObjectID = try coreAudioProcessObjectID(forPID: processID)
+        let description = CATapDescription(stereoMixdownOfProcesses: [processObjectID])
         description.name = "NoteAI-ProcessTap"
 
         // Create the process tap
@@ -68,6 +68,34 @@ final class ProcessTapProvider {
 
     // MARK: - Private
 
+    private func coreAudioProcessObjectID(forPID processID: pid_t) throws -> AudioObjectID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var pid = processID
+        var objectID = AudioObjectID(kAudioObjectUnknown)
+        var objectIDSize = UInt32(MemoryLayout<AudioObjectID>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            UInt32(MemoryLayout<pid_t>.size),
+            &pid,
+            &objectIDSize,
+            &objectID
+        )
+        guard status == noErr else {
+            throw AudioCaptureError.processObjectTranslationFailed(status)
+        }
+        guard objectID != kAudioObjectUnknown else {
+            throw AudioCaptureError.processObjectNotFound(processID)
+        }
+
+        return objectID
+    }
+
     private func createAggregateDevice(tapID: AudioObjectID) throws -> AudioObjectID {
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey as String: "NoteAI Aggregate",
@@ -112,6 +140,8 @@ final class ProcessTapProvider {
 }
 
 enum AudioCaptureError: LocalizedError {
+    case processObjectTranslationFailed(OSStatus)
+    case processObjectNotFound(pid_t)
     case processTapCreationFailed(OSStatus)
     case aggregateDeviceCreationFailed(OSStatus)
     case deviceAssignmentFailed(OSStatus)
@@ -120,6 +150,10 @@ enum AudioCaptureError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .processObjectTranslationFailed(let status):
+            return "Failed to translate process ID to Core Audio process object (OSStatus: \(status))"
+        case .processObjectNotFound(let processID):
+            return "No Core Audio process object found for PID \(processID)"
         case .processTapCreationFailed(let status):
             return "Failed to create process tap (OSStatus: \(status))"
         case .aggregateDeviceCreationFailed(let status):

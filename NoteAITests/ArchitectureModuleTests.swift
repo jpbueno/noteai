@@ -3,6 +3,14 @@ import SwiftUI
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
+    func testProcessTapProviderTranslatesPIDToCoreAudioProcessObjectID() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/Audio/ProcessTapProvider.swift"))
+
+        XCTAssertTrue(source.contains("kAudioHardwarePropertyTranslatePIDToProcessObject"))
+        XCTAssertFalse(source.contains("AudioObjectID(bitPattern: processID)"))
+    }
+
     func testLegacyNoteDecodesWithoutSpace() throws {
         let data = """
         {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","content":"Existing note","tags":["account"],"createdDate":0,"modifiedDate":0,"sourceMeetingID":null}
@@ -915,5 +923,14 @@ final class ArchitectureModuleTests: XCTestCase {
             ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { nil },
             "Read the whole note"
         )
+    }
+
+    private func repositoryRoot() -> URL {
+        var url = URL(fileURLWithPath: #filePath)
+        while url.lastPathComponent != "NoteAITests" {
+            url.deleteLastPathComponent()
+        }
+        url.deleteLastPathComponent()
+        return url
     }
 }

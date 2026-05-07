@@ -21,6 +21,7 @@ End-to-end Linear item handling:
 
 Default main/deployment workflow:
 - `main` is the source of truth for completed NoteAI work. Completed and tested work should not remain only on a Codex, feature, or temporary branch.
+- Always commit and push important implementation, configuration, documentation, and process-rule updates to the GitHub repo before treating the work as complete.
 - Before marking a Linear issue `Done`, verify the relevant changes are committed, pushed to `main`, and visible on the remote.
 - Run the relevant local checks for the touched modules before pushing. For web changes, include lint, typecheck, regression tests, and build. For Swift/macOS changes, include `swift test` or the appropriate Xcode build/test when available.
 - Push completed work to `main` unless the user explicitly asks for a PR-only flow. If branch protection blocks direct push, open the PR, merge it, and then verify `main`.

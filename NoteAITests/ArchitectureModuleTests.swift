@@ -756,6 +756,63 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("ISO8601DateFormatter"))
         XCTAssertTrue(source.contains("parseTodoDueDate"))
         XCTAssertTrue(source.contains("Untitled todo"))
+        XCTAssertTrue(source.contains("- list_todos: {\"action\":\"list_todos\""))
+        XCTAssertTrue(source.contains("case \"list_todos\""))
+        XCTAssertTrue(source.contains("handleLocalTodoListRequest"))
+    }
+
+    func testAssistantTodoListActionFormatsCopyReadyTitleAndDescription() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let afterDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 13)))
+        let olderDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 10)))
+        let newerDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 14)))
+
+        let included = TodoItem(
+            title: "Drive NSScale routing alignment",
+            description: "Summarize the NATS decision and gateway/session-affinity implications for the architecture doc.",
+            dueDate: newerDate,
+            createdDate: olderDate,
+            modifiedDate: newerDate
+        )
+        let excluded = TodoItem(
+            title: "Old reminder",
+            description: "Should not appear in the copy-ready list.",
+            createdDate: olderDate,
+            modifiedDate: olderDate
+        )
+
+        let filters = AssistantTodoListFormatter.Filters(after: afterDate, status: .all)
+        let output = AssistantTodoListFormatter.format(todos: [included, excluded], filters: filters)
+
+        XCTAssertTrue(output.contains("Tasks after Mar 13, 2026"))
+        XCTAssertTrue(output.contains("- Drive NSScale routing alignment"))
+        XCTAssertTrue(output.contains("  Summarize the NATS decision and gateway/session-affinity implications for the architecture doc."))
+        XCTAssertFalse(output.contains("Old reminder"))
+        XCTAssertFalse(output.contains("Title:"))
+        XCTAssertFalse(output.contains("Description:"))
+    }
+
+    func testAssistantTodoListActionParsesSlashDateFilter() throws {
+        let filters = AssistantTodoListFormatter.filters(from: [
+            "after": "03/13/2026",
+            "include_completed": true
+        ])
+
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 3)
+        XCTAssertEqual(components.day, 13)
+        XCTAssertEqual(filters.status, .all)
+    }
+
+    func testAssistantTodoListActionParsesNaturalLanguageAfterDate() throws {
+        let filters = AssistantTodoListFormatter.filters(fromPrompt: "list all my tasks after 03/13/2026 so that I can copy them to a google doc")
+
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 3)
+        XCTAssertEqual(components.day, 13)
+        XCTAssertEqual(filters.status, .all)
     }
 
     func testSidebarDividerIsFullHeightShellChrome() throws {

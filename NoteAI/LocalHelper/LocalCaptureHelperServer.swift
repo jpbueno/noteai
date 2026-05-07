@@ -439,7 +439,7 @@ final class LocalCaptureHelperServer {
             Task {
                 let response = await self.router.route(request)
                 Self.sendAll(Self.serialize(response), to: clientFD)
-                close(clientFD)
+                Self.closeAfterResponse(clientFD)
             }
         }
     }
@@ -515,6 +515,23 @@ final class LocalCaptureHelperServer {
                 sent += result
             }
         }
+    }
+
+    private static func closeAfterResponse(_ fd: Int32) {
+        _ = shutdown(fd, SHUT_WR)
+
+        let currentFlags = fcntl(fd, F_GETFL, 0)
+        if currentFlags >= 0 {
+            _ = fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK)
+        }
+
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while recv(fd, &buffer, buffer.count, 0) > 0 {}
+
+        if currentFlags >= 0 {
+            _ = fcntl(fd, F_SETFL, currentFlags)
+        }
+        close(fd)
     }
 
     private static func boundPort(for fd: Int32) throws -> UInt16 {

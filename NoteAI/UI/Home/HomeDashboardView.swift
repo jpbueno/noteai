@@ -128,11 +128,10 @@ enum DashboardPanelID: String, CaseIterable, Hashable {
         .recentlyCompleted,
         .setupChecklist,
     ]
-}
 
-struct DashboardPanelColumns: Equatable {
-    let leading: [DashboardPanelID]
-    let trailing: [DashboardPanelID]
+    var isFullWidth: Bool {
+        self == .setupChecklist
+    }
 }
 
 enum CommandCenterPanelOrder {
@@ -186,19 +185,28 @@ enum CommandCenterPanelOrder {
         return result
     }
 
-    static func columns(for ids: [DashboardPanelID]) -> DashboardPanelColumns {
-        var leading: [DashboardPanelID] = []
-        var trailing: [DashboardPanelID] = []
+    static func rows(for ids: [DashboardPanelID]) -> [[DashboardPanelID]] {
+        var rows: [[DashboardPanelID]] = []
+        var currentRow: [DashboardPanelID] = []
+        let fullWidthPanels = ids.filter(\.isFullWidth)
 
-        for (index, id) in ids.enumerated() {
-            if index.isMultiple(of: 2) {
-                leading.append(id)
-            } else {
-                trailing.append(id)
+        for id in ids where !id.isFullWidth {
+            currentRow.append(id)
+            if currentRow.count == 2 {
+                rows.append(currentRow)
+                currentRow.removeAll()
             }
         }
 
-        return DashboardPanelColumns(leading: leading, trailing: trailing)
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
+        }
+
+        for id in fullWidthPanels {
+            rows.append([id])
+        }
+
+        return rows
     }
 
     static func rawValue(for ids: [DashboardPanelID]) -> String {
@@ -265,26 +273,29 @@ struct HomeDashboardView: View {
     private var dashboardPanels: some View {
         let snapshot = snapshot
         let orderedIDs = orderedDashboardPanelIDs(for: snapshot)
-        let columns = CommandCenterPanelOrder.columns(for: orderedIDs)
-        return HStack(alignment: .top, spacing: layout.dashboardSpacing) {
-            dashboardPanelColumn(columns.leading, snapshot: snapshot, orderedIDs: orderedIDs)
-                .frame(maxWidth: .infinity, alignment: .top)
-            if !columns.trailing.isEmpty {
-                dashboardPanelColumn(columns.trailing, snapshot: snapshot, orderedIDs: orderedIDs)
-                    .frame(maxWidth: .infinity, alignment: .top)
+        let rows = CommandCenterPanelOrder.rows(for: orderedIDs)
+        return VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
+            ForEach(rows, id: \.self) { row in
+                dashboardPanelRow(row, snapshot: snapshot, orderedIDs: orderedIDs)
             }
         }
         .animation(.easeInOut(duration: 0.16), value: commandCenterPanelOrderRaw)
     }
 
-    private func dashboardPanelColumn(
-        _ ids: [DashboardPanelID],
+    @ViewBuilder
+    private func dashboardPanelRow(
+        _ row: [DashboardPanelID],
         snapshot: CommandCenterSnapshot,
         orderedIDs: [DashboardPanelID]
     ) -> some View {
-        VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
-            ForEach(ids, id: \.self) { id in
-                dashboardPanelCard(id, snapshot: snapshot, orderedIDs: orderedIDs)
+        if row.count == 1 {
+            dashboardPanelCard(row[0], snapshot: snapshot, orderedIDs: orderedIDs)
+        } else {
+            HStack(alignment: .top, spacing: layout.dashboardSpacing) {
+                ForEach(row, id: \.self) { id in
+                    dashboardPanelCard(id, snapshot: snapshot, orderedIDs: orderedIDs)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
             }
         }
     }

@@ -24,7 +24,6 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: NoteAI/Info.plist
-        CODE_SIGN_ENTITLEMENTS: NoteAI/NoteAI.entitlements
         CODE_SIGN_IDENTITY: Apple Development
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: BNLE7G9V59

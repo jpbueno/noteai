@@ -107,10 +107,11 @@ struct ChatPanelView: View {
                 .background(Theme.sidebarBG)
             }
 
-            HStack(spacing: 8) {
-                TextField("Ask anything...", text: $inputText)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask anything...", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
+                    .lineLimit(1...5)
                     .focused($inputFocused)
                     .onSubmit { sendMessage() }
 

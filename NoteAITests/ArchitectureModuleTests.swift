@@ -14,6 +14,15 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThan(opus47Index, opus46Index)
     }
 
+    func testChatPanelComposerSupportsMultilineAutosizing() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/Chat/ChatPanelView.swift"))
+
+        XCTAssertTrue(source.contains("TextField(\"Ask anything...\", text: $inputText, axis: .vertical)"))
+        XCTAssertTrue(source.contains(".lineLimit(1...5)"))
+        XCTAssertFalse(source.contains("TextField(\"Ask anything...\", text: $inputText)\n"))
+    }
+
     func testProcessTapProviderTranslatesPIDToCoreAudioProcessObjectID() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/ProcessTapProvider.swift"))

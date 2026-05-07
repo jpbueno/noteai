@@ -27,6 +27,7 @@ final class ChatManager: ObservableObject {
 
     Available actions:
     - create_note: {"action":"create_note", "title":"...", "content":"...", "tags":["..."]}
+    - create_todo: {"action":"create_todo", "title":"...", "description":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
     - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
@@ -42,11 +43,12 @@ final class ChatManager: ObservableObject {
     - For search, show matching results
     - If no action is needed, just chat normally
     - When asked to create a T5T report, use create_t5t (NOT create_note)
+    - When asked to create a task or todo, use create_todo (NOT create_note); task/todo requests belong in the Todo area
     - Be concise and helpful
     """
 
     init() {
-        messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, T5T reports, search your meetings, and more."))
+        messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, todos, T5T reports, search your meetings, and more."))
         refreshConfigurationPreflight()
     }
 
@@ -165,6 +167,17 @@ final class ChatManager: ObservableObject {
             NotificationCenter.default.post(name: .navigateToNote, object: note.id)
             return "Created note: \(title)"
 
+        case "create_todo":
+            let title = todoTitle(from: json["title"])
+            let description = (json["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let dueDateText = (json["due_date"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let dueDate = parseTodoDueDate(dueDateText)
+            manager.createTodo(title: title, description: description, dueDate: dueDate)
+            if let dueDateText, !dueDateText.isEmpty, dueDate == nil {
+                return "Created todo: \(title). Due date was not recognized."
+            }
+            return "Created todo: \(title)"
+
         case "create_t5t":
             let inputText = json["input"] as? String ?? ""
             let end = Date()
@@ -241,6 +254,28 @@ final class ChatManager: ObservableObject {
         default:
             return nil
         }
+    }
+
+    private func todoTitle(from value: Any?) -> String {
+        let title = (value as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Untitled todo" : title
+    }
+
+    private func parseTodoDueDate(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: value) {
+            return date
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.isLenient = false
+        return formatter.date(from: value)
     }
 
     private func selectedProvider() -> LLMProviderType {

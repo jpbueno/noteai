@@ -745,6 +745,19 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("todo.completed.toggle()"))
     }
 
+    func testChatAssistantCanCreateTodosWithoutCreatingTaskLikeNotes() throws {
+        let source = try chatManagerSource()
+
+        XCTAssertTrue(source.contains("- create_todo: {\"action\":\"create_todo\", \"title\":\"...\", \"description\":\"...\", \"due_date\":\"YYYY-MM-DD or ISO-8601\"}"))
+        XCTAssertTrue(source.contains("task/todo requests"))
+        XCTAssertTrue(source.contains("use create_todo (NOT create_note)"))
+        XCTAssertTrue(source.contains("case \"create_todo\""))
+        XCTAssertTrue(source.contains("manager.createTodo(title: title, description: description, dueDate: dueDate)"))
+        XCTAssertTrue(source.contains("ISO8601DateFormatter"))
+        XCTAssertTrue(source.contains("parseTodoDueDate"))
+        XCTAssertTrue(source.contains("Untitled todo"))
+    }
+
     func testSidebarDividerIsFullHeightShellChrome() throws {
         let source = try meetingLibrarySource()
 
@@ -801,6 +814,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let todoDetailFile = projectRoot.appendingPathComponent("NoteAI/UI/Todos/TodoDetailView.swift")
         return try String(contentsOf: todoDetailFile, encoding: .utf8)
+    }
+
+    private func chatManagerSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let chatManagerFile = projectRoot.appendingPathComponent("NoteAI/UI/Chat/ChatManager.swift")
+        return try String(contentsOf: chatManagerFile, encoding: .utf8)
     }
 
     private func settingsSource() throws -> String {

@@ -333,7 +333,7 @@ enum AssistantTodoListFormatter {
     }
 
     static func filters(fromPrompt prompt: String) -> Filters {
-        let after = firstDate(in: prompt, afterKeyword: "after")
+        let after = firstDate(in: prompt, afterKeyword: "after") ?? firstDate(in: prompt, afterKeyword: "since")
         let before = firstDate(in: prompt, afterKeyword: "before")
         let lowercased = prompt.lowercased()
         let status: Status
@@ -350,38 +350,34 @@ enum AssistantTodoListFormatter {
     static func format(todos: [TodoItem], filters: Filters) -> String {
         let filteredTodos = todos
             .filter { matches($0, filters: filters) }
-            .sorted { activityDate(for: $0) > activityDate(for: $1) }
+            .sorted { activityDate(for: $0) < activityDate(for: $1) }
 
         let title = header(for: filters)
         guard !filteredTodos.isEmpty else {
             return "No \(title.lowercased()) found."
         }
 
-        let entries = filteredTodos.map(formatTodo).joined(separator: "\n")
-        return "\(title)\n\n\(entries)"
+        let groupedTodos = Dictionary(grouping: filteredTodos) { Calendar.current.startOfDay(for: activityDate(for: $0)) }
+        let entries = groupedTodos.keys.sorted().map { date in
+            let todosForDate = groupedTodos[date] ?? []
+            let dateHeader = "- " + slashDate(date)
+            let todoEntries = todosForDate.map(formatGroupedTodo).joined(separator: "\n")
+            return dateHeader + "\n" + todoEntries
+        }.joined(separator: "\n")
+        return title + "\n\n" + entries
     }
 
-    private static func formatTodo(_ todo: TodoItem) -> String {
+    private static func formatGroupedTodo(_ todo: TodoItem) -> String {
         let title = todo.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Untitled todo"
             : todo.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        var line = "- \(title)"
-        var metadata: [String] = []
-        if todo.completed {
-            metadata.append("completed")
-        }
-        if let dueLabel = todo.dueDateLabel {
-            metadata.append(dueLabel)
-        }
-        if !metadata.isEmpty {
-            line += " (\(metadata.joined(separator: ", ")))"
-        }
+        let line = "  - " + title
 
         let descriptionLines = todo.description
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .map { "  \($0)" }
+            .map { "    " + $0 }
 
         if descriptionLines.isEmpty {
             return line
@@ -489,6 +485,13 @@ enum AssistantTodoListFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
+    private static func slashDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM/dd/yyyy"
         return formatter.string(from: date)
     }
 

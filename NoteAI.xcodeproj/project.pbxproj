@@ -81,6 +81,7 @@
 		D9ED33246708877C52269DB0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5275EBCAF60616BF7FB48838 /* Theme.swift */; };
 		DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EE88F8B897F5B1CE3EF8FF /* TTSPlayerView.swift */; };
 		DDFE1974EF5E36378A3AF82E /* LocalCaptureHelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3B32858CF2AC5AD6104843 /* LocalCaptureHelperProtocol.swift */; };
+		E11D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */; };
 		EBABA6C9C4BA258DE5DD6C64 /* CoachInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAA851BE02CC5560A2384D /* CoachInsight.swift */; };
 		F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFADEBEBCA9727CC2302DDDD /* T5TEntryEditor.swift */; };
 		F1D5C7E7EB34A71FE17C673A /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */; };
@@ -172,6 +173,7 @@
 		DB390385F199831DC1789A61 /* LibraryOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryOperations.swift; sourceTree = "<group>"; };
 		DC9ADA6F4C7FFF915174431B /* LocalCaptureHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCaptureHelperTests.swift; sourceTree = "<group>"; };
 		DFED471090686D9A28B620DA /* TranscriptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionEngine.swift; sourceTree = "<group>"; };
+		E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		EBB8C87C56A6D5C1B78C7DB9 /* LocalCaptureHelperStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCaptureHelperStatusProvider.swift; sourceTree = "<group>"; };
 		EFB36C6105D57E388C20B6A5 /* RecordingDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDiagnosticsTests.swift; sourceTree = "<group>"; };
 		F0008DC27CC173ED47C3B026 /* NoteAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -442,6 +444,7 @@
 				5FCD69E14BF8F976BDBD3B1F /* Settings */,
 				03BB510423A7102C117A617E /* SummaryView */,
 				F1F7594F8ECC7E154E563729 /* T5T */,
+				E33D4A8A7A0C4F06971F2B31 /* Tasks */,
 				64F66B3D4B407E0B5751C9F9 /* TextToSpeech */,
 				E9034B846CAF7220E3D69AA6 /* Todos */,
 				251D37A5FE21E6EF6AAB7338 /* TranscriptViewer */,
@@ -455,6 +458,14 @@
 				A2B302FC97494EFE1DFA9E12 /* TodoDetailView.swift */,
 			);
 			path = Todos;
+			sourceTree = "<group>";
+		};
+		E33D4A8A7A0C4F06971F2B31 /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */,
+			);
+			path = Tasks;
 			sourceTree = "<group>";
 		};
 		F1F7594F8ECC7E154E563729 /* T5T */ = {
@@ -655,6 +666,7 @@
 				D57D2158AAE6B1A1A17D1F4C /* T5TConfigSheet.swift in Sources */,
 				F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */,
 				D646E51F78654742FF540695 /* T5TReport.swift in Sources */,
+				E11D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift in Sources */,
 				DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */,
 				518BB86BFA5C7269491D4D66 /* TextToSpeechService.swift in Sources */,
 				D9ED33246708877C52269DB0 /* Theme.swift in Sources */,

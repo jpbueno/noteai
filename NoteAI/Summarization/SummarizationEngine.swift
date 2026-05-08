@@ -148,7 +148,7 @@ final class SummarizationEngine {
     // MARK: - T5T Generation
 
     /// Generates a T5T (Top 5 Things) report from multiple meetings in a reporting period.
-    func generateT5T(meetings: [Meeting], notes: [Note] = [], todos: [TodoItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
+    func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
         let client = try buildClient()
         let model = selectedModelID()
 
@@ -181,23 +181,31 @@ final class SummarizationEngine {
         }
         let notesText = noteBlocks.isEmpty ? "" : "\n\nNOTES:\n" + noteBlocks.joined(separator: "\n\n---\n\n")
 
-        // Build todo blocks — these are the primary source for T5T per the web app
-        var todoBlocks: [String] = []
-        for todo in todos {
+        // Build task blocks — durable work records are the primary T5T source.
+        var taskBlocks: [String] = []
+        for task in tasks {
             var block = "- "
-            block += todo.completed ? "[DONE] " : "[OPEN] "
-            block += todo.title
-            if let due = todo.dueDate {
-                let dueFmt = DateFormatter()
-                dueFmt.dateStyle = .medium
-                block += " (due \(dueFmt.string(from: due)))"
+            block += task.isCompleted ? "[DONE] " : "[OPEN] "
+            block += task.title
+            if let workDate = task.workDate {
+                let workFmt = DateFormatter()
+                workFmt.dateStyle = .medium
+                block += " (work date \(workFmt.string(from: workDate)))"
             }
-            if !todo.description.isEmpty {
-                block += "\n  " + String(todo.description.prefix(400))
+            if let completedDate = task.completedDate {
+                let completedFmt = DateFormatter()
+                completedFmt.dateStyle = .medium
+                block += " (completed \(completedFmt.string(from: completedDate)))"
             }
-            todoBlocks.append(block)
+            if let owner = task.owner {
+                block += "\n  Owner: \(owner)"
+            }
+            if !task.description.isEmpty {
+                block += "\n  " + String(task.description.prefix(800))
+            }
+            taskBlocks.append(block)
         }
-        let todosText = todoBlocks.isEmpty ? "" : "\n\nTODOS:\n" + todoBlocks.joined(separator: "\n")
+        let tasksText = taskBlocks.isEmpty ? "" : "\n\nTASKS:\n" + taskBlocks.joined(separator: "\n")
 
         let prompt = """
         You are an NVIDIA engineer's executive communication assistant. Generate a "Top 5 Things" (T5T) status report from the meeting notes below.
@@ -232,7 +240,7 @@ final class SummarizationEngine {
         MEETING SUMMARIES:
         \(meetingsText)
         \(notesText)
-        \(todosText)
+        \(tasksText)
 
         OUTPUT: Valid JSON only, with this exact structure:
         {

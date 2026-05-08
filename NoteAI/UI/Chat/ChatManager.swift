@@ -18,7 +18,7 @@ final class ChatManager: ObservableObject {
     }
 
     private let systemPrompt = """
-    You are NoteAI Assistant, an AI helper embedded in a macOS productivity app. You help the user manage meetings, notes, todos, and T5T (Top 5 Things) reports.
+    You are NoteAI Assistant, an AI helper embedded in a macOS productivity app. You help the user manage meetings, notes, tasks, todos, and T5T (Top 5 Things) reports.
 
     When the user asks you to perform an action, include a JSON action block in your response like this:
     ```json
@@ -27,8 +27,10 @@ final class ChatManager: ObservableObject {
 
     Available actions:
     - create_note: {"action":"create_note", "title":"...", "content":"...", "tags":["..."]}
-    - create_todo: {"action":"create_todo", "title":"...", "description":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
-    - list_todos: {"action":"list_todos", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true} — lists todos/tasks as copy-ready Markdown with title and description content
+    - create_task: {"action":"create_task", "title":"...", "description":"...", "status":"open|completed", "work_date":"YYYY-MM-DD or ISO-8601"}
+    - create_todo: {"action":"create_todo", "title":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
+    - list_tasks: {"action":"list_tasks", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true} — lists tasks as copy-ready Markdown with title and description content
+    - list_todos: {"action":"list_todos", "status":"open|completed|all"} — lists lightweight reminder todos
     - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
@@ -44,8 +46,9 @@ final class ChatManager: ObservableObject {
     - For search, show matching results
     - If no action is needed, just chat normally
     - When asked to create a T5T report, use create_t5t (NOT create_note)
-    - When asked to create a task or todo, use create_todo (NOT create_note); task/todo requests belong in the Todo area
-    - When asked to list tasks or todos, use list_todos; until NoteAI separates tasks from todos, task list requests read from the Todo area
+    - When asked to create a task or todo, use create_task or create_todo (NOT create_note); task requests use create_task and todo requests use create_todo
+    - When asked to list tasks, use list_tasks and read from durable Tasks
+    - When asked to list todos, use list_todos and read from lightweight Todos
     - Be concise and helpful
     """
 
@@ -67,7 +70,7 @@ final class ChatManager: ObservableObject {
 
         messages.append(ChatMessage(role: .user, content: trimmed))
 
-        if handleLocalTodoListRequest(trimmed) {
+        if handleLocalTaskOrTodoListRequest(trimmed) {
             return
         }
 
@@ -174,16 +177,31 @@ final class ChatManager: ObservableObject {
             NotificationCenter.default.post(name: .navigateToNote, object: note.id)
             return "Created note: \(title)"
 
+        case "create_task":
+            let title = taskTitle(from: json["title"])
+            let description = (json["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let status = parseTaskStatus(json["status"] as? String)
+            let workDateText = (json["work_date"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let workDate = parseTodoDueDate(workDateText)
+            manager.createTask(title: title, description: description, status: status, workDate: workDate)
+            if let workDateText, !workDateText.isEmpty, workDate == nil {
+                return "Created task: \(title). Work date was not recognized."
+            }
+            return "Created task: \(title)"
+
         case "create_todo":
             let title = todoTitle(from: json["title"])
-            let description = (json["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let dueDateText = (json["due_date"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             let dueDate = parseTodoDueDate(dueDateText)
-            manager.createTodo(title: title, description: description, dueDate: dueDate)
+            manager.createTodo(title: title, dueDate: dueDate)
             if let dueDateText, !dueDateText.isEmpty, dueDate == nil {
                 return "Created todo: \(title). Due date was not recognized."
             }
             return "Created todo: \(title)"
+
+        case "list_tasks":
+            let filters = AssistantTaskListFormatter.filters(from: json)
+            return AssistantTaskListFormatter.format(tasks: manager.tasks, filters: filters)
 
         case "list_todos":
             let filters = AssistantTodoListFormatter.filters(from: json)
@@ -196,13 +214,13 @@ final class ChatManager: ObservableObject {
 
             let meetings = manager.meetingsInRange(start: start, end: end)
             let notes = manager.notes
-            let todos = manager.todos
+            let tasks = manager.tasks
 
             do {
                 let sections = try await summarizationEngine.generateT5T(
                     meetings: meetings,
                     notes: inputText.isEmpty ? notes : [Note(title: "Input", content: inputText)],
-                    todos: todos,
+                    tasks: tasks,
                     config: manager.t5tConfig,
                     periodStart: start,
                     periodEnd: end
@@ -215,6 +233,7 @@ final class ChatManager: ObservableObject {
                     periodStart: start,
                     periodEnd: end,
                     meetingIDs: meetings.map(\.id),
+                    taskIDs: tasks.map(\.id),
                     sections: sections,
                     status: .draft
                 )
@@ -272,16 +291,37 @@ final class ChatManager: ObservableObject {
         return title.isEmpty ? "Untitled todo" : title
     }
 
-    private func handleLocalTodoListRequest(_ text: String) -> Bool {
+    private func taskTitle(from value: Any?) -> String {
+        let title = (value as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Untitled task" : title
+    }
+
+    private func parseTaskStatus(_ value: String?) -> TaskItem.Status {
+        switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "completed", "complete", "done":
+            return .completed
+        default:
+            return .open
+        }
+    }
+
+    private func handleLocalTaskOrTodoListRequest(_ text: String) -> Bool {
         let lowercased = text.lowercased()
         let isListRequest = lowercased.contains("list") || lowercased.contains("show")
-        let asksForTodos = lowercased.contains("todo") || lowercased.contains("task")
-        guard isListRequest, asksForTodos, let manager = meetingManager else {
+        let asksForTasks = lowercased.contains("task")
+        let asksForTodos = lowercased.contains("todo")
+        guard isListRequest, (asksForTasks || asksForTodos), let manager = meetingManager else {
             return false
         }
 
-        let filters = AssistantTodoListFormatter.filters(fromPrompt: text)
-        let output = AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
+        let output: String
+        if asksForTasks {
+            let filters = AssistantTaskListFormatter.filters(fromPrompt: text)
+            output = AssistantTaskListFormatter.format(tasks: manager.tasks, filters: filters)
+        } else {
+            let filters = AssistantTodoListFormatter.filters(fromPrompt: text)
+            output = AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
+        }
         messages.append(ChatMessage(role: .assistant, content: output))
         return true
     }
@@ -309,7 +349,7 @@ final class ChatManager: ObservableObject {
     }
 }
 
-enum AssistantTodoListFormatter {
+enum AssistantTaskListFormatter {
     enum Status: String, Equatable {
         case open
         case completed
@@ -347,33 +387,33 @@ enum AssistantTodoListFormatter {
         return Filters(after: after, before: before, status: status)
     }
 
-    static func format(todos: [TodoItem], filters: Filters) -> String {
-        let filteredTodos = todos
+    static func format(tasks: [TaskItem], filters: Filters) -> String {
+        let filteredTasks = tasks
             .filter { matches($0, filters: filters) }
-            .sorted { activityDate(for: $0) < activityDate(for: $1) }
+            .sorted { $0.activityDate < $1.activityDate }
 
         let title = header(for: filters)
-        guard !filteredTodos.isEmpty else {
+        guard !filteredTasks.isEmpty else {
             return "No \(title.lowercased()) found."
         }
 
-        let groupedTodos = Dictionary(grouping: filteredTodos) { Calendar.current.startOfDay(for: activityDate(for: $0)) }
-        let entries = groupedTodos.keys.sorted().map { date in
-            let todosForDate = groupedTodos[date] ?? []
+        let groupedTasks = Dictionary(grouping: filteredTasks) { Calendar.current.startOfDay(for: $0.activityDate) }
+        let entries = groupedTasks.keys.sorted().map { date in
+            let tasksForDate = groupedTasks[date] ?? []
             let dateHeader = "- " + slashDate(date)
-            let todoEntries = todosForDate.map(formatGroupedTodo).joined(separator: "\n")
-            return dateHeader + "\n" + todoEntries
+            let taskEntries = tasksForDate.map(formatGroupedTask).joined(separator: "\n")
+            return dateHeader + "\n" + taskEntries
         }.joined(separator: "\n")
         return title + "\n\n" + entries
     }
 
-    private static func formatGroupedTodo(_ todo: TodoItem) -> String {
-        let title = todo.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Untitled todo"
-            : todo.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func formatGroupedTask(_ task: TaskItem) -> String {
+        let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Untitled task"
+            : task.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = "  - " + title
 
-        let descriptionLines = todo.description
+        let descriptionLines = task.description
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -385,17 +425,17 @@ enum AssistantTodoListFormatter {
         return ([line] + descriptionLines).joined(separator: "\n")
     }
 
-    private static func matches(_ todo: TodoItem, filters: Filters) -> Bool {
+    private static func matches(_ task: TaskItem, filters: Filters) -> Bool {
         switch filters.status {
-        case .open where todo.completed:
+        case .open where task.isCompleted:
             return false
-        case .completed where !todo.completed:
+        case .completed where !task.isCompleted:
             return false
         default:
             break
         }
 
-        let activity = activityDate(for: todo)
+        let activity = task.activityDate
         if let after = filters.after, activity < Calendar.current.startOfDay(for: after) {
             return false
         }
@@ -403,10 +443,6 @@ enum AssistantTodoListFormatter {
             return false
         }
         return true
-    }
-
-    private static func activityDate(for todo: TodoItem) -> Date {
-        max(todo.createdDate, todo.modifiedDate)
     }
 
     private static func header(for filters: Filters) -> String {
@@ -499,5 +535,87 @@ enum AssistantTodoListFormatter {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: date)
         return calendar.date(byAdding: DateComponents(day: 1, second: -1), to: start) ?? date
+    }
+}
+
+enum AssistantTodoListFormatter {
+    enum Status: String, Equatable {
+        case open
+        case completed
+        case all
+    }
+
+    struct Filters: Equatable {
+        var status: Status = .all
+    }
+
+    static func filters(from json: [String: Any]) -> Filters {
+        Filters(status: status(from: json["status"] as? String))
+    }
+
+    static func filters(fromPrompt prompt: String) -> Filters {
+        let lowercased = prompt.lowercased()
+        if lowercased.contains("open") || lowercased.contains("incomplete") || lowercased.contains("pending") {
+            return Filters(status: .open)
+        }
+        if lowercased.contains("completed") || lowercased.contains("done") {
+            return Filters(status: .completed)
+        }
+        return Filters(status: .all)
+    }
+
+    static func format(todos: [TodoItem], filters: Filters) -> String {
+        let filteredTodos = todos
+            .filter { matches($0, filters: filters) }
+            .sorted { ($0.dueDate ?? $0.createdDate) < ($1.dueDate ?? $1.createdDate) }
+
+        let title = header(for: filters)
+        guard !filteredTodos.isEmpty else {
+            return "No \(title.lowercased()) found."
+        }
+
+        let entries = filteredTodos.map { todo -> String in
+            let title = todo.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Untitled todo"
+                : todo.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let label = todo.dueDateLabel, !todo.completed {
+                return "- \(title) (\(label))"
+            }
+            return "- \(title)"
+        }
+        return title + "\n\n" + entries.joined(separator: "\n")
+    }
+
+    private static func matches(_ todo: TodoItem, filters: Filters) -> Bool {
+        switch filters.status {
+        case .open:
+            return !todo.completed
+        case .completed:
+            return todo.completed
+        case .all:
+            return true
+        }
+    }
+
+    private static func header(for filters: Filters) -> String {
+        switch filters.status {
+        case .open:
+            return "Open todos"
+        case .completed:
+            return "Completed todos"
+        case .all:
+            return "Todos"
+        }
+    }
+
+    private static func status(from value: String?) -> Status {
+        switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "open", "pending", "incomplete":
+            return .open
+        case "completed", "complete", "done":
+            return .completed
+        default:
+            return .all
+        }
     }
 }

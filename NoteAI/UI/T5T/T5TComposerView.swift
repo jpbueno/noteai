@@ -11,10 +11,10 @@ struct T5TComposerView: View {
     @State private var periodStart: Date
     @State private var periodEnd: Date
     @State private var selectedNoteIDs: Set<UUID>
-    @State private var selectedTodoIDs: Set<UUID>
+    @State private var selectedTaskIDs: Set<UUID>
     @State private var showConfigSheet = false
     @State private var showNoteSelector = false
-    @State private var showTodoSelector = true
+    @State private var showTaskSelector = true
     @State private var editableConfig: T5TConfig
     @State private var generationError: String?
 
@@ -24,17 +24,19 @@ struct T5TComposerView: View {
         self.ttsService = ttsService
         self._selectedMeetingIDs = State(initialValue: Set(report.wrappedValue.meetingIDs))
         self._selectedNoteIDs = State(initialValue: Set(report.wrappedValue.noteIDs))
-        // Default: if the report has no explicit todo selection yet, auto-select
-        // all todos in the period (matches the web "todos are the primary T5T input" model).
-        let explicitTodos = report.wrappedValue.todoIDs
-        if explicitTodos.isEmpty {
-            let inRange = meetingManager.todosInRange(
+        // Default: if the report has no explicit task selection yet, auto-select
+        // all durable tasks in the period for T5T source material.
+        let explicitTasks = report.wrappedValue.taskIDs.isEmpty
+            ? report.wrappedValue.todoIDs
+            : report.wrappedValue.taskIDs
+        if explicitTasks.isEmpty {
+            let inRange = meetingManager.tasksInRange(
                 start: report.wrappedValue.periodStart,
                 end: report.wrappedValue.periodEnd
             )
-            self._selectedTodoIDs = State(initialValue: Set(inRange.map(\.id)))
+            self._selectedTaskIDs = State(initialValue: Set(inRange.map(\.id)))
         } else {
-            self._selectedTodoIDs = State(initialValue: Set(explicitTodos))
+            self._selectedTaskIDs = State(initialValue: Set(explicitTasks))
         }
         self._periodStart = State(initialValue: report.wrappedValue.periodStart)
         self._periodEnd = State(initialValue: report.wrappedValue.periodEnd)
@@ -48,7 +50,7 @@ struct T5TComposerView: View {
                     headerSection
                     Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
                     meetingSection
-                    todoSection
+                    taskSection
                     noteSection
                     Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
                     actionBar
@@ -219,21 +221,21 @@ struct T5TComposerView: View {
         .padding(.top, 8)
     }
 
-    // MARK: - Todo Selection (primary T5T input)
+    // MARK: - Task Selection (primary T5T input)
 
-    private var todoSection: some View {
+    private var taskSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    showTodoSelector.toggle()
+                    showTaskSelector.toggle()
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: showTodoSelector ? "chevron.down" : "chevron.right")
+                    Image(systemName: showTaskSelector ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                    Text("Source Todos")
+                    Text("Source Tasks")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("(\(selectedTodoIDs.count) selected)")
+                    Text("(\(selectedTaskIDs.count) selected)")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -241,15 +243,15 @@ struct T5TComposerView: View {
             }
             .buttonStyle(.plain)
 
-            if showTodoSelector {
-                TodoSelectorView(
-                    todos: meetingManager.todos,
-                    selectedIDs: $selectedTodoIDs,
+            if showTaskSelector {
+                TaskSelectorView(
+                    tasks: meetingManager.tasks,
+                    selectedIDs: $selectedTaskIDs,
                     periodStart: periodStart,
                     periodEnd: periodEnd
                 )
-                .onChange(of: selectedTodoIDs) { _, newValue in
-                    report.todoIDs = Array(newValue)
+                .onChange(of: selectedTaskIDs) { _, newValue in
+                    report.taskIDs = Array(newValue)
                     meetingManager.updateT5TReport(report)
                 }
             }
@@ -274,7 +276,7 @@ struct T5TComposerView: View {
                             .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedMeetingIDs.isEmpty && selectedNoteIDs.isEmpty && selectedTodoIDs.isEmpty)
+                    .disabled(selectedMeetingIDs.isEmpty && selectedNoteIDs.isEmpty && selectedTaskIDs.isEmpty)
                 }
 
                 Spacer()
@@ -379,13 +381,13 @@ struct T5TComposerView: View {
                         periodEnd: periodEnd,
                         meetingIDs: Array(selectedMeetingIDs),
                         noteIDs: Array(selectedNoteIDs),
-                        todoIDs: Array(selectedTodoIDs)
+                        taskIDs: Array(selectedTaskIDs)
                     )
                     report = newReport
                 } else {
                     report.meetingIDs = Array(selectedMeetingIDs)
                     report.noteIDs = Array(selectedNoteIDs)
-                    report.todoIDs = Array(selectedTodoIDs)
+                    report.taskIDs = Array(selectedTaskIDs)
                     let updated = try await meetingManager.regenerateT5T(report: report)
                     report = updated
                 }

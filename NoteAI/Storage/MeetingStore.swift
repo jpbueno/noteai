@@ -296,6 +296,38 @@ final class MeetingStore {
         }
     }
 
+    // MARK: - Tasks
+
+    func saveTask(_ task: TaskItem) throws {
+        let jsonData = try JSONEncoder().encode(task)
+        try dbQueue.write { db in
+            try saveTask(task, jsonData: jsonData, in: db)
+        }
+    }
+
+    func fetchAllTasks() throws -> [TaskItem] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT json_data FROM tasks ORDER BY COALESCE(completed_date, work_date, modified_date, created_date) DESC"
+            )
+            return rows.compactMap { row -> TaskItem? in
+                guard let jsonString: String = row["json_data"],
+                      let data = jsonString.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode(TaskItem.self, from: data)
+            }
+        }
+    }
+
+    func deleteTask(id: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM tasks WHERE id = ?",
+                arguments: [id.uuidString]
+            )
+        }
+    }
+
     // MARK: - Private
 
     private func createTablesIfNeeded() throws {
@@ -345,6 +377,88 @@ final class MeetingStore {
                     json_data TEXT NOT NULL
                 )
                 """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    created_date REAL NOT NULL,
+                    modified_date REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    work_date REAL,
+                    completed_date REAL,
+                    source_meeting_id TEXT,
+                    source_action_item_id TEXT,
+                    source_note_id TEXT,
+                    json_data TEXT NOT NULL
+                )
+                """)
+            try addMissingTaskColumnsIfNeeded(in: db)
+            try migrateLegacyTodosToTasks(in: db)
         }
+    }
+
+    private func addMissingTaskColumnsIfNeeded(in db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: "PRAGMA table_info(tasks)")
+        let columnNames = Set(rows.compactMap { row -> String? in row["name"] })
+        let columns: [(name: String, definition: String)] = [
+            ("status", "TEXT NOT NULL DEFAULT 'open'"),
+            ("work_date", "REAL"),
+            ("completed_date", "REAL"),
+            ("source_meeting_id", "TEXT"),
+            ("source_action_item_id", "TEXT"),
+            ("source_note_id", "TEXT"),
+        ]
+
+        for column in columns where !columnNames.contains(column.name) {
+            try db.execute(sql: "ALTER TABLE tasks ADD COLUMN \(column.name) \(column.definition)")
+        }
+    }
+
+    private func migrateLegacyTodosToTasks(in db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: "SELECT id, json_data FROM todos")
+        let todos = rows.compactMap { row -> TodoItem? in
+            guard let jsonString: String = row["json_data"],
+                  let data = jsonString.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(TodoItem.self, from: data)
+        }
+        guard !todos.isEmpty else { return }
+
+        let split = TaskTodoClassifier.splitLegacyTodos(todos)
+        guard !split.tasks.isEmpty else { return }
+
+        let existingTaskIDs = Set(try String.fetchAll(db, sql: "SELECT id FROM tasks"))
+        for task in split.tasks where !existingTaskIDs.contains(task.id.uuidString) {
+            let jsonData = try JSONEncoder().encode(task)
+            try saveTask(task, jsonData: jsonData, in: db)
+        }
+
+        for task in split.tasks {
+            try db.execute(
+                sql: "DELETE FROM todos WHERE id = ?",
+                arguments: [task.id.uuidString]
+            )
+        }
+    }
+
+    private func saveTask(_ task: TaskItem, jsonData: Data, in db: Database) throws {
+        try db.execute(
+            sql: """
+                INSERT OR REPLACE INTO tasks (id, title, created_date, modified_date, status, work_date, completed_date, source_meeting_id, source_action_item_id, source_note_id, json_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                task.id.uuidString,
+                task.title,
+                task.createdDate.timeIntervalSince1970,
+                task.modifiedDate.timeIntervalSince1970,
+                task.status.rawValue,
+                task.workDate?.timeIntervalSince1970,
+                task.completedDate?.timeIntervalSince1970,
+                task.sourceMeetingID?.uuidString,
+                task.sourceActionItemID,
+                task.sourceNoteID?.uuidString,
+                String(data: jsonData, encoding: .utf8)
+            ]
+        )
     }
 }

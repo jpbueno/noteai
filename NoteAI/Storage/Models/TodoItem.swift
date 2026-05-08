@@ -219,3 +219,251 @@ struct TodoItem: Identifiable, Codable, Equatable {
         return fmt.string(from: due)
     }
 }
+
+/// Durable work-tracking record used for meeting action items, AI task lists,
+/// and T5T source material. Todos stay lightweight reminders; Tasks carry the
+/// report-worthy context.
+struct TaskItem: Identifiable, Codable, Equatable {
+    enum Status: String, Codable, Equatable {
+        case open
+        case completed
+    }
+
+    let id: UUID
+    var title: String
+    var description: String
+    var status: Status
+    var workDate: Date?
+    var completedDate: Date?
+    var sourceMeetingID: UUID?
+    var sourceActionItemID: String?
+    var sourceNoteID: UUID?
+    var owner: String?
+    let createdDate: Date
+    var modifiedDate: Date
+
+    init(
+        id: UUID = UUID(),
+        title: String = "",
+        description: String = "",
+        status: Status = .open,
+        workDate: Date? = nil,
+        completedDate: Date? = nil,
+        sourceMeetingID: UUID? = nil,
+        sourceActionItemID: String? = nil,
+        sourceNoteID: UUID? = nil,
+        owner: String? = nil,
+        createdDate: Date = Date(),
+        modifiedDate: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.status = status
+        self.workDate = workDate
+        self.completedDate = completedDate
+        self.sourceMeetingID = sourceMeetingID
+        self.sourceActionItemID = sourceActionItemID
+        self.sourceNoteID = sourceNoteID
+        let trimmedOwner = owner?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.owner = trimmedOwner?.isEmpty == false ? trimmedOwner : nil
+        self.createdDate = createdDate
+        self.modifiedDate = modifiedDate
+    }
+
+    var isCompleted: Bool {
+        status == .completed
+    }
+
+    var activityDate: Date {
+        completedDate ?? workDate ?? max(createdDate, modifiedDate)
+    }
+
+    func isLinked(to meetingID: UUID) -> Bool {
+        sourceMeetingID == meetingID
+    }
+
+    static func fromLegacyTodo(_ todo: TodoItem) -> TaskItem {
+        TaskItem(
+            id: todo.id,
+            title: todo.title,
+            description: todo.description,
+            status: todo.completed ? .completed : .open,
+            workDate: todo.dueDate ?? max(todo.createdDate, todo.modifiedDate),
+            completedDate: todo.completed ? todo.modifiedDate : nil,
+            sourceMeetingID: todo.sourceMeetingID,
+            sourceActionItemID: todo.sourceActionItemID,
+            owner: todo.owner,
+            createdDate: todo.createdDate,
+            modifiedDate: todo.modifiedDate
+        )
+    }
+
+    static func actionLinkedTask(for actionItem: ActionItem, meeting: Meeting, now: Date = Date()) -> TaskItem {
+        let deadline = actionItem.deadline?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var descriptionParts = ["From meeting: \(meeting.title)"]
+        if let owner = actionItem.owner {
+            descriptionParts.append("Owner: \(owner)")
+        }
+        if let deadline, !deadline.isEmpty {
+            descriptionParts.append("Deadline: \(deadline)")
+        }
+
+        let status: Status = actionItem.isCompleted ? .completed : .open
+        return TaskItem(
+            title: actionItem.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Untitled action item"
+                : actionItem.task,
+            description: descriptionParts.joined(separator: "\n"),
+            status: status,
+            workDate: dueDate(from: deadline) ?? meeting.date,
+            completedDate: status == .completed ? now : nil,
+            sourceMeetingID: meeting.id,
+            sourceActionItemID: actionItem.id,
+            owner: actionItem.owner,
+            createdDate: now,
+            modifiedDate: now
+        )
+    }
+
+    static func mergingActionLinkedTasks(existing: [TaskItem], meeting: Meeting, now: Date = Date()) -> [TaskItem] {
+        var merged = existing
+        let meetingLinkedIndexes = linkedIndexes(for: meeting.id, in: merged)
+        let linkedIndexesByKey = linkIndexes(in: merged)
+        var usedIndexes = Set<Int>()
+
+        for actionItem in meeting.summary.actionItems {
+            guard !actionItem.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let key = linkKey(meetingID: meeting.id, actionItemID: actionItem.id)
+            let desired = actionLinkedTask(for: actionItem, meeting: meeting, now: now)
+
+            if let existingIndex = linkedIndexesByKey[key], !usedIndexes.contains(existingIndex) {
+                merged[existingIndex] = merged[existingIndex].refreshingSourceFields(from: desired, now: now)
+                usedIndexes.insert(existingIndex)
+            } else if let existingIndex = meetingLinkedIndexes.first(where: { !usedIndexes.contains($0) }) {
+                merged[existingIndex] = merged[existingIndex].refreshingSourceFields(from: desired, now: now)
+                usedIndexes.insert(existingIndex)
+            } else {
+                merged.insert(desired, at: 0)
+            }
+        }
+
+        for existingIndex in meetingLinkedIndexes where !usedIndexes.contains(existingIndex) {
+            merged[existingIndex] = merged[existingIndex].unlinkedFromSource(now: now)
+        }
+
+        return merged
+    }
+
+    private func refreshingSourceFields(from source: TaskItem, now: Date) -> TaskItem {
+        var refreshed = self
+        refreshed.title = source.title
+        refreshed.description = source.description
+        refreshed.workDate = source.workDate
+        refreshed.sourceMeetingID = source.sourceMeetingID
+        refreshed.sourceActionItemID = source.sourceActionItemID
+        refreshed.owner = source.owner
+        if refreshed != self {
+            refreshed.modifiedDate = now
+        }
+        return refreshed
+    }
+
+    private func unlinkedFromSource(now: Date) -> TaskItem {
+        guard sourceMeetingID != nil || sourceActionItemID != nil else { return self }
+        var unlinked = self
+        unlinked.sourceMeetingID = nil
+        unlinked.sourceActionItemID = nil
+        unlinked.modifiedDate = now
+        return unlinked
+    }
+
+    static func linkKey(meetingID: UUID, actionItemID: String) -> String {
+        "\(meetingID.uuidString.lowercased())|\(actionItemID)"
+    }
+
+    private static func linkKey(for task: TaskItem) -> String? {
+        guard let sourceMeetingID = task.sourceMeetingID,
+              let sourceActionItemID = task.sourceActionItemID else { return nil }
+        return linkKey(meetingID: sourceMeetingID, actionItemID: sourceActionItemID)
+    }
+
+    private static func linkIndexes(in tasks: [TaskItem]) -> [String: Int] {
+        var indexes: [String: Int] = [:]
+        for (index, task) in tasks.enumerated() {
+            guard let key = linkKey(for: task), indexes[key] == nil else { continue }
+            indexes[key] = index
+        }
+        return indexes
+    }
+
+    private static func linkedIndexes(for meetingID: UUID, in tasks: [TaskItem]) -> [Int] {
+        tasks.indices.filter { tasks[$0].sourceMeetingID == meetingID }
+    }
+
+    private static func dueDate(from deadline: String?) -> Date? {
+        guard let deadline, !deadline.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: deadline) {
+            return date
+        }
+
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        if let date = dayFormatter.date(from: deadline) {
+            return date
+        }
+
+        let mediumFormatter = DateFormatter()
+        mediumFormatter.locale = Locale(identifier: "en_US_POSIX")
+        mediumFormatter.dateStyle = .medium
+        mediumFormatter.timeStyle = .none
+        mediumFormatter.isLenient = true
+        return mediumFormatter.date(from: deadline)
+    }
+}
+
+struct TaskTodoSplit: Equatable {
+    var todos: [TodoItem]
+    var tasks: [TaskItem]
+}
+
+enum TaskTodoClassifier {
+    static func splitLegacyTodos(_ todos: [TodoItem]) -> TaskTodoSplit {
+        var keptTodos: [TodoItem] = []
+        var promotedTasks: [TaskItem] = []
+
+        for todo in todos {
+            if shouldPromoteToTask(todo) {
+                promotedTasks.append(TaskItem.fromLegacyTodo(todo))
+            } else {
+                keptTodos.append(todo)
+            }
+        }
+
+        return TaskTodoSplit(todos: keptTodos, tasks: promotedTasks)
+    }
+
+    static func shouldPromoteToTask(_ todo: TodoItem) -> Bool {
+        if todo.isActionLinked {
+            return true
+        }
+        if hasMeaningfulDescription(todo.description) {
+            return true
+        }
+        if todo.completed && (todo.dueDate == nil || !todo.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+            return true
+        }
+        return false
+    }
+
+    private static func hasMeaningfulDescription(_ description: String) -> Bool {
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("\n") {
+            return true
+        }
+        return trimmed.count >= 40
+    }
+}

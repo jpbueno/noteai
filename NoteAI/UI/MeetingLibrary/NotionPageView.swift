@@ -209,7 +209,7 @@ struct NotionPageView: View {
             editableTextSection(.openQuestions)
             verticalSpace()
 
-            linkedTodosSection
+            linkedTasksSection
 
             // Follow-up email section
             followUpSection
@@ -399,46 +399,46 @@ struct NotionPageView: View {
     }
 
     @ViewBuilder
-    private var linkedTodosSection: some View {
-        let linkedTodos = meetingManager?.todosLinked(to: meeting.id) ?? []
-        if !linkedTodos.isEmpty {
-            heading2("Linked Todos")
+    private var linkedTasksSection: some View {
+        let linkedTasks = meetingManager?.tasksLinked(to: meeting.id) ?? []
+        if !linkedTasks.isEmpty {
+            heading2("Linked Tasks")
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(linkedTodos) { todo in
-                    linkedTodoRow(todo)
+                ForEach(linkedTasks) { task in
+                    linkedTaskRow(task)
                 }
             }
             verticalSpace()
         }
     }
 
-    private func linkedTodoRow(_ todo: TodoItem) -> some View {
+    private func linkedTaskRow(_ task: TaskItem) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Button {
-                meetingManager?.toggleTodoCompletion(todo)
+                meetingManager?.toggleTaskCompletion(task)
             } label: {
-                Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
+                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
+                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
                     .padding(.top, 1)
             }
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
+                Text(task.title.isEmpty ? "Untitled task" : task.title)
                     .font(.system(size: Theme.bodySize))
-                    .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
-                    .strikethrough(todo.completed, color: Theme.textTertiary)
+                    .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
+                    .strikethrough(task.isCompleted, color: Theme.textTertiary)
                     .lineSpacing(4)
 
                 HStack(spacing: 8) {
-                    if let owner = todo.owner {
+                    if let owner = task.owner {
                         Text("@\(owner)")
                             .font(.system(size: Theme.smallSize))
                             .foregroundStyle(Theme.textSecondary)
                     }
-                    if let label = todo.dueDateLabel {
-                        Text(label)
+                    if let workDate = task.workDate {
+                        Text(workDate.formatted(date: .abbreviated, time: .omitted))
                             .font(.system(size: Theme.smallSize))
                             .foregroundStyle(Theme.textTertiary)
                     }

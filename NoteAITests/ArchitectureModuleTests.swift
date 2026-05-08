@@ -421,7 +421,45 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(summary.metadata(for: .topics).modifiedAt, regeneratedAt)
     }
 
-    func testActionLinkedTodoMergeUsesSourceFieldsWithoutDuplicating() {
+    func testLegacyTodosAreConservativelySplitIntoTodosAndTasks() {
+        let calendar = Calendar(identifier: .gregorian)
+        let dueDate = calendar.date(from: DateComponents(year: 2026, month: 5, day: 8))
+        let lightweightTodo = TodoItem(
+            title: "Ping Itay on Crusoe's Dynamo work",
+            dueDate: dueDate,
+            createdDate: Date(timeIntervalSince1970: 100),
+            modifiedDate: Date(timeIntervalSince1970: 100)
+        )
+        let durableWork = TodoItem(
+            title: "Completed Nscale 1:1 follow-up",
+            description: "Captured the gateway routing decision, NATS implications, and session-affinity context for reuse in the next T5T.",
+            completed: true,
+            createdDate: Date(timeIntervalSince1970: 200),
+            modifiedDate: Date(timeIntervalSince1970: 300)
+        )
+        let actionLinked = TodoItem(
+            title: "Send customer benchmark notes",
+            description: "From meeting: Nscale 1:1\nOwner: JP",
+            sourceMeetingID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            sourceActionItemID: "action-1",
+            owner: "JP",
+            createdDate: Date(timeIntervalSince1970: 400),
+            modifiedDate: Date(timeIntervalSince1970: 400)
+        )
+
+        let split = TaskTodoClassifier.splitLegacyTodos([lightweightTodo, durableWork, actionLinked])
+
+        XCTAssertEqual(split.todos.map(\.id), [lightweightTodo.id])
+        XCTAssertEqual(split.tasks.map(\.id), [durableWork.id, actionLinked.id])
+        XCTAssertEqual(split.tasks[0].status, .completed)
+        XCTAssertEqual(split.tasks[0].completedDate, durableWork.modifiedDate)
+        XCTAssertTrue(split.tasks[0].description.contains("gateway routing decision"))
+        XCTAssertEqual(split.tasks[1].sourceMeetingID, actionLinked.sourceMeetingID)
+        XCTAssertEqual(split.tasks[1].sourceActionItemID, actionLinked.sourceActionItemID)
+        XCTAssertEqual(split.tasks[1].owner, "JP")
+    }
+
+    func testActionLinkedTaskMergeUsesSourceFieldsWithoutDuplicating() {
         let meetingID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let action = ActionItem(task: "Send pricing notes", owner: "Ana", deadline: "2026-05-08")
         let meeting = Meeting(
@@ -434,18 +472,19 @@ final class ArchitectureModuleTests: XCTestCase {
         )
         let now = Date(timeIntervalSince1970: 300)
 
-        let firstMerge = TodoItem.mergingActionLinkedTodos(existing: [], meeting: meeting, now: now)
-        let secondMerge = TodoItem.mergingActionLinkedTodos(existing: firstMerge, meeting: meeting, now: now.addingTimeInterval(60))
+        let firstMerge = TaskItem.mergingActionLinkedTasks(existing: [], meeting: meeting, now: now)
+        let secondMerge = TaskItem.mergingActionLinkedTasks(existing: firstMerge, meeting: meeting, now: now.addingTimeInterval(60))
 
         XCTAssertEqual(firstMerge.count, 1)
         XCTAssertEqual(secondMerge.count, 1)
         XCTAssertEqual(firstMerge[0].title, "Send pricing notes")
+        XCTAssertTrue(firstMerge[0].description.contains("From meeting: Customer Sync"))
         XCTAssertEqual(firstMerge[0].sourceMeetingID, meetingID)
         XCTAssertEqual(firstMerge[0].sourceActionItemID, action.id)
         XCTAssertEqual(firstMerge[0].owner, "Ana")
     }
 
-    func testActionLinkedTodoMergeRefreshesExistingSourceFieldsWithoutResettingCompletion() throws {
+    func testActionLinkedTaskMergeRefreshesExistingSourceFieldsWithoutResettingCompletion() throws {
         let meetingID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
         let originalAction = ActionItem(task: "Send pricing notes", owner: "Ana", deadline: "2026-05-08")
         let refreshedAction = ActionItem(
@@ -454,13 +493,14 @@ final class ArchitectureModuleTests: XCTestCase {
             deadline: "2026-05-15",
             isCompleted: false
         )
-        let existingTodoID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
-        let existingTodo = TodoItem(
-            id: existingTodoID,
+        let existingTaskID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let existingTask = TaskItem(
+            id: existingTaskID,
             title: "Send pricing notes",
             description: "From meeting: Customer Sync\nOwner: Ana\nDeadline: 2026-05-08",
-            completed: true,
-            dueDate: Date(timeIntervalSince1970: 0),
+            status: .completed,
+            workDate: Date(timeIntervalSince1970: 0),
+            completedDate: Date(timeIntervalSince1970: 110),
             sourceMeetingID: meetingID,
             sourceActionItemID: originalAction.id,
             owner: "Ana",
@@ -476,36 +516,37 @@ final class ArchitectureModuleTests: XCTestCase {
             summary: MeetingSummary(actionItems: [refreshedAction], wasSummarized: true)
         )
 
-        let merged = TodoItem.mergingActionLinkedTodos(
-            existing: [existingTodo],
+        let merged = TaskItem.mergingActionLinkedTasks(
+            existing: [existingTask],
             meeting: meeting,
             now: Date(timeIntervalSince1970: 200)
         )
 
         XCTAssertEqual(merged.count, 1)
-        XCTAssertEqual(merged[0].id, existingTodoID)
+        XCTAssertEqual(merged[0].id, existingTaskID)
         XCTAssertEqual(merged[0].title, "Send updated pricing notes")
         XCTAssertTrue(merged[0].description.contains("Owner: Bo"))
         XCTAssertTrue(merged[0].description.contains("Deadline: 2026-05-15"))
         XCTAssertEqual(merged[0].owner, "Bo")
         XCTAssertEqual(merged[0].sourceActionItemID, refreshedAction.id)
-        XCTAssertTrue(merged[0].completed)
+        XCTAssertEqual(merged[0].status, .completed)
+        XCTAssertEqual(merged[0].completedDate, Date(timeIntervalSince1970: 110))
         XCTAssertEqual(merged[0].createdDate, Date(timeIntervalSince1970: 100))
         XCTAssertEqual(merged[0].modifiedDate, Date(timeIntervalSince1970: 200))
 
-        let dueDate = try XCTUnwrap(merged[0].dueDate)
-        let components = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: dueDate)
+        let workDate = try XCTUnwrap(merged[0].workDate)
+        let components = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: workDate)
         XCTAssertEqual(components.year, 2026)
         XCTAssertEqual(components.month, 5)
         XCTAssertEqual(components.day, 15)
     }
 
-    func testRemovedRegeneratedActionItemsAreUnlinkedWithoutDeletingTodo() {
+    func testRemovedRegeneratedActionItemsAreUnlinkedWithoutDeletingTask() {
         let meetingID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
         let staleAction = ActionItem(task: "Publish stale notes", owner: "Ana", deadline: "2026-05-08")
-        let existingTodoID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
-        let existingTodo = TodoItem(
-            id: existingTodoID,
+        let existingTaskID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let existingTask = TaskItem(
+            id: existingTaskID,
             title: "Publish stale notes",
             description: "From meeting: Customer Sync",
             sourceMeetingID: meetingID,
@@ -523,14 +564,14 @@ final class ArchitectureModuleTests: XCTestCase {
             summary: MeetingSummary(actionItems: [], wasSummarized: true)
         )
 
-        let merged = TodoItem.mergingActionLinkedTodos(
-            existing: [existingTodo],
+        let merged = TaskItem.mergingActionLinkedTasks(
+            existing: [existingTask],
             meeting: meeting,
             now: Date(timeIntervalSince1970: 200)
         )
 
         XCTAssertEqual(merged.count, 1)
-        XCTAssertEqual(merged[0].id, existingTodoID)
+        XCTAssertEqual(merged[0].id, existingTaskID)
         XCTAssertNil(merged[0].sourceMeetingID)
         XCTAssertNil(merged[0].sourceActionItemID)
         XCTAssertEqual(merged[0].modifiedDate, Date(timeIntervalSince1970: 200))
@@ -732,10 +773,12 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertTrue(source.contains("case t5tList"))
         XCTAssertTrue(source.contains("case notesList"))
+        XCTAssertTrue(source.contains("case tasksList"))
         XCTAssertTrue(source.contains("case todosList"))
         XCTAssertTrue(source.contains("case meetingsList"))
         XCTAssertTrue(source.contains("selectionTarget: .t5tList"))
         XCTAssertTrue(source.contains("notesSidebarSection(selectionTarget: .notesList"))
+        XCTAssertTrue(source.contains("selectionTarget: .tasksList"))
         XCTAssertTrue(source.contains("selectionTarget: .todosList"))
         XCTAssertTrue(source.contains("selectionTarget: .meetingsList"))
         XCTAssertTrue(source.contains("private func sidebarSectionHeaderButton"))
@@ -749,12 +792,46 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("t5tReportsListPage"))
         XCTAssertTrue(source.contains("case .notesList = selection"))
         XCTAssertTrue(source.contains("notesListPage"))
+        XCTAssertTrue(source.contains("case .tasksList = selection"))
+        XCTAssertTrue(source.contains("tasksListPage"))
         XCTAssertTrue(source.contains("case .todosList = selection"))
         XCTAssertTrue(source.contains("todosListPage"))
         XCTAssertTrue(source.contains("case .meetingsList = selection"))
         XCTAssertTrue(source.contains("meetingsListPage"))
         XCTAssertTrue(source.contains("private func collectionListPage"))
         XCTAssertTrue(source.contains("private func collectionListRow"))
+    }
+
+    func testMacOSTasksTrackerHasSeparateSidebarSectionAndCreateAction() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("case task(UUID)"))
+        XCTAssertTrue(source.contains("sidebarSection(.tasks, title: \"Tasks\", icon: \"checklist\", selectionTarget: .tasksList, action: createNewTask"))
+        XCTAssertTrue(source.contains("visibleTasks"))
+        XCTAssertTrue(source.contains("taskSidebarRow(task: task"))
+        XCTAssertTrue(source.contains("emptyHint(\"No tasks yet\""))
+        XCTAssertTrue(source.contains("private func createNewTask()"))
+        XCTAssertTrue(source.contains("let task = meetingManager.createTask()"))
+        XCTAssertTrue(source.contains("selection = .task(task.id)"))
+    }
+
+    func testMacOSTasksTrackerRendersListPageAndTaskDetailEditor() throws {
+        let source = try meetingLibrarySource()
+        let detailSource = try taskDetailSource()
+
+        XCTAssertTrue(source.contains("private var tasksListPage: some View"))
+        XCTAssertTrue(source.contains("eyebrow: \"Tasks\""))
+        XCTAssertTrue(source.contains("title: \"Tasks\""))
+        XCTAssertTrue(source.contains("durable work records for T5T"))
+        XCTAssertTrue(source.contains("collectionListRow("))
+        XCTAssertTrue(source.contains("selection = .task(task.id)"))
+        XCTAssertTrue(source.contains("TaskDetailView("))
+        XCTAssertTrue(detailSource.contains("struct TaskDetailView: View"))
+        XCTAssertTrue(detailSource.contains("@Binding var task: TaskItem"))
+        XCTAssertTrue(detailSource.contains("meetingManager.updateTask(updated)"))
+        XCTAssertTrue(detailSource.contains("meetingManager.toggleTaskCompletion(task)"))
+        XCTAssertTrue(detailSource.contains("meetingManager.deleteTask(task)"))
+        XCTAssertTrue(detailSource.contains("WORK DATE"))
     }
 
     func testNoteSpaceHeadersExposeRenameAndDeleteContextMenuForCustomSpaces() throws {
@@ -777,44 +854,68 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("todo.completed.toggle()"))
     }
 
-    func testChatAssistantCanCreateTodosWithoutCreatingTaskLikeNotes() throws {
+    func testT5TComposerUsesTasksAsPrimarySourceInput() throws {
+        let source = try t5tComposerSource()
+        let selectorSource = try taskSelectorSource()
+        let engineSource = try summarizationEngineSource()
+
+        XCTAssertTrue(source.contains("@State private var selectedTaskIDs"))
+        XCTAssertTrue(source.contains("meetingManager.tasksInRange"))
+        XCTAssertTrue(source.contains("TaskSelectorView("))
+        XCTAssertTrue(source.contains("taskIDs: Array(selectedTaskIDs)"))
+        XCTAssertTrue(source.contains("Text(\"Source Tasks\")"))
+        XCTAssertFalse(source.contains("Text(\"Source Todos\")"))
+        XCTAssertTrue(selectorSource.contains("struct TaskSelectorView"))
+        XCTAssertTrue(selectorSource.contains("let tasks: [TaskItem]"))
+        XCTAssertTrue(engineSource.contains("func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = []"))
+        XCTAssertTrue(engineSource.contains("TASKS:"))
+        XCTAssertFalse(engineSource.contains("TODOS:"))
+    }
+
+    func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {
         let source = try chatManagerSource()
 
-        XCTAssertTrue(source.contains("- create_todo: {\"action\":\"create_todo\", \"title\":\"...\", \"description\":\"...\", \"due_date\":\"YYYY-MM-DD or ISO-8601\"}"))
-        XCTAssertTrue(source.contains("task/todo requests"))
-        XCTAssertTrue(source.contains("use create_todo (NOT create_note)"))
+        XCTAssertTrue(source.contains("- create_task: {\"action\":\"create_task\", \"title\":\"...\", \"description\":\"...\", \"status\":\"open|completed\", \"work_date\":\"YYYY-MM-DD or ISO-8601\"}"))
+        XCTAssertTrue(source.contains("- create_todo: {\"action\":\"create_todo\", \"title\":\"...\", \"due_date\":\"YYYY-MM-DD or ISO-8601\"}"))
+        XCTAssertTrue(source.contains("task requests use create_task"))
+        XCTAssertTrue(source.contains("todo requests use create_todo"))
+        XCTAssertTrue(source.contains("use create_task or create_todo (NOT create_note)"))
+        XCTAssertTrue(source.contains("case \"create_task\""))
+        XCTAssertTrue(source.contains("manager.createTask(title: title, description: description, status: status, workDate: workDate)"))
         XCTAssertTrue(source.contains("case \"create_todo\""))
-        XCTAssertTrue(source.contains("manager.createTodo(title: title, description: description, dueDate: dueDate)"))
+        XCTAssertTrue(source.contains("manager.createTodo(title: title, dueDate: dueDate)"))
         XCTAssertTrue(source.contains("ISO8601DateFormatter"))
         XCTAssertTrue(source.contains("parseTodoDueDate"))
         XCTAssertTrue(source.contains("Untitled todo"))
+        XCTAssertTrue(source.contains("- list_tasks: {\"action\":\"list_tasks\""))
         XCTAssertTrue(source.contains("- list_todos: {\"action\":\"list_todos\""))
+        XCTAssertTrue(source.contains("case \"list_tasks\""))
         XCTAssertTrue(source.contains("case \"list_todos\""))
-        XCTAssertTrue(source.contains("handleLocalTodoListRequest"))
+        XCTAssertTrue(source.contains("handleLocalTaskOrTodoListRequest"))
     }
 
-    func testAssistantTodoListActionFormatsCopyReadyTitleAndDescription() throws {
+    func testAssistantTaskListActionFormatsCopyReadyTitleAndDescription() throws {
         let calendar = Calendar(identifier: .gregorian)
         let afterDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 13)))
         let olderDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 10)))
         let newerDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 14)))
 
-        let included = TodoItem(
+        let included = TaskItem(
             title: "Drive NSScale routing alignment",
             description: "Summarize the NATS decision and gateway/session-affinity implications for the architecture doc.",
-            dueDate: newerDate,
+            workDate: newerDate,
             createdDate: olderDate,
             modifiedDate: newerDate
         )
-        let excluded = TodoItem(
+        let excluded = TaskItem(
             title: "Old reminder",
             description: "Should not appear in the copy-ready list.",
             createdDate: olderDate,
             modifiedDate: olderDate
         )
 
-        let filters = AssistantTodoListFormatter.Filters(after: afterDate, status: .all)
-        let output = AssistantTodoListFormatter.format(todos: [included, excluded], filters: filters)
+        let filters = AssistantTaskListFormatter.Filters(after: afterDate, status: .all)
+        let output = AssistantTaskListFormatter.format(tasks: [included, excluded], filters: filters)
 
         XCTAssertTrue(output.contains("Tasks after Mar 13, 2026"))
         XCTAssertTrue(output.contains("- Drive NSScale routing alignment"))
@@ -824,27 +925,29 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("Description:"))
     }
 
-    func testAssistantTodoListActionGroupsCopyReadyTasksByDate() throws {
+    func testAssistantTaskListActionGroupsCopyReadyTasksByDate() throws {
         let calendar = Calendar(identifier: .gregorian)
         let march13 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 13)))
         let march14 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 14)))
 
-        let first = TodoItem(
+        let first = TaskItem(
             title: "Created Dynamo KBYG Guide",
             description: "Prepared the full product guide for GTC 2026 workshop follow-up.",
+            workDate: march13,
             createdDate: march13,
             modifiedDate: march13
         )
-        let second = TodoItem(
+        let second = TaskItem(
             title: "Reviewed NSScale routing plan",
             description: "Captured gateway and session-affinity alignment for reuse.",
+            workDate: march14,
             createdDate: march14,
             modifiedDate: march14
         )
 
-        let output = AssistantTodoListFormatter.format(
-            todos: [second, first],
-            filters: AssistantTodoListFormatter.Filters(after: march13, status: .all)
+        let output = AssistantTaskListFormatter.format(
+            tasks: [second, first],
+            filters: AssistantTaskListFormatter.Filters(after: march13, status: .all)
         )
 
         XCTAssertTrue(output.contains("""
@@ -860,8 +963,8 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("Description:"))
     }
 
-    func testAssistantTodoListActionParsesSlashDateFilter() throws {
-        let filters = AssistantTodoListFormatter.filters(from: [
+    func testAssistantTaskListActionParsesSlashDateFilter() throws {
+        let filters = AssistantTaskListFormatter.filters(from: [
             "after": "03/13/2026",
             "include_completed": true
         ])
@@ -873,8 +976,8 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(filters.status, .all)
     }
 
-    func testAssistantTodoListActionParsesNaturalLanguageAfterDate() throws {
-        let filters = AssistantTodoListFormatter.filters(fromPrompt: "list all my tasks after 03/13/2026 so that I can copy them to a google doc")
+    func testAssistantTaskListActionParsesNaturalLanguageAfterDate() throws {
+        let filters = AssistantTaskListFormatter.filters(fromPrompt: "list all my tasks after 03/13/2026 so that I can copy them to a google doc")
 
         let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
         XCTAssertEqual(components.year, 2026)
@@ -883,8 +986,8 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(filters.status, .all)
     }
 
-    func testAssistantTodoListActionParsesNaturalLanguageSinceDate() throws {
-        let filters = AssistantTodoListFormatter.filters(fromPrompt: "List my tasks since 03/13/2026")
+    func testAssistantTaskListActionParsesNaturalLanguageSinceDate() throws {
+        let filters = AssistantTaskListFormatter.filters(fromPrompt: "List my tasks since 03/13/2026")
 
         let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
         XCTAssertEqual(components.year, 2026)
@@ -951,11 +1054,39 @@ final class ArchitectureModuleTests: XCTestCase {
         return try String(contentsOf: todoDetailFile, encoding: .utf8)
     }
 
+    private func taskDetailSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let taskDetailFile = projectRoot.appendingPathComponent("NoteAI/UI/Tasks/TaskDetailView.swift")
+        return try String(contentsOf: taskDetailFile, encoding: .utf8)
+    }
+
     private func chatManagerSource() throws -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let chatManagerFile = projectRoot.appendingPathComponent("NoteAI/UI/Chat/ChatManager.swift")
         return try String(contentsOf: chatManagerFile, encoding: .utf8)
+    }
+
+    private func t5tComposerSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let composerFile = projectRoot.appendingPathComponent("NoteAI/UI/T5T/T5TComposerView.swift")
+        return try String(contentsOf: composerFile, encoding: .utf8)
+    }
+
+    private func taskSelectorSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let selectorFile = projectRoot.appendingPathComponent("NoteAI/UI/T5T/TodoSelectorView.swift")
+        return try String(contentsOf: selectorFile, encoding: .utf8)
+    }
+
+    private func summarizationEngineSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let engineFile = projectRoot.appendingPathComponent("NoteAI/Summarization/SummarizationEngine.swift")
+        return try String(contentsOf: engineFile, encoding: .utf8)
     }
 
     private func settingsSource() throws -> String {

@@ -824,6 +824,42 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("Description:"))
     }
 
+    func testAssistantTodoListActionGroupsCopyReadyTasksByDate() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let march13 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 13)))
+        let march14 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 14)))
+
+        let first = TodoItem(
+            title: "Created Dynamo KBYG Guide",
+            description: "Prepared the full product guide for GTC 2026 workshop follow-up.",
+            createdDate: march13,
+            modifiedDate: march13
+        )
+        let second = TodoItem(
+            title: "Reviewed NSScale routing plan",
+            description: "Captured gateway and session-affinity alignment for reuse.",
+            createdDate: march14,
+            modifiedDate: march14
+        )
+
+        let output = AssistantTodoListFormatter.format(
+            todos: [second, first],
+            filters: AssistantTodoListFormatter.Filters(after: march13, status: .all)
+        )
+
+        XCTAssertTrue(output.contains("""
+        - 03/13/2026
+          - Created Dynamo KBYG Guide
+            Prepared the full product guide for GTC 2026 workshop follow-up.
+        - 03/14/2026
+          - Reviewed NSScale routing plan
+            Captured gateway and session-affinity alignment for reuse.
+        """))
+        XCTAssertFalse(output.contains("(completed"))
+        XCTAssertFalse(output.contains("Title:"))
+        XCTAssertFalse(output.contains("Description:"))
+    }
+
     func testAssistantTodoListActionParsesSlashDateFilter() throws {
         let filters = AssistantTodoListFormatter.filters(from: [
             "after": "03/13/2026",
@@ -839,6 +875,16 @@ final class ArchitectureModuleTests: XCTestCase {
 
     func testAssistantTodoListActionParsesNaturalLanguageAfterDate() throws {
         let filters = AssistantTodoListFormatter.filters(fromPrompt: "list all my tasks after 03/13/2026 so that I can copy them to a google doc")
+
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 3)
+        XCTAssertEqual(components.day, 13)
+        XCTAssertEqual(filters.status, .all)
+    }
+
+    func testAssistantTodoListActionParsesNaturalLanguageSinceDate() throws {
+        let filters = AssistantTodoListFormatter.filters(fromPrompt: "List my tasks since 03/13/2026")
 
         let components = Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(filters.after))
         XCTAssertEqual(components.year, 2026)

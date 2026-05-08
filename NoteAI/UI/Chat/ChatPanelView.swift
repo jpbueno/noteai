@@ -194,9 +194,37 @@ struct ChatPanelView: View {
                     }
                 }
             }
+
+            HStack {
+                Spacer(minLength: 0)
+                assistantMessageCopyButton(content)
+            }
         }
         .padding(10)
         .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 10))
+        .contextMenu {
+            Button {
+                copyAssistantMessageContent(content)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    private func assistantMessageCopyButton(_ content: String) -> some View {
+        Button {
+            copyAssistantMessageContent(content)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+                .labelStyle(.iconOnly)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Theme.contentBG.opacity(0.55), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Copy assistant response")
     }
 
     private func sendMessage() {
@@ -219,6 +247,11 @@ struct ChatPanelView: View {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
         }
+    }
+
+    private func copyAssistantMessageContent(_ content: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(content, forType: .string)
     }
 
     private func extractSourceLinks(from content: String) -> [SourceChip] {

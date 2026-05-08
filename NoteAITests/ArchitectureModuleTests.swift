@@ -23,6 +23,23 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("TextField(\"Ask anything...\", text: $inputText)\n"))
     }
 
+    func testChatPanelAssistantMessagesExposeCopyAction() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/Chat/ChatPanelView.swift"))
+
+        XCTAssertTrue(source.contains("copyAssistantMessageContent(content)"))
+        XCTAssertTrue(source.contains("assistantMessageCopyButton(content)"))
+        XCTAssertTrue(source.contains("private func assistantMessageCopyButton(_ content: String) -> some View"))
+        XCTAssertTrue(source.contains("NSPasteboard.general.setString(content, forType: .string)"))
+        XCTAssertTrue(source.contains("Label(\"Copy\", systemImage: \"doc.on.doc\")"))
+        XCTAssertTrue(source.contains(".contextMenu"))
+        XCTAssertTrue(source.contains("static let messageTextSelectionEnabled = false"))
+
+        let messageTextRange = try XCTUnwrap(source.range(of: "Text(content)"))
+        let copyButtonRange = try XCTUnwrap(source.range(of: "assistantMessageCopyButton(content)"))
+        XCTAssertLessThan(messageTextRange.lowerBound, copyButtonRange.lowerBound)
+    }
+
     func testProcessTapProviderTranslatesPIDToCoreAudioProcessObjectID() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/ProcessTapProvider.swift"))

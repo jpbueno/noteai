@@ -45,6 +45,18 @@ final class MeetingManager: ObservableObject {
         }
     }
 
+    // Tasks state (durable work records for meeting actions, AI task lists, and T5T)
+    @Published var tasks: [TaskItem] = []
+
+    var filteredTasks: [TaskItem] {
+        guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return tasks }
+        let query = searchQuery.lowercased()
+        return tasks.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.description.lowercased().contains(query)
+        }
+    }
+
     // T5T state
     @Published var t5tReports: [T5TReport] = []
     @Published var t5tConfig: T5TConfig = .empty
@@ -142,6 +154,7 @@ final class MeetingManager: ObservableObject {
         loadNotes()
         loadT5TData()
         loadTodos()
+        loadTasks()
         refreshOnboardingChecklistState()
         setupToggleListener()
         setupTranscriptionPipeline()
@@ -327,7 +340,7 @@ final class MeetingManager: ObservableObject {
             do {
                 try meetingStore.save(meeting: meeting)
                 meetings.insert(meeting, at: 0)
-                syncActionItemsToTodos(for: meeting)
+                syncActionItemsToTasks(for: meeting)
             } catch {
                 print("Failed to save meeting: \(error)")
             }
@@ -348,8 +361,8 @@ final class MeetingManager: ObservableObject {
         // Persist the change
         do {
             try meetingStore.save(meeting: meetings[index])
-            syncActionItemsToTodos(for: meetings[index])
-            syncLinkedTodoCompletion(
+            syncActionItemsToTasks(for: meetings[index])
+            syncLinkedTaskCompletion(
                 meetingID: meetingId,
                 actionItemID: actionItemId,
                 completed: completed
@@ -391,7 +404,7 @@ final class MeetingManager: ObservableObject {
             meetings[index] = updated
         }
 
-        syncActionItemsToTodos(for: updated)
+        syncActionItemsToTasks(for: updated)
 
         debugLog("meeting updated and saved")
         return updated
@@ -411,7 +424,7 @@ final class MeetingManager: ObservableObject {
         }
 
         if section == .actionItems {
-            syncActionItemsToTodos(for: updated)
+            syncActionItemsToTasks(for: updated)
         }
 
         debugLog("regenerated section \(section.rawValue) and saved")
@@ -433,7 +446,7 @@ final class MeetingManager: ObservableObject {
                 meetings[index] = updated
             }
             if section == .actionItems {
-                syncActionItemsToTodos(for: updated)
+                syncActionItemsToTasks(for: updated)
             }
         } catch {
             print("Failed to save edited summary section: \(error)")
@@ -666,7 +679,6 @@ final class MeetingManager: ObservableObject {
         updated.completed.toggle()
         updated.modifiedDate = Date()
         updateTodo(updated)
-        syncActionItemCompletionFromTodo(updated)
     }
 
     func deleteTodo(_ todo: TodoItem) {
@@ -694,56 +706,142 @@ final class MeetingManager: ObservableObject {
         }
     }
 
-    private func syncActionItemsToTodos(for meeting: Meeting) {
-        let merged = TodoItem.mergingActionLinkedTodos(existing: todos, meeting: meeting)
-        let existingByID = Dictionary(uniqueKeysWithValues: todos.map { ($0.id, $0) })
-        let changedTodos = merged.filter { existingByID[$0.id] != $0 }
-        guard !changedTodos.isEmpty else { return }
+    // MARK: - Tasks
 
+    @discardableResult
+    func createTask(
+        title: String = "",
+        description: String = "",
+        status: TaskItem.Status = .open,
+        workDate: Date? = nil
+    ) -> TaskItem {
+        let now = Date()
+        let task = TaskItem(
+            title: title,
+            description: description,
+            status: status,
+            workDate: workDate,
+            completedDate: status == .completed ? (workDate ?? now) : nil,
+            createdDate: now,
+            modifiedDate: now
+        )
         do {
-            for todo in changedTodos {
-                try meetingStore.saveTodo(todo)
-            }
-            todos = merged
+            try meetingStore.saveTask(task)
+            tasks.insert(task, at: 0)
         } catch {
-            print("Failed to sync action item todos: \(error)")
+            print("Failed to save task: \(error)")
+        }
+        return task
+    }
+
+    func updateTask(_ task: TaskItem) {
+        var updated = task
+        updated.modifiedDate = Date()
+        if updated.status == .completed && updated.completedDate == nil {
+            updated.completedDate = updated.modifiedDate
+        } else if updated.status == .open {
+            updated.completedDate = nil
+        }
+        do {
+            try meetingStore.saveTask(updated)
+            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+                tasks[index] = updated
+            }
+        } catch {
+            print("Failed to update task: \(error)")
         }
     }
 
-    private func syncLinkedTodoCompletion(meetingID: UUID, actionItemID: String, completed: Bool) {
-        for index in todos.indices {
-            guard todos[index].sourceMeetingID == meetingID,
-                  todos[index].sourceActionItemID == actionItemID,
-                  todos[index].completed != completed else { continue }
+    func toggleTaskCompletion(_ task: TaskItem) {
+        var updated = task
+        if updated.status == .completed {
+            updated.status = .open
+            updated.completedDate = nil
+        } else {
+            updated.status = .completed
+            updated.completedDate = Date()
+        }
+        updated.modifiedDate = Date()
+        updateTask(updated)
+        syncActionItemCompletionFromTask(updated)
+    }
 
-            var updated = todos[index]
-            updated.completed = completed
+    func deleteTask(_ task: TaskItem) {
+        do {
+            try meetingStore.deleteTask(id: task.id)
+            tasks.removeAll { $0.id == task.id }
+        } catch {
+            print("Failed to delete task: \(error)")
+        }
+    }
+
+    func tasksInRange(start: Date, end: Date) -> [TaskItem] {
+        tasks.filter { $0.activityDate >= start && $0.activityDate <= end }
+    }
+
+    func tasksLinked(to meetingID: UUID) -> [TaskItem] {
+        tasks.filter { $0.isLinked(to: meetingID) }
+    }
+
+    private func loadTasks() {
+        do {
+            tasks = try meetingStore.fetchAllTasks()
+        } catch {
+            print("Failed to load tasks: \(error)")
+        }
+    }
+
+    private func syncActionItemsToTasks(for meeting: Meeting) {
+        let merged = TaskItem.mergingActionLinkedTasks(existing: tasks, meeting: meeting)
+        let existingByID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        let changedTasks = merged.filter { existingByID[$0.id] != $0 }
+        guard !changedTasks.isEmpty else { return }
+
+        do {
+            for task in changedTasks {
+                try meetingStore.saveTask(task)
+            }
+            tasks = merged
+        } catch {
+            print("Failed to sync action item tasks: \(error)")
+        }
+    }
+
+    private func syncLinkedTaskCompletion(meetingID: UUID, actionItemID: String, completed: Bool) {
+        for index in tasks.indices {
+            guard tasks[index].sourceMeetingID == meetingID,
+                  tasks[index].sourceActionItemID == actionItemID,
+                  tasks[index].isCompleted != completed else { continue }
+
+            var updated = tasks[index]
+            updated.status = completed ? .completed : .open
+            updated.completedDate = completed ? Date() : nil
             updated.modifiedDate = Date()
 
             do {
-                try meetingStore.saveTodo(updated)
-                todos[index] = updated
+                try meetingStore.saveTask(updated)
+                tasks[index] = updated
             } catch {
-                print("Failed to sync linked todo completion: \(error)")
+                print("Failed to sync linked task completion: \(error)")
             }
         }
     }
 
-    private func syncActionItemCompletionFromTodo(_ todo: TodoItem) {
-        guard let sourceMeetingID = todo.sourceMeetingID,
-              let sourceActionItemID = todo.sourceActionItemID,
+    private func syncActionItemCompletionFromTask(_ task: TaskItem) {
+        guard let sourceMeetingID = task.sourceMeetingID,
+              let sourceActionItemID = task.sourceActionItemID,
               let meetingIndex = meetings.firstIndex(where: { $0.id == sourceMeetingID }),
               let actionIndex = meetings[meetingIndex].summary.actionItems.firstIndex(where: { $0.id == sourceActionItemID }),
-              meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted != todo.completed else {
+              meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted != task.isCompleted else {
             return
         }
 
-        meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted = todo.completed
+        meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted = task.isCompleted
 
         do {
             try meetingStore.save(meeting: meetings[meetingIndex])
         } catch {
-            print("Failed to sync todo completion back to action item: \(error)")
+            print("Failed to sync task completion back to action item: \(error)")
         }
     }
 
@@ -753,11 +851,18 @@ final class MeetingManager: ObservableObject {
         LibraryOperations.meetingsInRange(meetings, start: start, end: end)
     }
 
-    func createT5TReport(periodStart: Date, periodEnd: Date, meetingIDs: [UUID], noteIDs: [UUID] = [], todoIDs: [UUID] = []) async throws -> T5TReport {
+    func createT5TReport(
+        periodStart: Date,
+        periodEnd: Date,
+        meetingIDs: [UUID],
+        noteIDs: [UUID] = [],
+        taskIDs: [UUID] = [],
+        todoIDs: [UUID] = []
+    ) async throws -> T5TReport {
         let selectedMeetings = meetings.filter { meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { noteIDs.contains($0.id) }
-        let selectedTodos = todos.filter { todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTodos.isEmpty else {
+        let selectedTasks = tasks.filter { taskIDs.contains($0.id) || todoIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -769,7 +874,7 @@ final class MeetingManager: ObservableObject {
             sections = try await summarizationEngine.generateT5T(
                 meetings: selectedMeetings,
                 notes: selectedNotes,
-                todos: selectedTodos,
+                tasks: selectedTasks,
                 config: t5tConfig,
                 periodStart: periodStart,
                 periodEnd: periodEnd
@@ -788,6 +893,7 @@ final class MeetingManager: ObservableObject {
             periodEnd: periodEnd,
             meetingIDs: meetingIDs,
             noteIDs: noteIDs,
+            taskIDs: taskIDs,
             todoIDs: todoIDs,
             sections: sections,
             status: .draft
@@ -830,8 +936,8 @@ final class MeetingManager: ObservableObject {
     func regenerateT5T(report: T5TReport) async throws -> T5TReport {
         let selectedMeetings = meetings.filter { report.meetingIDs.contains($0.id) }
         let selectedNotes = notes.filter { report.noteIDs.contains($0.id) }
-        let selectedTodos = todos.filter { report.todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTodos.isEmpty else {
+        let selectedTasks = tasks.filter { report.taskIDs.contains($0.id) || report.todoIDs.contains($0.id) }
+        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
             throw T5TError.noMeetingsSelected
         }
 
@@ -843,7 +949,7 @@ final class MeetingManager: ObservableObject {
             sections = try await summarizationEngine.generateT5T(
                 meetings: selectedMeetings,
                 notes: selectedNotes,
-                todos: selectedTodos,
+                tasks: selectedTasks,
                 config: t5tConfig,
                 periodStart: report.periodStart,
                 periodEnd: report.periodEnd

@@ -8,18 +8,21 @@ enum SidebarSelection: Hashable {
     case home
     case t5tList
     case notesList
+    case tasksList
     case todosList
     case meetingsList
     case meeting(UUID)
     case t5tReport(UUID)
     case newT5T
     case note(UUID)
+    case task(UUID)
     case todo(UUID)
 }
 
 private enum SidebarSectionID: Hashable {
     case t5t
     case notes
+    case tasks
     case todos
     case meetings
 }
@@ -350,6 +353,19 @@ struct MeetingLibraryView: View {
                         }
                     }
 
+                    sidebarSection(.tasks, title: "Tasks", icon: "checklist", selectionTarget: .tasksList, action: createNewTask, layout: layout) {
+                        sidebarLimitedContent(
+                            visibleTasks,
+                            expansionID: sidebarExpansionID(for: .tasks),
+                            layout: layout
+                        ) { task in
+                            taskSidebarRow(task: task, layout: layout)
+                        }
+                        if visibleTasks.isEmpty && meetingManager.searchQuery.isEmpty {
+                            emptyHint("No tasks yet", layout: layout)
+                        }
+                    }
+
                     sidebarSection(.todos, title: "Todos", icon: "checkmark.square", selectionTarget: .todosList, action: createNewTodo, layout: layout) {
                         sidebarLimitedContent(
                             visibleTodos,
@@ -424,6 +440,7 @@ struct MeetingLibraryView: View {
         switch section {
         case .t5t: return "t5t"
         case .notes: return "notes"
+        case .tasks: return "tasks"
         case .todos: return "todos"
         case .meetings: return "meetings"
         }
@@ -1015,6 +1032,14 @@ struct MeetingLibraryView: View {
         return sortedPending + sortedCompleted
     }
 
+    private var visibleTasks: [TaskItem] {
+        let open = meetingManager.filteredTasks.filter { !$0.isCompleted }
+        let completed = meetingManager.filteredTasks.filter { $0.isCompleted }
+        let sortedOpen = open.sorted { $0.activityDate > $1.activityDate }
+        let sortedCompleted = completed.sorted { $0.activityDate > $1.activityDate }
+        return sortedOpen + sortedCompleted
+    }
+
     private var visibleNotes: [Note] {
         meetingManager.filteredNotes
     }
@@ -1073,6 +1098,58 @@ struct MeetingLibraryView: View {
         }
     }
 
+    private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View {
+        Button {
+            selection = .task(task.id)
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: layout.bodyFontSize))
+                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(task.title.isEmpty ? "Untitled task" : task.title)
+                        .font(.system(size: layout.bodyFontSize))
+                        .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
+                        .strikethrough(task.isCompleted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if !task.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(task.description.replacingOccurrences(of: "\n", with: " "))
+                            .font(.system(size: layout.tinyFontSize))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(task.isCompleted ? "Done" : "Open")
+                    .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
+                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
+                    .padding(.top, 1)
+            }
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selection == .task(task.id) ? Theme.selectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .contextMenu {
+            Button(task.isCompleted ? "Mark open" : "Mark complete") {
+                meetingManager.toggleTaskCompletion(task)
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                if selection == .task(task.id) { selection = nil }
+                meetingManager.deleteTask(task)
+            }
+        }
+    }
+
     private func dueLabelColor(for todo: TodoItem) -> Color {
         switch todo.dueGroup {
         case .overdue: return Theme.danger
@@ -1115,6 +1192,8 @@ struct MeetingLibraryView: View {
             t5tReportsListPage
         } else if case .notesList = selection {
             notesListPage
+        } else if case .tasksList = selection {
+            tasksListPage
         } else if case .todosList = selection {
             todosListPage
         } else if case .meetingsList = selection {
@@ -1123,6 +1202,13 @@ struct MeetingLibraryView: View {
                   let index = meetingManager.todos.firstIndex(where: { $0.id == id }) {
             TodoDetailView(
                 todo: $meetingManager.todos[index],
+                meetingManager: meetingManager
+            )
+            .id(id)
+        } else if case .task(let id) = selection,
+                  let index = meetingManager.tasks.firstIndex(where: { $0.id == id }) {
+            TaskDetailView(
+                task: $meetingManager.tasks[index],
                 meetingManager: meetingManager
             )
             .id(id)
@@ -1157,6 +1243,31 @@ struct MeetingLibraryView: View {
                 onSelectTodo: { id in selection = .todo(id) },
                 onOnboardingAction: handleOnboardingAction
             )
+        }
+    }
+
+    private var tasksListPage: some View {
+        collectionListPage(
+            eyebrow: "Tasks",
+            title: "Tasks",
+            subtitle: "\(visibleTasks.filter { !$0.isCompleted }.count) open • \(visibleTasks.filter(\.isCompleted).count) completed",
+            isEmpty: visibleTasks.isEmpty,
+            emptyTitle: meetingManager.searchQuery.isEmpty ? "No tasks yet" : "No matching tasks",
+            emptySubtitle: meetingManager.searchQuery.isEmpty
+                ? "Create durable work records for T5T from the sidebar when a todo becomes report-worthy."
+                : "Try a different search term or clear the workspace search."
+        ) {
+            ForEach(visibleTasks) { task in
+                collectionListRow(
+                    icon: task.isCompleted ? "checkmark.circle.fill" : "circle",
+                    tint: task.isCompleted ? Theme.success : Theme.textTertiary,
+                    title: task.title.isEmpty ? "Untitled task" : task.title,
+                    metadata: taskStatusMetadata(task),
+                    detail: task.description.isEmpty ? nil : task.description
+                ) {
+                    selection = .task(task.id)
+                }
+            }
         }
     }
 
@@ -1391,6 +1502,12 @@ struct MeetingLibraryView: View {
         return preview.isEmpty ? nil : preview
     }
 
+    private func taskStatusMetadata(_ task: TaskItem) -> String {
+        let status = task.isCompleted ? "Completed" : "Open"
+        guard let workDate = task.workDate else { return "\(status) • No work date" }
+        return "\(status) • Work date \(workDate.formatted(date: .abbreviated, time: .omitted))"
+    }
+
     private var newT5TPlaceholder: some View {
         VStack(spacing: 12) {
             ProgressView()
@@ -1459,6 +1576,11 @@ struct MeetingLibraryView: View {
     private func createNewTodo() {
         let todo = meetingManager.createTodo()
         selection = .todo(todo.id)
+    }
+
+    private func createNewTask() {
+        let task = meetingManager.createTask()
+        selection = .task(task.id)
     }
 
     private func createNewNote() {

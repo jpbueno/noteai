@@ -875,13 +875,17 @@ final class ArchitectureModuleTests: XCTestCase {
     func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {
         let source = try chatManagerSource()
 
-        XCTAssertTrue(source.contains("- create_task: {\"action\":\"create_task\", \"title\":\"...\", \"description\":\"...\", \"status\":\"open|completed\", \"work_date\":\"YYYY-MM-DD or ISO-8601\"}"))
+        XCTAssertTrue(source.contains("- create_task: {\"action\":\"create_task\", \"title\":\"...\", \"description\":\"...\", \"status\":\"open|completed\", \"work_date\":\"YYYY-MM-DD or ISO-8601\", \"source\""))
+        XCTAssertTrue(source.contains("- create_tasks: {\"action\":\"create_tasks\", \"tasks\""))
         XCTAssertTrue(source.contains("- create_todo: {\"action\":\"create_todo\", \"title\":\"...\", \"due_date\":\"YYYY-MM-DD or ISO-8601\"}"))
         XCTAssertTrue(source.contains("task requests use create_task"))
         XCTAssertTrue(source.contains("todo requests use create_todo"))
+        XCTAssertTrue(source.contains("When converting Outlook email conversations into work items, use create_tasks"))
         XCTAssertTrue(source.contains("use create_task or create_todo (NOT create_note)"))
         XCTAssertTrue(source.contains("case \"create_task\""))
-        XCTAssertTrue(source.contains("manager.createTask(title: title, description: description, status: status, workDate: workDate)"))
+        XCTAssertTrue(source.contains("AssistantTaskActionParser.taskDraft(from: json)"))
+        XCTAssertTrue(source.contains("sourceMetadata: draft.sourceMetadata"))
+        XCTAssertTrue(source.contains("case \"create_tasks\""))
         XCTAssertTrue(source.contains("case \"create_todo\""))
         XCTAssertTrue(source.contains("manager.createTodo(title: title, dueDate: dueDate)"))
         XCTAssertTrue(source.contains("ISO8601DateFormatter"))
@@ -961,6 +965,100 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("(completed"))
         XCTAssertFalse(output.contains("Title:"))
         XCTAssertFalse(output.contains("Description:"))
+    }
+
+    func testTaskItemPreservesOutlookSourceMetadataThroughCodable() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let messageDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 4, day: 8, hour: 10)))
+        let source = TaskItem.SourceMetadata(
+            kind: .email,
+            provider: "outlook",
+            threadID: "thread-123",
+            messageID: "message-456",
+            subject: "Follow up on NSScale routing",
+            sender: "alex@example.com",
+            sentDate: messageDate,
+            url: "https://outlook.office.com/mail/thread-123"
+        )
+        let task = TaskItem(
+            title: "Send routing summary",
+            description: "Alex asked for the latest gateway recommendation.",
+            sourceMetadata: source
+        )
+
+        let decoded = try JSONDecoder().decode(TaskItem.self, from: JSONEncoder().encode(task))
+
+        XCTAssertEqual(decoded.sourceMetadata, source)
+    }
+
+    func testAssistantBulkTaskActionParsesOutlookCandidates() throws {
+        let taskDate = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-04-09T14:30:00Z"))
+        let drafts = AssistantTaskActionParser.taskDrafts(from: [
+            "action": "create_tasks",
+            "tasks": [
+                [
+                    "title": "Send routing summary",
+                    "description": "Alex asked for the latest gateway recommendation.",
+                    "status": "open",
+                    "work_date": "2026-04-09T14:30:00Z",
+                    "source": [
+                        "kind": "email",
+                        "provider": "outlook",
+                        "thread_id": "thread-123",
+                        "message_id": "message-456",
+                        "subject": "Follow up on NSScale routing",
+                        "sender": "alex@example.com",
+                        "date": "2026-04-08T10:00:00Z",
+                        "url": "https://outlook.office.com/mail/thread-123"
+                    ]
+                ]
+            ]
+        ])
+
+        let draft = try XCTUnwrap(drafts.first)
+        XCTAssertEqual(drafts.count, 1)
+        XCTAssertEqual(draft.title, "Send routing summary")
+        XCTAssertEqual(draft.description, "Alex asked for the latest gateway recommendation.")
+        XCTAssertEqual(draft.status, .open)
+        XCTAssertEqual(draft.workDate, taskDate)
+        XCTAssertEqual(draft.sourceMetadata?.kind, .email)
+        XCTAssertEqual(draft.sourceMetadata?.provider, "outlook")
+        XCTAssertEqual(draft.sourceMetadata?.threadID, "thread-123")
+        XCTAssertEqual(draft.sourceMetadata?.messageID, "message-456")
+    }
+
+    func testAssistantTaskListCanIncludeEmailSourceInCopyReadyOutput() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let workDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 4, day: 9)))
+        let messageDate = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-04-08T10:00:00Z"))
+        let task = TaskItem(
+            title: "Send routing summary",
+            description: "Alex asked for the latest gateway recommendation.",
+            workDate: workDate,
+            sourceMetadata: TaskItem.SourceMetadata(
+                kind: .email,
+                provider: "outlook",
+                threadID: "thread-123",
+                messageID: "message-456",
+                subject: "Follow up on NSScale routing",
+                sender: "alex@example.com",
+                sentDate: messageDate,
+                url: "https://outlook.office.com/mail/thread-123"
+            )
+        )
+
+        let output = AssistantTaskListFormatter.format(
+            tasks: [task],
+            filters: AssistantTaskListFormatter.Filters(status: .all, includeSource: true)
+        )
+
+        XCTAssertTrue(output.contains("""
+        - 04/09/2026
+          - Send routing summary
+            Alex asked for the latest gateway recommendation.
+            Source: Outlook email from alex@example.com, "Follow up on NSScale routing" (04/08/2026)
+            Link: https://outlook.office.com/mail/thread-123
+        """))
     }
 
     func testAssistantTaskListActionParsesSlashDateFilter() throws {

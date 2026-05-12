@@ -713,7 +713,8 @@ final class MeetingManager: ObservableObject {
         title: String = "",
         description: String = "",
         status: TaskItem.Status = .open,
-        workDate: Date? = nil
+        workDate: Date? = nil,
+        sourceMetadata: TaskItem.SourceMetadata? = nil
     ) -> TaskItem {
         let now = Date()
         let task = TaskItem(
@@ -722,6 +723,7 @@ final class MeetingManager: ObservableObject {
             status: status,
             workDate: workDate,
             completedDate: status == .completed ? (workDate ?? now) : nil,
+            sourceMetadata: sourceMetadata,
             createdDate: now,
             modifiedDate: now
         )

@@ -229,6 +229,75 @@ struct TaskItem: Identifiable, Codable, Equatable {
         case completed
     }
 
+    enum SourceKind: String, Codable, Equatable {
+        case email
+        case unknown
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            self = SourceKind(rawValue: value) ?? .unknown
+        }
+    }
+
+    struct SourceMetadata: Codable, Equatable {
+        var kind: SourceKind
+        var provider: String?
+        var threadID: String?
+        var messageID: String?
+        var subject: String?
+        var sender: String?
+        var sentDate: Date?
+        var url: String?
+
+        init(
+            kind: SourceKind = .unknown,
+            provider: String? = nil,
+            threadID: String? = nil,
+            messageID: String? = nil,
+            subject: String? = nil,
+            sender: String? = nil,
+            sentDate: Date? = nil,
+            url: String? = nil
+        ) {
+            self.kind = kind
+            self.provider = Self.clean(provider)
+            self.threadID = Self.clean(threadID)
+            self.messageID = Self.clean(messageID)
+            self.subject = Self.clean(subject)
+            self.sender = Self.clean(sender)
+            self.sentDate = sentDate
+            self.url = Self.clean(url)
+        }
+
+        var hasAnyValue: Bool {
+            kind != .unknown ||
+            provider != nil ||
+            threadID != nil ||
+            messageID != nil ||
+            subject != nil ||
+            sender != nil ||
+            sentDate != nil ||
+            url != nil
+        }
+
+        var providerDisplayName: String {
+            switch provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "outlook":
+                return "Outlook"
+            case let provider? where !provider.isEmpty:
+                return provider
+            default:
+                return kind == .email ? "Email" : "Source"
+            }
+        }
+
+        private static func clean(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed?.isEmpty == false ? trimmed : nil
+        }
+    }
+
     let id: UUID
     var title: String
     var description: String
@@ -238,6 +307,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var sourceMeetingID: UUID?
     var sourceActionItemID: String?
     var sourceNoteID: UUID?
+    var sourceMetadata: SourceMetadata?
     var owner: String?
     let createdDate: Date
     var modifiedDate: Date
@@ -252,6 +322,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         sourceMeetingID: UUID? = nil,
         sourceActionItemID: String? = nil,
         sourceNoteID: UUID? = nil,
+        sourceMetadata: SourceMetadata? = nil,
         owner: String? = nil,
         createdDate: Date = Date(),
         modifiedDate: Date = Date()
@@ -265,6 +336,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         self.sourceMeetingID = sourceMeetingID
         self.sourceActionItemID = sourceActionItemID
         self.sourceNoteID = sourceNoteID
+        self.sourceMetadata = sourceMetadata?.hasAnyValue == true ? sourceMetadata : nil
         let trimmedOwner = owner?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.owner = trimmedOwner?.isEmpty == false ? trimmedOwner : nil
         self.createdDate = createdDate

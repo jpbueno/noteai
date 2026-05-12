@@ -27,9 +27,10 @@ final class ChatManager: ObservableObject {
 
     Available actions:
     - create_note: {"action":"create_note", "title":"...", "content":"...", "tags":["..."]}
-    - create_task: {"action":"create_task", "title":"...", "description":"...", "status":"open|completed", "work_date":"YYYY-MM-DD or ISO-8601"}
+    - create_task: {"action":"create_task", "title":"...", "description":"...", "status":"open|completed", "work_date":"YYYY-MM-DD or ISO-8601", "source":{"kind":"email", "provider":"outlook", "thread_id":"...", "message_id":"...", "subject":"...", "sender":"...", "date":"ISO-8601", "url":"..."}}
+    - create_tasks: {"action":"create_tasks", "tasks":[{"title":"...", "description":"...", "status":"open|completed", "work_date":"YYYY-MM-DD or ISO-8601", "source":{"kind":"email", "provider":"outlook", "thread_id":"...", "message_id":"...", "subject":"...", "sender":"...", "date":"ISO-8601", "url":"..."}}]}
     - create_todo: {"action":"create_todo", "title":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
-    - list_tasks: {"action":"list_tasks", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true} — lists tasks as copy-ready Markdown with title and description content
+    - list_tasks: {"action":"list_tasks", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true, "include_source":true} — lists durable Tasks as copy-ready Markdown with date lines and indented bullets
     - list_todos: {"action":"list_todos", "status":"open|completed|all"} — lists lightweight reminder todos
     - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
@@ -47,6 +48,7 @@ final class ChatManager: ObservableObject {
     - If no action is needed, just chat normally
     - When asked to create a T5T report, use create_t5t (NOT create_note)
     - When asked to create a task or todo, use create_task or create_todo (NOT create_note); task requests use create_task and todo requests use create_todo
+    - When converting Outlook email conversations into work items, use create_tasks to create durable Tasks and preserve available email source metadata
     - When asked to list tasks, use list_tasks and read from durable Tasks
     - When asked to list todos, use list_todos and read from lightweight Todos
     - Be concise and helpful
@@ -178,16 +180,33 @@ final class ChatManager: ObservableObject {
             return "Created note: \(title)"
 
         case "create_task":
-            let title = taskTitle(from: json["title"])
-            let description = (json["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let status = parseTaskStatus(json["status"] as? String)
-            let workDateText = (json["work_date"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let workDate = parseTodoDueDate(workDateText)
-            manager.createTask(title: title, description: description, status: status, workDate: workDate)
-            if let workDateText, !workDateText.isEmpty, workDate == nil {
-                return "Created task: \(title). Work date was not recognized."
+            let draft = AssistantTaskActionParser.taskDraft(from: json)
+            manager.createTask(
+                title: draft.title,
+                description: draft.description,
+                status: draft.status,
+                workDate: draft.workDate,
+                sourceMetadata: draft.sourceMetadata
+            )
+            if draft.hadUnrecognizedWorkDate {
+                return "Created task: \(draft.title). Work date was not recognized."
             }
-            return "Created task: \(title)"
+            return "Created task: \(draft.title)"
+
+        case "create_tasks":
+            let drafts = AssistantTaskActionParser.taskDrafts(from: json)
+            guard !drafts.isEmpty else { return "No tasks were created." }
+            for draft in drafts {
+                manager.createTask(
+                    title: draft.title,
+                    description: draft.description,
+                    status: draft.status,
+                    workDate: draft.workDate,
+                    sourceMetadata: draft.sourceMetadata
+                )
+            }
+            let warning = drafts.contains(where: \.hadUnrecognizedWorkDate) ? " Some work dates were not recognized." : ""
+            return "Created \(drafts.count) tasks.\(warning)"
 
         case "create_todo":
             let title = todoTitle(from: json["title"])
@@ -291,20 +310,6 @@ final class ChatManager: ObservableObject {
         return title.isEmpty ? "Untitled todo" : title
     }
 
-    private func taskTitle(from value: Any?) -> String {
-        let title = (value as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Untitled task" : title
-    }
-
-    private func parseTaskStatus(_ value: String?) -> TaskItem.Status {
-        switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "completed", "complete", "done":
-            return .completed
-        default:
-            return .open
-        }
-    }
-
     private func handleLocalTaskOrTodoListRequest(_ text: String) -> Bool {
         let lowercased = text.lowercased()
         let isListRequest = lowercased.contains("list") || lowercased.contains("show")
@@ -349,6 +354,98 @@ final class ChatManager: ObservableObject {
     }
 }
 
+struct AssistantTaskDraft: Equatable {
+    var title: String
+    var description: String
+    var status: TaskItem.Status
+    var workDate: Date?
+    var sourceMetadata: TaskItem.SourceMetadata?
+    var hadUnrecognizedWorkDate: Bool
+}
+
+enum AssistantTaskActionParser {
+    static func taskDraft(from json: [String: Any]) -> AssistantTaskDraft {
+        draft(from: json)
+    }
+
+    static func taskDrafts(from json: [String: Any]) -> [AssistantTaskDraft] {
+        guard let rawTasks = json["tasks"] as? [[String: Any]] else {
+            return [taskDraft(from: json)]
+        }
+        return rawTasks.map(draft)
+    }
+
+    private static func draft(from json: [String: Any]) -> AssistantTaskDraft {
+        let workDateText = stringValue(json["work_date"] ?? json["date"])
+        let workDate = parseDate(workDateText)
+        return AssistantTaskDraft(
+            title: title(from: json["title"]),
+            description: stringValue(json["description"]) ?? "",
+            status: status(from: stringValue(json["status"])),
+            workDate: workDate,
+            sourceMetadata: sourceMetadata(from: json),
+            hadUnrecognizedWorkDate: workDateText != nil && workDate == nil
+        )
+    }
+
+    private static func sourceMetadata(from json: [String: Any]) -> TaskItem.SourceMetadata? {
+        let source = json["source"] as? [String: Any] ?? json
+        let kind = TaskItem.SourceKind(rawValue: stringValue(source["kind"] ?? source["source_kind"])?.lowercased() ?? "") ?? .unknown
+        let metadata = TaskItem.SourceMetadata(
+            kind: kind,
+            provider: stringValue(source["provider"] ?? source["source_provider"]),
+            threadID: stringValue(source["thread_id"] ?? source["threadID"] ?? source["thread"] ?? source["source_thread_id"]),
+            messageID: stringValue(source["message_id"] ?? source["messageID"] ?? source["source_message_id"]),
+            subject: stringValue(source["subject"] ?? source["source_subject"]),
+            sender: stringValue(source["sender"] ?? source["from"] ?? source["source_sender"]),
+            sentDate: parseDate(stringValue(source["date"] ?? source["sent_date"] ?? source["message_date"] ?? source["source_date"])),
+            url: stringValue(source["url"] ?? source["web_url"] ?? source["source_url"])
+        )
+        return metadata.hasAnyValue ? metadata : nil
+    }
+
+    private static func title(from value: Any?) -> String {
+        let title = stringValue(value) ?? ""
+        return title.isEmpty ? "Untitled task" : title
+    }
+
+    private static func status(from value: String?) -> TaskItem.Status {
+        switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "completed", "complete", "done":
+            return .completed
+        default:
+            return .open
+        }
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        let trimmed = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: value) {
+            return date
+        }
+
+        for format in ["yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy"] {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .current
+            formatter.dateFormat = format
+            formatter.isLenient = false
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
+    }
+}
+
 enum AssistantTaskListFormatter {
     enum Status: String, Equatable {
         case open
@@ -360,6 +457,14 @@ enum AssistantTaskListFormatter {
         var after: Date?
         var before: Date?
         var status: Status = .all
+        var includeSource: Bool = false
+
+        init(after: Date? = nil, before: Date? = nil, status: Status = .all, includeSource: Bool = false) {
+            self.after = after
+            self.before = before
+            self.status = status
+            self.includeSource = includeSource
+        }
     }
 
     static func filters(from json: [String: Any]) -> Filters {
@@ -369,7 +474,7 @@ enum AssistantTaskListFormatter {
             from: json["status"] as? String,
             includeCompleted: json["include_completed"] as? Bool
         )
-        return Filters(after: after, before: before, status: status)
+        return Filters(after: after, before: before, status: status, includeSource: json["include_source"] as? Bool ?? false)
     }
 
     static func filters(fromPrompt prompt: String) -> Filters {
@@ -401,28 +506,55 @@ enum AssistantTaskListFormatter {
         let entries = groupedTasks.keys.sorted().map { date in
             let tasksForDate = groupedTasks[date] ?? []
             let dateHeader = "- " + slashDate(date)
-            let taskEntries = tasksForDate.map(formatGroupedTask).joined(separator: "\n")
+            let taskEntries = tasksForDate.map { formatGroupedTask($0, includeSource: filters.includeSource) }.joined(separator: "\n")
             return dateHeader + "\n" + taskEntries
         }.joined(separator: "\n")
         return title + "\n\n" + entries
     }
 
-    private static func formatGroupedTask(_ task: TaskItem) -> String {
+    private static func formatGroupedTask(_ task: TaskItem, includeSource: Bool) -> String {
         let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Untitled task"
             : task.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = "  - " + title
 
-        let descriptionLines = task.description
+        var detailLines = task.description
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            .map { "    " + $0 }
 
-        if descriptionLines.isEmpty {
+        if includeSource, let source = task.sourceMetadata {
+            detailLines.append(contentsOf: sourceLines(for: source))
+        }
+
+        if detailLines.isEmpty {
             return line
         }
-        return ([line] + descriptionLines).joined(separator: "\n")
+        return ([line] + detailLines.map { "    " + $0 }).joined(separator: "\n")
+    }
+
+    private static func sourceLines(for source: TaskItem.SourceMetadata) -> [String] {
+        var prefix = source.providerDisplayName
+        if source.kind == .email {
+            prefix += " email"
+        }
+
+        var line = "Source: \(prefix)"
+        if let sender = source.sender {
+            line += " from \(sender)"
+        }
+        if let subject = source.subject {
+            line += "\(source.sender == nil ? " " : ", ")\"\(subject)\""
+        }
+        if let sentDate = source.sentDate {
+            line += " (\(slashDate(sentDate)))"
+        }
+
+        var lines = [line]
+        if let url = source.url {
+            lines.append("Link: \(url)")
+        }
+        return lines
     }
 
     private static func matches(_ task: TaskItem, filters: Filters) -> Bool {

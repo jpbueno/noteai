@@ -834,6 +834,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(detailSource.contains("WORK DATE"))
     }
 
+    func testTaskSidebarStatusCircleHasDedicatedCompletionAction() throws {
+        let source = try meetingLibrarySource()
+        let rowStart = try XCTUnwrap(source.range(of: "private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func dueLabelColor", range: rowStart.upperBound..<source.endIndex))
+        let rowSource = String(source[rowStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertTrue(rowSource.contains("selection = .task(task.id)"))
+        XCTAssertTrue(rowSource.contains("meetingManager.toggleTaskCompletion(task)"))
+        XCTAssertTrue(rowSource.contains(".buttonStyle(.plain)"))
+        XCTAssertTrue(rowSource.contains(".accessibilityLabel(task.isCompleted ? \"Mark task open\" : \"Mark task complete\")"))
+    }
+
     func testNoteSpaceHeadersExposeRenameAndDeleteContextMenuForCustomSpaces() throws {
         let source = try meetingLibrarySource()
 

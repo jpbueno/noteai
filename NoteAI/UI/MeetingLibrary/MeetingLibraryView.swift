@@ -1099,44 +1099,55 @@ struct MeetingLibraryView: View {
     }
 
     private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View {
-        Button {
-            selection = .task(task.id)
-        } label: {
-            HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+            Button {
+                meetingManager.toggleTaskCompletion(task)
+            } label: {
                 Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
                     .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(task.title.isEmpty ? "Untitled task" : task.title)
-                        .font(.system(size: layout.bodyFontSize))
-                        .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
-                        .strikethrough(task.isCompleted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if !task.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(task.description.replacingOccurrences(of: "\n", with: " "))
-                            .font(.system(size: layout.tinyFontSize))
-                            .foregroundStyle(Theme.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(task.isCompleted ? "Mark task open" : "Mark task complete")
+
+            Button {
+                selection = .task(task.id)
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(task.title.isEmpty ? "Untitled task" : task.title)
+                            .font(.system(size: layout.bodyFontSize))
+                            .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
+                            .strikethrough(task.isCompleted)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        if !task.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(task.description.replacingOccurrences(of: "\n", with: " "))
+                                .font(.system(size: layout.tinyFontSize))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
+                    Spacer(minLength: 8)
+                    Text(task.isCompleted ? "Done" : "Open")
+                        .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
+                        .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
+                        .padding(.top, 1)
                 }
-                Spacer(minLength: 8)
-                Text(task.isCompleted ? "Done" : "Open")
-                    .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
-                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
-                    .padding(.top, 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.vertical, round(6 * layout.scale))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selection == .task(task.id) ? Theme.selectedBG : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
-            )
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, round(14 * layout.scale))
+        .padding(.vertical, round(6 * layout.scale))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            selection == .task(task.id) ? Theme.selectedBG : Color.clear,
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .padding(.horizontal, 4)
         .contextMenu {
             Button(task.isCompleted ? "Mark open" : "Mark complete") {

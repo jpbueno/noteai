@@ -1567,7 +1567,7 @@ struct MeetingLibraryView: View {
     private func createNewT5T() {
         let end = Date()
         let start = Calendar.current.date(byAdding: .day, value: -14, to: end)!
-        let meetingsInRange = meetingManager.meetingsInRange(start: start, end: end)
+        let tasksInRange = meetingManager.tasksInRange(start: start, end: end)
 
         let report = T5TReport(
             id: UUID(),
@@ -1575,7 +1575,10 @@ struct MeetingLibraryView: View {
             createdDate: Date(),
             periodStart: start,
             periodEnd: end,
-            meetingIDs: meetingsInRange.map(\.id),
+            meetingIDs: [],
+            noteIDs: [],
+            taskIDs: tasksInRange.map(\.id),
+            todoIDs: tasksInRange.map(\.id),
             sections: .empty,
             status: .draft
         )

@@ -147,7 +147,7 @@ final class SummarizationEngine {
 
     // MARK: - T5T Generation
 
-    /// Generates a T5T (Top 5 Things) report from multiple meetings in a reporting period.
+    /// Generates a T5T (Top 5 Things) report from durable task records in a reporting period.
     func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
         let client = try buildClient()
         let model = selectedModelID()
@@ -208,7 +208,7 @@ final class SummarizationEngine {
         let tasksText = taskBlocks.isEmpty ? "" : "\n\nTASKS:\n" + taskBlocks.joined(separator: "\n")
 
         let prompt = """
-        You are an NVIDIA engineer's executive communication assistant. Generate a "Top 5 Things" (T5T) status report from the meeting notes below.
+        You are an NVIDIA engineer's executive communication assistant. Generate a "Top 5 Things" (T5T) status report from the task records below.
 
         T5T FORMAT RULES (from Jensen Huang):
         - T5T is NVIDIA's internal bi-weekly status report read by leadership including Jensen
@@ -218,7 +218,7 @@ final class SummarizationEngine {
         - Focus on top priorities being actively worked on — this is a "priority list", NOT a "to-do list"
         - Include: workload context, usage descriptions, acceleration libraries or tools used, teams driving the work
         - Share insights, what worked and what didn't, changes in strategy or direction
-        - Do NOT cut-and-paste or repeat items — synthesize across meetings
+        - Do NOT cut-and-paste or repeat items — synthesize across tasks
 
         THREE SECTIONS (omit any section with no relevant content — return empty array):
 
@@ -237,7 +237,7 @@ final class SummarizationEngine {
 
         REPORTING PERIOD: \(dateFmt.string(from: periodStart)) to \(dateFmt.string(from: periodEnd))
 
-        MEETING SUMMARIES:
+        SOURCE CONTEXT:
         \(meetingsText)
         \(notesText)
         \(tasksText)
@@ -249,7 +249,7 @@ final class SummarizationEngine {
           "futurePlans": [{"headline": "...", "explanation": "..."}]
         }
 
-        Aim for 3-5 total entries across all sections. Quality over quantity. Omit a section (empty array) if no meeting content maps to it.
+        Aim for 3-5 total entries across all sections. Quality over quantity. Omit a section (empty array) if no task content maps to it.
         """
 
         let responseText = try await client.complete(prompt: prompt, model: model)

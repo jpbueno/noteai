@@ -876,12 +876,36 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("TaskSelectorView("))
         XCTAssertTrue(source.contains("taskIDs: Array(selectedTaskIDs)"))
         XCTAssertTrue(source.contains("Text(\"Source Tasks\")"))
+        XCTAssertTrue(source.contains(".disabled(selectedTaskIDs.isEmpty)"))
+        XCTAssertFalse(source.contains("MeetingSelectorView("))
+        XCTAssertFalse(source.contains("NoteSelectorView("))
+        XCTAssertFalse(source.contains("Text(\"Source Meetings\")"))
+        XCTAssertFalse(source.contains("Text(\"Source Notes\")"))
+        XCTAssertFalse(source.contains("meetingIDs: Array(selectedMeetingIDs)"))
+        XCTAssertFalse(source.contains("noteIDs: Array(selectedNoteIDs)"))
         XCTAssertFalse(source.contains("Text(\"Source Todos\")"))
         XCTAssertTrue(selectorSource.contains("struct TaskSelectorView"))
         XCTAssertTrue(selectorSource.contains("let tasks: [TaskItem]"))
+        XCTAssertTrue(selectorSource.contains(".frame(minHeight: 260, maxHeight: 420)"))
+        XCTAssertTrue(selectorSource.contains("systemImage: \"calendar\""))
+        XCTAssertTrue(selectorSource.contains("systemImage: \"text.alignleft\""))
         XCTAssertTrue(engineSource.contains("func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = []"))
         XCTAssertTrue(engineSource.contains("TASKS:"))
         XCTAssertFalse(engineSource.contains("TODOS:"))
+    }
+
+    func testNewT5TReportsAreSeededFromTasksOnly() throws {
+        let source = try meetingLibrarySource()
+        let actionStart = try XCTUnwrap(source.range(of: "private func createNewT5T()"))
+        let nextAction = try XCTUnwrap(source.range(of: "private func createNewTodo()", range: actionStart.upperBound..<source.endIndex))
+        let actionSource = String(source[actionStart.lowerBound..<nextAction.lowerBound])
+
+        XCTAssertTrue(actionSource.contains("let tasksInRange = meetingManager.tasksInRange(start: start, end: end)"))
+        XCTAssertTrue(actionSource.contains("meetingIDs: []"))
+        XCTAssertTrue(actionSource.contains("noteIDs: []"))
+        XCTAssertTrue(actionSource.contains("taskIDs: tasksInRange.map(\\.id)"))
+        XCTAssertFalse(actionSource.contains("meetingsInRange"))
+        XCTAssertFalse(actionSource.contains("meetingIDs: meetingsInRange.map(\\.id)"))
     }
 
     func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {

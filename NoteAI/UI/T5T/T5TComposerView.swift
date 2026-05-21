@@ -335,23 +335,14 @@ struct T5TComposerView: View {
         generationError = nil
         Task {
             do {
-                if report.sections.isEmpty {
-                    let newReport = try await meetingManager.createT5TReport(
-                        periodStart: periodStart,
-                        periodEnd: periodEnd,
-                        meetingIDs: [],
-                        noteIDs: [],
-                        taskIDs: Array(selectedTaskIDs)
-                    )
-                    report = newReport
-                } else {
-                    report.meetingIDs = []
-                    report.noteIDs = []
-                    report.taskIDs = Array(selectedTaskIDs)
-                    report.todoIDs = Array(selectedTaskIDs)
-                    let updated = try await meetingManager.regenerateT5T(report: report)
-                    report = updated
-                }
+                report.periodStart = periodStart
+                report.periodEnd = periodEnd
+                report.meetingIDs = []
+                report.noteIDs = []
+                report.taskIDs = Array(selectedTaskIDs)
+                report.todoIDs = Array(selectedTaskIDs)
+                let updated = try await meetingManager.regenerateT5T(report: report)
+                report = updated
             } catch {
                 generationError = error.localizedDescription
             }

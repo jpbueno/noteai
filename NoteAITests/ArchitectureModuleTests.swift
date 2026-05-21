@@ -874,7 +874,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("@State private var selectedTaskIDs"))
         XCTAssertTrue(source.contains("meetingManager.tasksInRange"))
         XCTAssertTrue(source.contains("TaskSelectorView("))
-        XCTAssertTrue(source.contains("taskIDs: Array(selectedTaskIDs)"))
+        XCTAssertTrue(source.contains("report.taskIDs = Array(selectedTaskIDs)"))
         XCTAssertTrue(source.contains("Text(\"Source Tasks\")"))
         XCTAssertTrue(source.contains(".disabled(selectedTaskIDs.isEmpty)"))
         XCTAssertFalse(source.contains("MeetingSelectorView("))
@@ -906,6 +906,21 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(actionSource.contains("taskIDs: tasksInRange.map(\\.id)"))
         XCTAssertFalse(actionSource.contains("meetingsInRange"))
         XCTAssertFalse(actionSource.contains("meetingIDs: meetingsInRange.map(\\.id)"))
+    }
+
+    func testT5TGenerationUpdatesCurrentReportInsteadOfCreatingDuplicate() throws {
+        let source = try t5tComposerSource()
+        let actionStart = try XCTUnwrap(source.range(of: "private func generateT5T()"))
+        let nextAction = try XCTUnwrap(source.range(of: "private func copyToClipboard()", range: actionStart.upperBound..<source.endIndex))
+        let actionSource = String(source[actionStart.lowerBound..<nextAction.lowerBound])
+
+        XCTAssertTrue(actionSource.contains("report.periodStart = periodStart"))
+        XCTAssertTrue(actionSource.contains("report.periodEnd = periodEnd"))
+        XCTAssertTrue(actionSource.contains("report.taskIDs = Array(selectedTaskIDs)"))
+        XCTAssertTrue(actionSource.contains("report.todoIDs = Array(selectedTaskIDs)"))
+        XCTAssertTrue(actionSource.contains("meetingManager.regenerateT5T(report: report)"))
+        XCTAssertFalse(actionSource.contains("report.sections.isEmpty"))
+        XCTAssertFalse(actionSource.contains("meetingManager.createT5TReport"))
     }
 
     func testT5TMailDraftURLPreservesFullBodyWithAmpersandsBulletsAndNewlines() throws {

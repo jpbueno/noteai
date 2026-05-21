@@ -39,5 +39,7 @@
     <string>NoteAI uses your calendar to automatically detect upcoming meetings.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>NoteAI uses full calendar access to arm recording prompts before upcoming meetings.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>NoteAI uses automation to create formatted T5T email drafts in Microsoft Outlook when you choose Open in Mail.</string>
 </dict>
 </plist>

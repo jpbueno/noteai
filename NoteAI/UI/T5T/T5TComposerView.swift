@@ -356,9 +356,7 @@ struct T5TComposerView: View {
     }
 
     private func openInMail() {
-        if let url = T5TMailDraft.mailtoURL(for: report) {
-            NSWorkspace.shared.open(url)
-        }
+        T5TMailDraft.open(for: report)
     }
 
     private func syncPeriodAndTaskSelection() {

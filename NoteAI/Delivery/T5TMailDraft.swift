@@ -1,6 +1,46 @@
 import AppKit
 
 enum T5TMailDraft {
+    enum AppleScriptExecution {
+        case success
+        case failure(String)
+    }
+
+    enum OpenResult: Equatable {
+        case openedOutlookDraft
+        case openedMailtoFallback
+        case mailtoUnavailable
+        case outlookAutomationFailed(String)
+    }
+
+    struct Environment {
+        let isOutlookAvailable: () -> Bool
+        let executeAppleScript: (String) -> AppleScriptExecution
+        let openURL: (URL) -> Void
+
+        static let live = Environment(
+            isOutlookAvailable: {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.Outlook") != nil
+            },
+            executeAppleScript: { source in
+                var error: NSDictionary?
+                guard let script = NSAppleScript(source: source) else {
+                    return .failure("NoteAI could not prepare the Outlook automation script.")
+                }
+
+                script.executeAndReturnError(&error)
+                if let error {
+                    return .failure(error.description)
+                }
+
+                return .success
+            },
+            openURL: { url in
+                NSWorkspace.shared.open(url)
+            }
+        )
+    }
+
     static func mailtoURL(for report: T5TReport) -> URL? {
         var components = URLComponents()
         components.scheme = "mailto"
@@ -11,14 +51,24 @@ enum T5TMailDraft {
         return components.url
     }
 
-    static func open(for report: T5TReport) {
-        if openInMicrosoftOutlook(report) {
-            return
+    @discardableResult
+    static func open(for report: T5TReport, environment: Environment = .live) -> OpenResult {
+        if environment.isOutlookAvailable() {
+            let source = outlookAppleScriptSource(for: report)
+            switch environment.executeAppleScript(source) {
+            case .success:
+                return .openedOutlookDraft
+            case .failure(let message):
+                return .outlookAutomationFailed(message)
+            }
         }
 
-        if let url = mailtoURL(for: report) {
-            NSWorkspace.shared.open(url)
+        guard let url = mailtoURL(for: report) else {
+            return .mailtoUnavailable
         }
+
+        environment.openURL(url)
+        return .openedMailtoFallback
     }
 
     static func htmlBody(for report: T5TReport) -> String {
@@ -49,31 +99,14 @@ enum T5TMailDraft {
         """
     }
 
-    private static func openInMicrosoftOutlook(_ report: T5TReport) -> Bool {
-        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.Outlook") != nil else {
-            return false
-        }
-
-        let source = """
+    private static func outlookAppleScriptSource(for report: T5TReport) -> String {
+        """
         tell application "Microsoft Outlook"
-            set newMessage to make new message with properties {subject:\(appleScriptLiteral(report.title)), content:\(appleScriptLiteral(htmlBody(for: report)))}
+            set newMessage to make new outgoing_message with properties {subject:\(appleScriptLiteral(report.title)), content:\(appleScriptLiteral(htmlBody(for: report)))}
             open newMessage
             activate
         end tell
         """
-
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else {
-            return false
-        }
-
-        script.executeAndReturnError(&error)
-        if let error {
-            print("Failed to create Outlook T5T draft: \(error)")
-            return false
-        }
-
-        return true
     }
 
     private static func appendSection(title: String, entries: [T5TEntry], to sections: inout [String]) {

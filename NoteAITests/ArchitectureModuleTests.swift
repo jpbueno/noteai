@@ -968,8 +968,49 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(body?.contains("Keep follow-up crisp.") == true)
 
         let composerSource = try t5tComposerSource()
-        XCTAssertTrue(composerSource.contains("T5TMailDraft.mailtoURL(for: report)"))
+        XCTAssertTrue(composerSource.contains("T5TMailDraft.open(for: report)"))
         XCTAssertFalse(composerSource.contains(".urlQueryAllowed"))
+    }
+
+    func testT5TMailDraftHTMLUsesAptosHierarchyForOutlookDrafts() throws {
+        let report = T5TReport(
+            id: UUID(),
+            title: "Top 5 Things - Inference Ops | NALA | SA",
+            createdDate: Date(timeIntervalSince1970: 0),
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            meetingIDs: [],
+            taskIDs: [],
+            sections: T5TSections(
+                insights: [],
+                accountUpdates: [
+                    T5TEntry(
+                        headline: "Delivered ModelOpt Demo to CoreWeave Covering Speculative Decoding and FP4 Quantization",
+                        explanation: "To enable the CoreWeave team to optimize LLM deployments on their GPU cloud infrastructure, I delivered a ModelOpt demo & technical presentation."
+                    ),
+                ],
+                futurePlans: []
+            ),
+            status: .draft
+        )
+
+        let html = T5TMailDraft.htmlBody(for: report)
+
+        XCTAssertTrue(html.contains("font-family: Aptos, Arial, sans-serif; font-size: 13pt; font-weight: 700"))
+        XCTAssertTrue(html.contains(">Industry Business Development / Account Updates<"))
+        XCTAssertTrue(html.contains("font-family: Aptos, Arial, sans-serif; font-size: 11pt; font-weight: 700"))
+        XCTAssertTrue(html.contains(">Delivered ModelOpt Demo to CoreWeave Covering Speculative Decoding and FP4 Quantization<"))
+        XCTAssertTrue(html.contains("font-family: Aptos, Arial, sans-serif; font-size: 11pt; font-weight: 400"))
+        XCTAssertTrue(html.contains("&bull;&nbsp;To enable the CoreWeave team"))
+        XCTAssertTrue(html.contains("demo &amp; technical presentation"))
+
+        let composerSource = try t5tComposerSource()
+        XCTAssertTrue(composerSource.contains("T5TMailDraft.open(for: report)"))
+        XCTAssertFalse(composerSource.contains("NSWorkspace.shared.open(url)"))
+
+        let mailDraftSource = try t5tMailDraftSource()
+        XCTAssertTrue(mailDraftSource.contains("make new message with properties"))
+        XCTAssertFalse(mailDraftSource.contains("make new outgoing message"))
     }
 
     func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {
@@ -1271,6 +1312,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let composerFile = projectRoot.appendingPathComponent("NoteAI/UI/T5T/T5TComposerView.swift")
         return try String(contentsOf: composerFile, encoding: .utf8)
+    }
+
+    private func t5tMailDraftSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let mailDraftFile = projectRoot.appendingPathComponent("NoteAI/Delivery/T5TMailDraft.swift")
+        return try String(contentsOf: mailDraftFile, encoding: .utf8)
     }
 
     private func taskSelectorSource() throws -> String {

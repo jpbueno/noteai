@@ -365,9 +365,7 @@ struct T5TComposerView: View {
     }
 
     private func openInMail() {
-        let subject = report.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let body = report.emailBody.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "mailto:?subject=\(subject)&body=\(body)") {
+        if let url = T5TMailDraft.mailtoURL(for: report) {
             NSWorkspace.shared.open(url)
         }
     }

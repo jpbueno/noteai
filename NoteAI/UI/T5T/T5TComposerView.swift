@@ -1,19 +1,15 @@
 import SwiftUI
 
-/// Main T5T report composer — date selection, meeting picker, LLM generation, section editing, export.
+/// Main T5T report composer — task selection, LLM generation, section editing, export.
 struct T5TComposerView: View {
     @ObservedObject var meetingManager: MeetingManager
     @Binding var report: T5TReport
     @ObservedObject var ttsService: TextToSpeechService
 
-    @State private var showMeetingSelector = true
-    @State private var selectedMeetingIDs: Set<UUID>
     @State private var periodStart: Date
     @State private var periodEnd: Date
-    @State private var selectedNoteIDs: Set<UUID>
     @State private var selectedTaskIDs: Set<UUID>
     @State private var showConfigSheet = false
-    @State private var showNoteSelector = false
     @State private var showTaskSelector = true
     @State private var editableConfig: T5TConfig
     @State private var generationError: String?
@@ -22,8 +18,6 @@ struct T5TComposerView: View {
         self.meetingManager = meetingManager
         self._report = report
         self.ttsService = ttsService
-        self._selectedMeetingIDs = State(initialValue: Set(report.wrappedValue.meetingIDs))
-        self._selectedNoteIDs = State(initialValue: Set(report.wrappedValue.noteIDs))
         // Default: if the report has no explicit task selection yet, auto-select
         // all durable tasks in the period for T5T source material.
         let explicitTasks = report.wrappedValue.taskIDs.isEmpty
@@ -49,9 +43,8 @@ struct T5TComposerView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     headerSection
                     Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
-                    meetingSection
+                    periodControls
                     taskSection
-                    noteSection
                     Divider().foregroundStyle(Theme.border).padding(.vertical, 16)
                     actionBar
                     if !report.sections.isEmpty {
@@ -107,7 +100,7 @@ struct T5TComposerView: View {
                 Label(report.periodLabel, systemImage: "calendar")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
-                Label("\(selectedMeetingIDs.count) meetings", systemImage: "doc.text")
+                Label("\(selectedTaskIDs.count) tasks", systemImage: "checklist")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
@@ -128,97 +121,63 @@ struct T5TComposerView: View {
             .background(
                 (report.status == .draft ? Color.orange : Color.green).opacity(0.15),
                 in: RoundedRectangle(cornerRadius: 4)
-            )
+        )
     }
 
-    // MARK: - Meeting Selection
+    // MARK: - Period Selection
 
-    private var meetingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showMeetingSelector.toggle()
-                }
-            } label: {
+    private var periodControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
                 HStack(spacing: 6) {
-                    Image(systemName: showMeetingSelector ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Source Meetings")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("(\(selectedMeetingIDs.count) selected)")
+                    Text("From")
                         .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(Theme.textSecondary)
+                    DatePicker("", selection: $periodStart, displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.field)
                 }
-                .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 6) {
+                    Text("To")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                    DatePicker("", selection: $periodEnd, displayedComponents: .date)
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+                }
+                Spacer()
             }
-            .buttonStyle(.plain)
 
-            if showMeetingSelector {
-                MeetingSelectorView(
-                    meetings: meetingManager.meetings,
-                    selectedIDs: $selectedMeetingIDs,
-                    periodStart: $periodStart,
-                    periodEnd: $periodEnd
-                )
-                .onChange(of: selectedMeetingIDs) { _, newValue in
-                    report.meetingIDs = Array(newValue)
-                    report.periodStart = periodStart
-                    report.periodEnd = periodEnd
-                    meetingManager.updateT5TReport(report)
+            HStack(spacing: 8) {
+                quickRangeButton("Last 2 weeks") {
+                    periodEnd = Date()
+                    periodStart = Calendar.current.date(byAdding: .day, value: -14, to: periodEnd)!
                 }
-                .onChange(of: periodStart) { _, _ in
-                    report.periodStart = periodStart
-                    // Auto-select meetings in new range
-                    let inRange = meetingManager.meetingsInRange(start: periodStart, end: periodEnd)
-                    selectedMeetingIDs = Set(inRange.map(\.id))
+                quickRangeButton("This month") {
+                    periodEnd = Date()
+                    periodStart = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date()))!
                 }
-                .onChange(of: periodEnd) { _, _ in
-                    report.periodEnd = periodEnd
-                    let inRange = meetingManager.meetingsInRange(start: periodStart, end: periodEnd)
-                    selectedMeetingIDs = Set(inRange.map(\.id))
-                }
+                Spacer()
             }
+        }
+        .onChange(of: periodStart) { _, _ in
+            syncPeriodAndTaskSelection()
+        }
+        .onChange(of: periodEnd) { _, _ in
+            syncPeriodAndTaskSelection()
         }
     }
 
-    // MARK: - Action Bar
-
-    // MARK: - Note Selection
-
-    private var noteSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showNoteSelector.toggle()
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: showNoteSelector ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Source Notes")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("(\(selectedNoteIDs.count) selected)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
-                }
+    private func quickRangeButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
-            }
-            .buttonStyle(.plain)
-
-            if showNoteSelector {
-                NoteSelectorView(
-                    notes: meetingManager.notes,
-                    selectedIDs: $selectedNoteIDs,
-                    periodStart: periodStart,
-                    periodEnd: periodEnd
-                )
-                .onChange(of: selectedNoteIDs) { _, newValue in
-                    report.noteIDs = Array(newValue)
-                    meetingManager.updateT5TReport(report)
-                }
-            }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 4))
         }
-        .padding(.top, 8)
+        .buttonStyle(.plain)
     }
 
     // MARK: - Task Selection (primary T5T input)
@@ -234,9 +193,9 @@ struct T5TComposerView: View {
                     Image(systemName: showTaskSelector ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                     Text("Source Tasks")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                     Text("(\(selectedTaskIDs.count) selected)")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .foregroundStyle(Theme.textSecondary)
@@ -252,6 +211,7 @@ struct T5TComposerView: View {
                 )
                 .onChange(of: selectedTaskIDs) { _, newValue in
                     report.taskIDs = Array(newValue)
+                    report.todoIDs = Array(newValue)
                     meetingManager.updateT5TReport(report)
                 }
             }
@@ -276,7 +236,7 @@ struct T5TComposerView: View {
                             .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedMeetingIDs.isEmpty && selectedNoteIDs.isEmpty && selectedTaskIDs.isEmpty)
+                    .disabled(selectedTaskIDs.isEmpty)
                 }
 
                 Spacer()
@@ -379,15 +339,16 @@ struct T5TComposerView: View {
                     let newReport = try await meetingManager.createT5TReport(
                         periodStart: periodStart,
                         periodEnd: periodEnd,
-                        meetingIDs: Array(selectedMeetingIDs),
-                        noteIDs: Array(selectedNoteIDs),
+                        meetingIDs: [],
+                        noteIDs: [],
                         taskIDs: Array(selectedTaskIDs)
                     )
                     report = newReport
                 } else {
-                    report.meetingIDs = Array(selectedMeetingIDs)
-                    report.noteIDs = Array(selectedNoteIDs)
+                    report.meetingIDs = []
+                    report.noteIDs = []
                     report.taskIDs = Array(selectedTaskIDs)
+                    report.todoIDs = Array(selectedTaskIDs)
                     let updated = try await meetingManager.regenerateT5T(report: report)
                     report = updated
                 }
@@ -409,5 +370,15 @@ struct T5TComposerView: View {
         if let url = URL(string: "mailto:?subject=\(subject)&body=\(body)") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private func syncPeriodAndTaskSelection() {
+        report.periodStart = periodStart
+        report.periodEnd = periodEnd
+        let inRange = meetingManager.tasksInRange(start: periodStart, end: periodEnd)
+        selectedTaskIDs = Set(inRange.map(\.id))
+        report.taskIDs = Array(selectedTaskIDs)
+        report.todoIDs = Array(selectedTaskIDs)
+        meetingManager.updateT5TReport(report)
     }
 }

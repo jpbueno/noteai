@@ -13,14 +13,20 @@ struct TaskSelectorView: View {
             let activity = task.activityDate
             return activity >= periodStart && activity <= periodEnd
         }
+        .sorted { $0.activityDate > $1.activityDate }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("\(tasksInRange.count) tasks in period")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(tasksInRange.count) tasks in period")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Select the work records that should feed this T5T.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                }
                 Spacer()
                 Button(tasksInRange.count == selectedIDs.count ? "Deselect All" : "Select All") {
                     if tasksInRange.count == selectedIDs.count {
@@ -38,16 +44,27 @@ struct TaskSelectorView: View {
                 Text("No tasks in this date range")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
-                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                    .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.rowBorder, lineWidth: 1)
+                    )
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(tasksInRange) { task in
                             taskRow(task)
                         }
                     }
+                    .padding(10)
                 }
-                .frame(maxHeight: 180)
+                .frame(minHeight: 260, maxHeight: 420)
+                .background(Theme.panelBG, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
             }
         }
     }
@@ -60,33 +77,47 @@ struct TaskSelectorView: View {
                 selectedIDs.insert(task.id)
             }
         } label: {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
                 Image(systemName: selectedIDs.contains(task.id) ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 14))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(selectedIDs.contains(task.id) ? Color.accentColor : Theme.textTertiary)
+                    .padding(.top, 2)
                 Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(task.isCompleted ? Color.green : Theme.textTertiary)
-                VStack(alignment: .leading, spacing: 2) {
+                    .font(.system(size: 15))
+                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 6) {
                     Text(task.title.isEmpty ? "Untitled task" : task.title)
-                        .font(.system(size: 13))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .strikethrough(task.isCompleted)
                         .lineLimit(1)
                     if !task.description.isEmpty {
                         Text(task.description)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(2)
                     }
+                    HStack(spacing: 12) {
+                        Label(task.activityDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                            .labelStyle(.titleAndIcon)
+                        Label(task.isCompleted ? "Completed" : "Open", systemImage: "text.alignleft")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
                 }
                 Spacer()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
-                selectedIDs.contains(task.id) ? Theme.selectedBG : Color.clear,
-                in: RoundedRectangle(cornerRadius: 4)
+                selectedIDs.contains(task.id) ? Theme.selectedBG : Theme.rowBG,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selectedIDs.contains(task.id) ? Theme.accent.opacity(0.65) : Theme.rowBorder, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

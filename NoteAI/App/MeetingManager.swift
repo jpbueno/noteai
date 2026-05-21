@@ -861,11 +861,9 @@ final class MeetingManager: ObservableObject {
         taskIDs: [UUID] = [],
         todoIDs: [UUID] = []
     ) async throws -> T5TReport {
-        let selectedMeetings = meetings.filter { meetingIDs.contains($0.id) }
-        let selectedNotes = notes.filter { noteIDs.contains($0.id) }
         let selectedTasks = tasks.filter { taskIDs.contains($0.id) || todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
-            throw T5TError.noMeetingsSelected
+        guard !selectedTasks.isEmpty else {
+            throw T5TError.noTasksSelected
         }
 
         let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
@@ -874,8 +872,8 @@ final class MeetingManager: ObservableObject {
         let sections: T5TSections
         do {
             sections = try await summarizationEngine.generateT5T(
-                meetings: selectedMeetings,
-                notes: selectedNotes,
+                meetings: [],
+                notes: [],
                 tasks: selectedTasks,
                 config: t5tConfig,
                 periodStart: periodStart,
@@ -893,8 +891,8 @@ final class MeetingManager: ObservableObject {
             createdDate: Date(),
             periodStart: periodStart,
             periodEnd: periodEnd,
-            meetingIDs: meetingIDs,
-            noteIDs: noteIDs,
+            meetingIDs: [],
+            noteIDs: [],
             taskIDs: taskIDs,
             todoIDs: todoIDs,
             sections: sections,
@@ -936,11 +934,9 @@ final class MeetingManager: ObservableObject {
     }
 
     func regenerateT5T(report: T5TReport) async throws -> T5TReport {
-        let selectedMeetings = meetings.filter { report.meetingIDs.contains($0.id) }
-        let selectedNotes = notes.filter { report.noteIDs.contains($0.id) }
         let selectedTasks = tasks.filter { report.taskIDs.contains($0.id) || report.todoIDs.contains($0.id) }
-        guard !selectedMeetings.isEmpty || !selectedNotes.isEmpty || !selectedTasks.isEmpty else {
-            throw T5TError.noMeetingsSelected
+        guard !selectedTasks.isEmpty else {
+            throw T5TError.noTasksSelected
         }
 
         let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
@@ -949,8 +945,8 @@ final class MeetingManager: ObservableObject {
         let sections: T5TSections
         do {
             sections = try await summarizationEngine.generateT5T(
-                meetings: selectedMeetings,
-                notes: selectedNotes,
+                meetings: [],
+                notes: [],
                 tasks: selectedTasks,
                 config: t5tConfig,
                 periodStart: report.periodStart,
@@ -964,6 +960,8 @@ final class MeetingManager: ObservableObject {
 
         var updated = report
         updated.sections = sections
+        updated.meetingIDs = []
+        updated.noteIDs = []
         updateT5TReport(updated)
         return updated
     }
@@ -1369,12 +1367,12 @@ private enum LocalHelperCaptureError: LocalizedError {
 }
 
 enum T5TError: LocalizedError {
-    case noMeetingsSelected
+    case noTasksSelected
 
     var errorDescription: String? {
         switch self {
-        case .noMeetingsSelected:
-            return "No meetings selected for T5T generation."
+        case .noTasksSelected:
+            return "No tasks selected for T5T generation."
         }
     }
 }

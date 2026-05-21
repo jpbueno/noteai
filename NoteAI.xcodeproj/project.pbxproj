@@ -60,6 +60,7 @@
 		89E2DE067ACFFFF58BA8FAEE /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA84AA301B2E637B64EA7917 /* KeychainHelper.swift */; };
 		8BCCAF0602D394DD9A182261 /* NotionPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2D7103FF2BB53EB0DB2B06 /* NotionPageView.swift */; };
 		926C58A72353A1A9589D7333 /* NoteAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5789A1B69F7C8C779D1AB3 /* NoteAIApp.swift */; };
+		988236332878808633E8FDAE /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878CBAEADF154FEB0AC80AFA /* TaskDetailView.swift */; };
 		9CC0354A93E3A82738E661E6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20A2936958A2188902476039 /* Assets.xcassets */; };
 		9CEFF2981B130BDA48B5E206 /* CoachPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2518E6F5F675E601EC1854CD /* CoachPanelView.swift */; };
 		A62C850C374AE9BBE8D7AF96 /* MeetingNamePromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146E8758C5F2E3C7211F4B39 /* MeetingNamePromptView.swift */; };
@@ -75,13 +76,13 @@
 		BFC5B00BB6A317264C625837 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76FB78343ABD52A1EFE8666C /* LoginView.swift */; };
 		C3DC7EA04B75F7FD49775030 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 2605629576F958EFB4224FE8 /* GRDB */; };
 		CE487E2B3C8EEE874897416E /* MeetingLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C60554C3878865ED798844 /* MeetingLibraryView.swift */; };
+		D470EEF51F55F7B939FDB254 /* T5TMailDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4F51785AD90EEEF9E8814D /* T5TMailDraft.swift */; };
 		D57D2158AAE6B1A1A17D1F4C /* T5TConfigSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A9FD043430E42F3E367D9A /* T5TConfigSheet.swift */; };
 		D5D72205213E4589E200821A /* TodoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B302FC97494EFE1DFA9E12 /* TodoDetailView.swift */; };
 		D646E51F78654742FF540695 /* T5TReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB3766E5A948FC25F5D54550 /* T5TReport.swift */; };
 		D9ED33246708877C52269DB0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5275EBCAF60616BF7FB48838 /* Theme.swift */; };
 		DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EE88F8B897F5B1CE3EF8FF /* TTSPlayerView.swift */; };
 		DDFE1974EF5E36378A3AF82E /* LocalCaptureHelperProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3B32858CF2AC5AD6104843 /* LocalCaptureHelperProtocol.swift */; };
-		E11D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */; };
 		EBABA6C9C4BA258DE5DD6C64 /* CoachInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAA851BE02CC5560A2384D /* CoachInsight.swift */; };
 		F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFADEBEBCA9727CC2302DDDD /* T5TEntryEditor.swift */; };
 		F1D5C7E7EB34A71FE17C673A /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */; };
@@ -136,6 +137,7 @@
 		76FB78343ABD52A1EFE8666C /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		78D94FCFFB8CD60D05DD32CE /* TextToSpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToSpeechService.swift; sourceTree = "<group>"; };
 		87619E6DF3D124304FF29DF6 /* LLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMProvider.swift; sourceTree = "<group>"; };
+		878CBAEADF154FEB0AC80AFA /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		8B7AF75D7C180D2EF19836BF /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		8D91AEE092F68A5599C1C155 /* ChatPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelView.swift; sourceTree = "<group>"; };
 		8F00934F125AB267497C03FA /* MeetingDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetector.swift; sourceTree = "<group>"; };
@@ -157,6 +159,7 @@
 		B584089B6160536C12154E08 /* NoteSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteSelectorView.swift; sourceTree = "<group>"; };
 		B8F52C1801F8EDDC027BA910 /* Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repositories.swift; sourceTree = "<group>"; };
 		BB5AA1AAC32AD1BFAD9B79B4 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		BD4F51785AD90EEEF9E8814D /* T5TMailDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T5TMailDraft.swift; sourceTree = "<group>"; };
 		BF5537BC64EB7235F2A002E7 /* NotionImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionImporter.swift; sourceTree = "<group>"; };
 		C0DD6F573EA9F49038593E89 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C127BA10A1B02F8EBAC90127 /* NotePageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotePageView.swift; sourceTree = "<group>"; };
@@ -173,7 +176,6 @@
 		DB390385F199831DC1789A61 /* LibraryOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryOperations.swift; sourceTree = "<group>"; };
 		DC9ADA6F4C7FFF915174431B /* LocalCaptureHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCaptureHelperTests.swift; sourceTree = "<group>"; };
 		DFED471090686D9A28B620DA /* TranscriptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionEngine.swift; sourceTree = "<group>"; };
-		E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		EBB8C87C56A6D5C1B78C7DB9 /* LocalCaptureHelperStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCaptureHelperStatusProvider.swift; sourceTree = "<group>"; };
 		EFB36C6105D57E388C20B6A5 /* RecordingDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDiagnosticsTests.swift; sourceTree = "<group>"; };
 		F0008DC27CC173ED47C3B026 /* NoteAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -236,6 +238,7 @@
 				FAEF817F16010C5A2792323D /* ExportManager.swift */,
 				3B071D338F9B3BC984C0225C /* NotificationDelivery.swift */,
 				BF5537BC64EB7235F2A002E7 /* NotionImporter.swift */,
+				BD4F51785AD90EEEF9E8814D /* T5TMailDraft.swift */,
 			);
 			path = Delivery;
 			sourceTree = "<group>";
@@ -293,6 +296,14 @@
 				2518E6F5F675E601EC1854CD /* CoachPanelView.swift */,
 			);
 			path = AICoach;
+			sourceTree = "<group>";
+		};
+		3B720DA86429780447B3E26F /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				878CBAEADF154FEB0AC80AFA /* TaskDetailView.swift */,
+			);
+			path = Tasks;
 			sourceTree = "<group>";
 		};
 		580F209C99D1922CF635F72F /* Products */ = {
@@ -444,7 +455,7 @@
 				5FCD69E14BF8F976BDBD3B1F /* Settings */,
 				03BB510423A7102C117A617E /* SummaryView */,
 				F1F7594F8ECC7E154E563729 /* T5T */,
-				E33D4A8A7A0C4F06971F2B31 /* Tasks */,
+				3B720DA86429780447B3E26F /* Tasks */,
 				64F66B3D4B407E0B5751C9F9 /* TextToSpeech */,
 				E9034B846CAF7220E3D69AA6 /* Todos */,
 				251D37A5FE21E6EF6AAB7338 /* TranscriptViewer */,
@@ -458,14 +469,6 @@
 				A2B302FC97494EFE1DFA9E12 /* TodoDetailView.swift */,
 			);
 			path = Todos;
-			sourceTree = "<group>";
-		};
-		E33D4A8A7A0C4F06971F2B31 /* Tasks */ = {
-			isa = PBXGroup;
-			children = (
-				E22D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift */,
-			);
-			path = Tasks;
 			sourceTree = "<group>";
 		};
 		F1F7594F8ECC7E154E563729 /* T5T */ = {
@@ -665,9 +668,10 @@
 				0C69E0BD10BFBECFEEA97435 /* T5TComposerView.swift in Sources */,
 				D57D2158AAE6B1A1A17D1F4C /* T5TConfigSheet.swift in Sources */,
 				F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */,
+				D470EEF51F55F7B939FDB254 /* T5TMailDraft.swift in Sources */,
 				D646E51F78654742FF540695 /* T5TReport.swift in Sources */,
-				E11D4A8A7A0C4F06971F2B31 /* TaskDetailView.swift in Sources */,
 				DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */,
+				988236332878808633E8FDAE /* TaskDetailView.swift in Sources */,
 				518BB86BFA5C7269491D4D66 /* TextToSpeechService.swift in Sources */,
 				D9ED33246708877C52269DB0 /* Theme.swift in Sources */,
 				D5D72205213E4589E200821A /* TodoDetailView.swift in Sources */,
@@ -706,6 +710,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = NoteAI/NoteAI.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -884,6 +889,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = NoteAI/NoteAI.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

@@ -908,6 +908,55 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(actionSource.contains("meetingIDs: meetingsInRange.map(\\.id)"))
     }
 
+    func testT5TMailDraftURLPreservesFullBodyWithAmpersandsBulletsAndNewlines() throws {
+        let report = T5TReport(
+            id: UUID(),
+            title: "Top 5 Things - Inference Ops | NALA | SA",
+            createdDate: Date(timeIntervalSince1970: 0),
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            meetingIDs: [],
+            taskIDs: [],
+            sections: T5TSections(
+                insights: [
+                    T5TEntry(
+                        headline: "Insights, Management Escalations & Help Needed",
+                        explanation: "Reframed roadmap ownership & automation blockers."
+                    ),
+                ],
+                accountUpdates: [
+                    T5TEntry(
+                        headline: "Industry Business Development / Account Updates",
+                        explanation: "Restarted Nscale 30/60/90 with Dynamo PoC & Envoy alignment."
+                    ),
+                ],
+                futurePlans: [
+                    T5TEntry(
+                        headline: "Land Nscale Dynamo PoC",
+                        explanation: "Next two weeks: execute benchmark runs.\nKeep follow-up crisp."
+                    ),
+                ]
+            ),
+            status: .draft
+        )
+
+        let url = try XCTUnwrap(T5TMailDraft.mailtoURL(for: report))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let subject = components.queryItems?.first { $0.name == "subject" }?.value
+        let body = components.queryItems?.first { $0.name == "body" }?.value
+
+        XCTAssertEqual(subject, report.title)
+        XCTAssertEqual(body, report.emailBody)
+        XCTAssertTrue(body?.contains("Management Escalations & Help Needed") == true)
+        XCTAssertTrue(body?.contains("Dynamo PoC & Envoy alignment") == true)
+        XCTAssertTrue(body?.contains("• Land Nscale Dynamo PoC") == true)
+        XCTAssertTrue(body?.contains("Keep follow-up crisp.") == true)
+
+        let composerSource = try t5tComposerSource()
+        XCTAssertTrue(composerSource.contains("T5TMailDraft.mailtoURL(for: report)"))
+        XCTAssertFalse(composerSource.contains(".urlQueryAllowed"))
+    }
+
     func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {
         let source = try chatManagerSource()
 

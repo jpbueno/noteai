@@ -1,6 +1,8 @@
 import AppKit
 
 enum T5TMailDraft {
+    private static let outlookOutgoingMessageClass = "\u{00AB}class outm\u{00BB}"
+
     enum AppleScriptExecution {
         case success
         case failure(String)
@@ -102,7 +104,7 @@ enum T5TMailDraft {
     private static func outlookAppleScriptSource(for report: T5TReport) -> String {
         """
         tell application "Microsoft Outlook"
-            set newMessage to make new outgoing_message with properties {subject:\(appleScriptLiteral(report.title)), content:\(appleScriptLiteral(htmlBody(for: report)))}
+            set newMessage to make new \(outlookOutgoingMessageClass) with properties {subject:\(appleScriptLiteral(report.title)), content:\(appleScriptLiteral(htmlBody(for: report)))}
             open newMessage
             activate
         end tell

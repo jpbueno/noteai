@@ -1009,7 +1009,8 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(composerSource.contains("NSWorkspace.shared.open(url)"))
 
         let mailDraftSource = try t5tMailDraftSource()
-        XCTAssertTrue(mailDraftSource.contains("make new outgoing_message with properties"))
+        XCTAssertTrue(mailDraftSource.contains(#""\u{00AB}class outm\u{00BB}""#))
+        XCTAssertFalse(mailDraftSource.contains("make new outgoing_message with properties"))
         XCTAssertFalse(mailDraftSource.contains("make new message with properties"))
         XCTAssertFalse(mailDraftSource.contains("make new outgoing message"))
     }
@@ -1078,7 +1079,8 @@ final class ArchitectureModuleTests: XCTestCase {
         let result = T5TMailDraft.open(for: report, environment: environment)
 
         XCTAssertNil(openedURL)
-        XCTAssertTrue(executedScript?.contains("make new outgoing_message with properties") == true)
+        XCTAssertTrue(executedScript?.contains("make new \u{00AB}class outm\u{00BB} with properties") == true)
+        XCTAssertTrue(executedScript?.contains("outgoing_message") == false)
         XCTAssertEqual(result, .outlookAutomationFailed("Not authorized to send Apple events to Microsoft Outlook."))
     }
 

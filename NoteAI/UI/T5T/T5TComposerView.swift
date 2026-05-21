@@ -13,6 +13,7 @@ struct T5TComposerView: View {
     @State private var showTaskSelector = true
     @State private var editableConfig: T5TConfig
     @State private var generationError: String?
+    @State private var mailDraftError: String?
 
     init(meetingManager: MeetingManager, report: Binding<T5TReport>, ttsService: TextToSpeechService) {
         self.meetingManager = meetingManager
@@ -67,6 +68,21 @@ struct T5TComposerView: View {
                 report.title = config.subjectLine
                 meetingManager.updateT5TReport(report)
             }
+        }
+        .alert(
+            "Could not open formatted Outlook draft",
+            isPresented: Binding(
+                get: { mailDraftError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        mailDraftError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(mailDraftError ?? "")
         }
         .onAppear {
             if !meetingManager.t5tConfig.isComplete && report.sections.isEmpty {
@@ -356,7 +372,10 @@ struct T5TComposerView: View {
     }
 
     private func openInMail() {
-        T5TMailDraft.open(for: report)
+        let result = T5TMailDraft.open(for: report)
+        if case .outlookAutomationFailed(let message) = result {
+            mailDraftError = message
+        }
     }
 
     private func syncPeriodAndTaskSelection() {

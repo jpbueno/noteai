@@ -1009,8 +1009,88 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(composerSource.contains("NSWorkspace.shared.open(url)"))
 
         let mailDraftSource = try t5tMailDraftSource()
-        XCTAssertTrue(mailDraftSource.contains("make new message with properties"))
+        XCTAssertTrue(mailDraftSource.contains("make new outgoing_message with properties"))
+        XCTAssertFalse(mailDraftSource.contains("make new message with properties"))
         XCTAssertFalse(mailDraftSource.contains("make new outgoing message"))
+    }
+
+    func testT5TMailDraftFallsBackToMailtoOnlyWhenOutlookIsUnavailable() throws {
+        let report = T5TReport(
+            id: UUID(),
+            title: "Top 5 Things - Inference Ops | NALA | SA",
+            createdDate: Date(timeIntervalSince1970: 0),
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            meetingIDs: [],
+            taskIDs: [],
+            sections: T5TSections(
+                insights: [T5TEntry(headline: "Insight", explanation: "Plain fallback content")],
+                accountUpdates: [],
+                futurePlans: []
+            ),
+            status: .draft
+        )
+        var openedURL: URL?
+        var executedScripts: [String] = []
+        let environment = T5TMailDraft.Environment(
+            isOutlookAvailable: { false },
+            executeAppleScript: { source in
+                executedScripts.append(source)
+                return .success
+            },
+            openURL: { url in openedURL = url }
+        )
+
+        let result = T5TMailDraft.open(for: report, environment: environment)
+
+        XCTAssertEqual(result, .openedMailtoFallback)
+        XCTAssertEqual(openedURL?.scheme, "mailto")
+        XCTAssertTrue(executedScripts.isEmpty)
+    }
+
+    func testT5TMailDraftDoesNotOpenPlainMailtoWhenOutlookAutomationFails() throws {
+        let report = T5TReport(
+            id: UUID(),
+            title: "Top 5 Things - Inference Ops | NALA | SA",
+            createdDate: Date(timeIntervalSince1970: 0),
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400),
+            meetingIDs: [],
+            taskIDs: [],
+            sections: T5TSections(
+                insights: [T5TEntry(headline: "Insight", explanation: "Formatted content")],
+                accountUpdates: [],
+                futurePlans: []
+            ),
+            status: .draft
+        )
+        var openedURL: URL?
+        var executedScript: String?
+        let environment = T5TMailDraft.Environment(
+            isOutlookAvailable: { true },
+            executeAppleScript: { source in
+                executedScript = source
+                return .failure("Not authorized to send Apple events to Microsoft Outlook.")
+            },
+            openURL: { url in openedURL = url }
+        )
+
+        let result = T5TMailDraft.open(for: report, environment: environment)
+
+        XCTAssertNil(openedURL)
+        XCTAssertTrue(executedScript?.contains("make new outgoing_message with properties") == true)
+        XCTAssertEqual(result, .outlookAutomationFailed("Not authorized to send Apple events to Microsoft Outlook."))
+    }
+
+    func testT5TComposerShowsOutlookAutomationFailureInsteadOfSilentFallback() throws {
+        let composerSource = try t5tComposerSource()
+
+        XCTAssertTrue(composerSource.contains("@State private var mailDraftError: String?"))
+        XCTAssertTrue(composerSource.contains(".alert("))
+        XCTAssertTrue(composerSource.contains("\"Could not open formatted Outlook draft\""))
+        XCTAssertTrue(composerSource.contains("let result = T5TMailDraft.open(for: report)"))
+        XCTAssertTrue(composerSource.contains("mailDraftError = message"))
+        XCTAssertFalse(composerSource.contains("private func openInMail() {\n        T5TMailDraft.open(for: report)\n    }"))
     }
 
     func testChatAssistantSeparatesTasksFromTodosWithoutCreatingTaskLikeNotes() throws {

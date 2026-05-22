@@ -32,7 +32,7 @@ final class ChatManager: ObservableObject {
     - create_todo: {"action":"create_todo", "title":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
     - list_tasks: {"action":"list_tasks", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true, "include_source":true} — lists durable Tasks as copy-ready Markdown with date lines and indented bullets
     - list_todos: {"action":"list_todos", "status":"open|completed|all"} — lists lightweight reminder todos
-    - create_t5t: {"action":"create_t5t", "input":"..."} — generates a full T5T report. Put ALL the user's input text in the "input" field so the AI can use it to generate the report sections.
+    - create_t5t: {"action":"create_t5t"} — generates a full T5T report from durable Tasks using JP's default NVIDIA Top 5 Things style.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
     - list_notes: {"action":"list_notes"} — shows recent notes
@@ -46,7 +46,7 @@ final class ChatManager: ObservableObject {
     - For list actions, format the results nicely
     - For search, show matching results
     - If no action is needed, just chat normally
-    - When asked to create a T5T report, use create_t5t (NOT create_note)
+    - When asked to create a T5T report, use create_t5t (NOT create_note); T5Ts are generated from durable Tasks, not meetings or notes
     - When asked to create a task or todo, use create_task or create_todo (NOT create_note); task requests use create_task and todo requests use create_todo
     - When converting Outlook email conversations into work items, use create_tasks to create durable Tasks and preserve available email source metadata
     - When asked to list tasks, use list_tasks and read from durable Tasks
@@ -227,18 +227,14 @@ final class ChatManager: ObservableObject {
             return AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
 
         case "create_t5t":
-            let inputText = json["input"] as? String ?? ""
             let end = Date()
             let start = Calendar.current.date(byAdding: .day, value: -14, to: end)!
-
-            let meetings = manager.meetingsInRange(start: start, end: end)
-            let notes = manager.notes
             let tasks = manager.tasks
 
             do {
                 let sections = try await summarizationEngine.generateT5T(
-                    meetings: meetings,
-                    notes: inputText.isEmpty ? notes : [Note(title: "Input", content: inputText)],
+                    meetings: [],
+                    notes: [],
                     tasks: tasks,
                     config: manager.t5tConfig,
                     periodStart: start,
@@ -251,7 +247,8 @@ final class ChatManager: ObservableObject {
                     createdDate: Date(),
                     periodStart: start,
                     periodEnd: end,
-                    meetingIDs: meetings.map(\.id),
+                    meetingIDs: [],
+                    noteIDs: [],
                     taskIDs: tasks.map(\.id),
                     sections: sections,
                     status: .draft

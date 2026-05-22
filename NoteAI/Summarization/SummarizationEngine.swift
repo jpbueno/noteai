@@ -151,106 +151,12 @@ final class SummarizationEngine {
     func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
         let client = try buildClient()
         let model = selectedModelID()
-
-        let dateFmt = DateFormatter()
-        dateFmt.dateStyle = .medium
-
-        // Build per-meeting summaries for the prompt
-        var meetingBlocks: [String] = []
-        for meeting in meetings {
-            var block = "MEETING: \(meeting.title)\n"
-            block += "DATE: \(meeting.date.formatted(date: .abbreviated, time: .shortened))\n"
-            block += "DURATION: \(meeting.formattedDuration)\n"
-            block += AITasks.formatSummaryForPrompt(meeting.summary)
-            meetingBlocks.append(block)
-        }
-        let meetingsText = meetingBlocks.joined(separator: "\n\n---\n\n")
-
-        // Build note blocks
-        var noteBlocks: [String] = []
-        for note in notes {
-            var block = "NOTE: \(note.title)\n"
-            block += "DATE: \(note.modifiedDate.formatted(date: .abbreviated, time: .shortened))\n"
-            if !note.tags.isEmpty {
-                block += "TAGS: \(note.tags.joined(separator: ", "))\n"
-            }
-            // Truncate long notes to ~2000 chars to stay within token budget
-            let content = note.content.prefix(2000)
-            block += "CONTENT:\n\(content)"
-            noteBlocks.append(block)
-        }
-        let notesText = noteBlocks.isEmpty ? "" : "\n\nNOTES:\n" + noteBlocks.joined(separator: "\n\n---\n\n")
-
-        // Build task blocks — durable work records are the primary T5T source.
-        var taskBlocks: [String] = []
-        for task in tasks {
-            var block = "- "
-            block += task.isCompleted ? "[DONE] " : "[OPEN] "
-            block += task.title
-            if let workDate = task.workDate {
-                let workFmt = DateFormatter()
-                workFmt.dateStyle = .medium
-                block += " (work date \(workFmt.string(from: workDate)))"
-            }
-            if let completedDate = task.completedDate {
-                let completedFmt = DateFormatter()
-                completedFmt.dateStyle = .medium
-                block += " (completed \(completedFmt.string(from: completedDate)))"
-            }
-            if let owner = task.owner {
-                block += "\n  Owner: \(owner)"
-            }
-            if !task.description.isEmpty {
-                block += "\n  " + String(task.description.prefix(800))
-            }
-            taskBlocks.append(block)
-        }
-        let tasksText = taskBlocks.isEmpty ? "" : "\n\nTASKS:\n" + taskBlocks.joined(separator: "\n")
-
-        let prompt = """
-        You are an NVIDIA engineer's executive communication assistant. Generate a "Top 5 Things" (T5T) status report from the task records below.
-
-        T5T FORMAT RULES (from Jensen Huang):
-        - T5T is NVIDIA's internal bi-weekly status report read by leadership including Jensen
-        - It must be plain spoken, using "newspaper-style headlines" — verb-driven action phrases, not just nouns
-        - Each entry has a BOLD HEADLINE (action-oriented, e.g. "Enabled Crusoe to Onboard and Benchmark Nemotron") followed by a 2-3 sentence explanation paragraph
-        - Total output should be half to one page when read on a phone
-        - Focus on top priorities being actively worked on — this is a "priority list", NOT a "to-do list"
-        - Include: workload context, usage descriptions, acceleration libraries or tools used, teams driving the work
-        - Share insights, what worked and what didn't, changes in strategy or direction
-        - Do NOT cut-and-paste or repeat items — synthesize across tasks
-
-        THREE SECTIONS (omit any section with no relevant content — return empty array):
-
-        1. "insights" — Insights, Management Escalations & Help Needed, Market & Competition
-           Relevant competitive product info, strategic changes, threats or opportunities, escalations
-
-        2. "accountUpdates" — Industry Business Development / Account Updates
-           Work on business development, ecosystem building, account/partner engagement
-           Include account/partner name, project status, key wins/losses & why
-
-        3. "futurePlans" — Future Plans
-           What you plan to accomplish in the next weeks, your priorities
-
-        ENGINEER'S ROLE:
-        \(config.vertical) | \(config.region) | \(config.jobFunction)
-
-        REPORTING PERIOD: \(dateFmt.string(from: periodStart)) to \(dateFmt.string(from: periodEnd))
-
-        SOURCE CONTEXT:
-        \(meetingsText)
-        \(notesText)
-        \(tasksText)
-
-        OUTPUT: Valid JSON only, with this exact structure:
-        {
-          "insights": [{"headline": "...", "explanation": "..."}],
-          "accountUpdates": [{"headline": "...", "explanation": "..."}],
-          "futurePlans": [{"headline": "...", "explanation": "..."}]
-        }
-
-        Aim for 3-5 total entries across all sections. Quality over quantity. Omit a section (empty array) if no task content maps to it.
-        """
+        let prompt = T5TPrompt.buildPrompt(
+            tasks: tasks,
+            config: config,
+            periodStart: periodStart,
+            periodEnd: periodEnd
+        )
 
         let responseText = try await client.complete(prompt: prompt, model: model)
         return try AITasks.parseT5TSections(responseText)

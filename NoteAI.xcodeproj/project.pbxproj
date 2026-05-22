@@ -75,6 +75,7 @@
 		BDD336675FAC6E8862B6876E /* NotePageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C127BA10A1B02F8EBAC90127 /* NotePageView.swift */; };
 		BFC5B00BB6A317264C625837 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76FB78343ABD52A1EFE8666C /* LoginView.swift */; };
 		C3DC7EA04B75F7FD49775030 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 2605629576F958EFB4224FE8 /* GRDB */; };
+		C6BD5F3E25EE77D6864A498F /* T5TPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13BB9D0A8FBE9F0EE926F318 /* T5TPrompt.swift */; };
 		CE487E2B3C8EEE874897416E /* MeetingLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C60554C3878865ED798844 /* MeetingLibraryView.swift */; };
 		D470EEF51F55F7B939FDB254 /* T5TMailDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4F51785AD90EEEF9E8814D /* T5TMailDraft.swift */; };
 		D57D2158AAE6B1A1A17D1F4C /* T5TConfigSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A9FD043430E42F3E367D9A /* T5TConfigSheet.swift */; };
@@ -103,6 +104,7 @@
 /* Begin PBXFileReference section */
 		070122A1C9307EDF3919B893 /* MeetingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStoreTests.swift; sourceTree = "<group>"; };
 		08CA9D22EA6B79EBB1EE955B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		13BB9D0A8FBE9F0EE926F318 /* T5TPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T5TPrompt.swift; sourceTree = "<group>"; };
 		146E8758C5F2E3C7211F4B39 /* MeetingNamePromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNamePromptView.swift; sourceTree = "<group>"; };
 		161E870D01B1967F0967FCC4 /* AICoachEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICoachEngine.swift; sourceTree = "<group>"; };
 		1EF718225D5C885FDB361E0D /* Note.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Note.swift; sourceTree = "<group>"; };
@@ -437,6 +439,7 @@
 				4D26B413A6C06CBF3B0B76DD /* OpenRouterClient.swift */,
 				A3654E87D10A4BF1FBF11E1A /* OpenRouterModelFetcher.swift */,
 				C5EF390F77D3249B27E44552 /* SummarizationEngine.swift */,
+				13BB9D0A8FBE9F0EE926F318 /* T5TPrompt.swift */,
 			);
 			path = Summarization;
 			sourceTree = "<group>";
@@ -669,6 +672,7 @@
 				D57D2158AAE6B1A1A17D1F4C /* T5TConfigSheet.swift in Sources */,
 				F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */,
 				D470EEF51F55F7B939FDB254 /* T5TMailDraft.swift in Sources */,
+				C6BD5F3E25EE77D6864A498F /* T5TPrompt.swift in Sources */,
 				D646E51F78654742FF540695 /* T5TReport.swift in Sources */,
 				DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */,
 				988236332878808633E8FDAE /* TaskDetailView.swift in Sources */,

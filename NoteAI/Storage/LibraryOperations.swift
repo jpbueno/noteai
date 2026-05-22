@@ -48,6 +48,7 @@ enum LibraryOperations {
         let vertical = config.vertical.trimmingCharacters(in: .whitespaces)
         let region = config.region.trimmingCharacters(in: .whitespaces)
         let jobFunction = config.jobFunction.trimmingCharacters(in: .whitespaces)
-        return "Top 5 Things – \(vertical.isEmpty ? "Inference Ops" : vertical) | \(region.isEmpty ? "NALA" : region) | \(jobFunction.isEmpty ? "SA" : jobFunction)"
+        let title = "Top 5 Things - \(vertical.isEmpty ? "Inference Ops" : vertical) | \(region.isEmpty ? "NALA" : region) | \(jobFunction.isEmpty ? "SA" : jobFunction)"
+        return title.isEmpty ? T5TPrompt.defaultSubjectLine : title
     }
 }

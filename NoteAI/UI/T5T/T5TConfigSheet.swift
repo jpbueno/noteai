@@ -21,7 +21,7 @@ struct T5TConfigSheet: View {
                 Text("Subject line format:")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
-                Text("Top 5 Things – \(config.vertical.isEmpty ? "[Vertical]" : config.vertical) | \(config.region.isEmpty ? "[Region]" : config.region) | \(config.jobFunction.isEmpty ? "[Job Function]" : config.jobFunction)")
+                Text("Top 5 Things - \(config.vertical.isEmpty ? "[Vertical]" : config.vertical) | \(config.region.isEmpty ? "[Region]" : config.region) | \(config.jobFunction.isEmpty ? "[Job Function]" : config.jobFunction)")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
                     .padding(8)

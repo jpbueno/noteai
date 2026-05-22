@@ -890,8 +890,90 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(selectorSource.contains("systemImage: \"calendar\""))
         XCTAssertTrue(selectorSource.contains("systemImage: \"text.alignleft\""))
         XCTAssertTrue(engineSource.contains("func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = []"))
-        XCTAssertTrue(engineSource.contains("TASKS:"))
+        XCTAssertTrue(engineSource.contains("T5TPrompt.buildPrompt("))
+        XCTAssertTrue(try t5tPromptSource().contains("TASK SOURCE MATERIAL:"))
         XCTAssertFalse(engineSource.contains("TODOS:"))
+    }
+
+    func testT5TPromptCentralizesJPPreferredNVIDIAStyle() throws {
+        let promptSource = try t5tPromptSource()
+        let engineSource = try summarizationEngineSource()
+
+        XCTAssertTrue(promptSource.contains("enum T5TPrompt"))
+        XCTAssertTrue(promptSource.contains("Top 5 Things - Inference Ops | NALA | SA"))
+        XCTAssertTrue(promptSource.contains("Industry Business Development / Account Updates"))
+        XCTAssertTrue(promptSource.contains("Future Plans"))
+        XCTAssertTrue(promptSource.contains("Make it a priority list, not a to-do list."))
+        XCTAssertTrue(promptSource.contains("Do not use \"Result:\" labels"))
+        XCTAssertTrue(promptSource.contains("Work-in-progress and open items belong in futurePlans"))
+        XCTAssertTrue(promptSource.contains("Do not claim JP caused a customer or partner action when he is supporting it."))
+        XCTAssertTrue(promptSource.contains("Omit sections that do not apply"))
+        XCTAssertTrue(promptSource.contains("Avoid naming Slack channels"))
+        XCTAssertTrue(promptSource.contains("Avoid links in final T5Ts unless explicitly requested."))
+        XCTAssertTrue(promptSource.contains("Return ONLY valid JSON"))
+
+        XCTAssertTrue(engineSource.contains("T5TPrompt.buildPrompt("))
+        XCTAssertFalse(engineSource.contains("T5T FORMAT RULES (from Jensen Huang):"))
+    }
+
+    func testT5TPromptBuildsTaskOnlyContextAndRoutesOpenWorkToFuturePlans() throws {
+        let completed = TaskItem(
+            title: "Delivered Production Cadence JEDAI Platform",
+            description: "Moved Cadence JEDAI from PoC to production NVPark/NVCF service for 300+ engineers.",
+            status: .completed,
+            workDate: Date(timeIntervalSince1970: 1_800),
+            completedDate: Date(timeIntervalSince1970: 2_000),
+            createdDate: Date(timeIntervalSince1970: 1_000),
+            modifiedDate: Date(timeIntervalSince1970: 2_000)
+        )
+        let open = TaskItem(
+            title: "Execute Nscale Dynamo PoC",
+            description: "Advance sample integrations, two-cluster testing, network validation, and load metrics.",
+            status: .open,
+            workDate: Date(timeIntervalSince1970: 3_000),
+            createdDate: Date(timeIntervalSince1970: 3_000),
+            modifiedDate: Date(timeIntervalSince1970: 3_000)
+        )
+
+        let prompt = T5TPrompt.buildPrompt(
+            tasks: [completed, open],
+            config: .empty,
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400)
+        )
+
+        XCTAssertTrue(prompt.contains("SUBJECT LINE DEFAULT:\nTop 5 Things - Inference Ops | NALA | SA"))
+        XCTAssertTrue(prompt.contains("COMPLETED TASKS - use as candidates for accountUpdates"))
+        XCTAssertTrue(prompt.contains("[COMPLETED] Delivered Production Cadence JEDAI Platform"))
+        XCTAssertTrue(prompt.contains("OPEN / IN-PROGRESS TASKS - use as candidates for futurePlans"))
+        XCTAssertTrue(prompt.contains("[OPEN] Execute Nscale Dynamo PoC"))
+        XCTAssertFalse(prompt.contains("MEETING SUMMARIES:"))
+        XCTAssertFalse(prompt.contains("NOTES:"))
+        XCTAssertFalse(prompt.contains("TODOS:"))
+    }
+
+    func testT5TDefaultSubjectUsesExactPreferredHyphenatedFormat() throws {
+        XCTAssertEqual(T5TPrompt.defaultSubjectLine, "Top 5 Things - Inference Ops | NALA | SA")
+        XCTAssertEqual(LibraryOperations.t5tDefaultTitle(config: .empty), "Top 5 Things - Inference Ops | NALA | SA")
+
+        let source = try t5tConfigSheetSource()
+        XCTAssertTrue(source.contains("Top 5 Things - "))
+        XCTAssertFalse(source.contains("Top 5 Things – "))
+    }
+
+    func testAssistantT5TCreationUsesTasksAndCanonicalPromptPath() throws {
+        let source = try chatManagerSource()
+        let actionStart = try XCTUnwrap(source.range(of: "case \"create_t5t\":"))
+        let nextAction = try XCTUnwrap(source.range(of: "case \"list_t5t\":", range: actionStart.upperBound..<source.endIndex))
+        let actionSource = String(source[actionStart.lowerBound..<nextAction.lowerBound])
+
+        XCTAssertTrue(actionSource.contains("tasks: tasks"))
+        XCTAssertTrue(actionSource.contains("taskIDs: tasks.map(\\.id)"))
+        XCTAssertTrue(actionSource.contains("meetingIDs: []"))
+        XCTAssertTrue(actionSource.contains("noteIDs: []"))
+        XCTAssertFalse(actionSource.contains("let meetings = manager.meetingsInRange"))
+        XCTAssertFalse(actionSource.contains("let notes = manager.notes"))
+        XCTAssertFalse(actionSource.contains("notes: inputText.isEmpty ? notes"))
     }
 
     func testNewT5TReportsAreSeededFromTasksOnly() throws {
@@ -1415,6 +1497,20 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let engineFile = projectRoot.appendingPathComponent("NoteAI/Summarization/SummarizationEngine.swift")
         return try String(contentsOf: engineFile, encoding: .utf8)
+    }
+
+    private func t5tPromptSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let promptFile = projectRoot.appendingPathComponent("NoteAI/Summarization/T5TPrompt.swift")
+        return try String(contentsOf: promptFile, encoding: .utf8)
+    }
+
+    private func t5tConfigSheetSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let configFile = projectRoot.appendingPathComponent("NoteAI/UI/T5T/T5TConfigSheet.swift")
+        return try String(contentsOf: configFile, encoding: .utf8)
     }
 
     private func settingsSource() throws -> String {

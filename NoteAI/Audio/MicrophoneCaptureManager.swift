@@ -60,6 +60,14 @@ final class MicrophoneCaptureManager {
 
     private func installTapAndStart(engine: AVAudioEngine, onBuffer: @escaping (AVAudioPCMBuffer) -> Void) throws {
         let inputNode = engine.inputNode
+
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            print("[MicCapture] Voice processing enabled for microphone capture")
+        } catch {
+            print("[MicCapture] Voice processing unavailable for current input: \(error)")
+        }
+
         let format = inputNode.outputFormat(forBus: 0)
 
         print("[MicCapture] Mic format: \(format.sampleRate)Hz, \(format.channelCount)ch, \(format.commonFormat.rawValue)")

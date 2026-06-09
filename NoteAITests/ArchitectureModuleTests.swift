@@ -79,6 +79,28 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("AudioObjectID(bitPattern: processID)"))
     }
 
+    func testAudioConverterCacheKeyIncludesFullInputFormatForBluetoothRouteChanges() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/Audio/AudioCaptureManager.swift"))
+
+        XCTAssertTrue(source.contains("struct AudioConverterCacheKey: Hashable"))
+        XCTAssertTrue(source.contains("let channelCount: AVAudioChannelCount"))
+        XCTAssertTrue(source.contains("let commonFormat: AVAudioCommonFormat"))
+        XCTAssertTrue(source.contains("let interleaved: Bool"))
+        XCTAssertTrue(source.contains("converterCache[cacheKey]"))
+        XCTAssertFalse(source.contains("converterCache[srcFormat.sampleRate]"))
+    }
+
+    func testMicrophoneCaptureEnablesVoiceProcessingBeforeReadingInputFormat() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/Audio/MicrophoneCaptureManager.swift"))
+
+        let voiceProcessingRange = try XCTUnwrap(source.range(of: "setVoiceProcessingEnabled(true)"))
+        let formatRange = try XCTUnwrap(source.range(of: "let format = inputNode.outputFormat(forBus: 0)"))
+
+        XCTAssertLessThan(voiceProcessingRange.lowerBound, formatRange.lowerBound)
+    }
+
     func testLegacyNoteDecodesWithoutSpace() throws {
         let data = """
         {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","content":"Existing note","tags":["account"],"createdDate":0,"modifiedDate":0,"sourceMeetingID":null}

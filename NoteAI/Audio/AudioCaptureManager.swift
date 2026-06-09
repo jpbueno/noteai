@@ -63,8 +63,9 @@ final class AudioCaptureManager: NSObject {
     }
     private var isCapturing = false
 
-    /// Cached converters keyed by source sample rate to avoid creating one per buffer
-    private var converterCache: [Double: AVAudioConverter] = [:]
+    /// Cached converters keyed by the full source format to avoid reusing a converter
+    /// across Bluetooth route changes that keep the same sample rate but change layout.
+    private var converterCache: [AudioConverterCacheKey: AVAudioConverter] = [:]
 
     /// Target format for WhisperKit: 16kHz, mono, float32
     private static let targetSampleRate: Double = 16000
@@ -329,16 +330,17 @@ final class AudioCaptureManager: NSObject {
             return buffer
         }
 
-        // Reuse cached converter for this sample rate
+        // Reuse cached converter for this exact source format.
+        let cacheKey = AudioConverterCacheKey(format: srcFormat)
         let converter: AVAudioConverter
-        if let cached = converterCache[srcFormat.sampleRate] {
+        if let cached = converterCache[cacheKey] {
             converter = cached
         } else {
             guard let newConverter = AVAudioConverter(from: srcFormat, to: Self.targetFormat) else {
                 print("[AudioCapture] Failed to create converter from \(srcFormat) to 16kHz mono")
                 return buffer
             }
-            converterCache[srcFormat.sampleRate] = newConverter
+            converterCache[cacheKey] = newConverter
             converter = newConverter
         }
 
@@ -394,6 +396,20 @@ final class AudioCaptureManager: NSObject {
         let snapshot = diagnostics
         diagnosticsLock.unlock()
         log("Diagnostics \(event): \(snapshot.troubleshootingLines().joined(separator: " | "))")
+    }
+}
+
+struct AudioConverterCacheKey: Hashable {
+    let sampleRate: Double
+    let channelCount: AVAudioChannelCount
+    let commonFormat: AVAudioCommonFormat
+    let interleaved: Bool
+
+    init(format: AVAudioFormat) {
+        self.sampleRate = format.sampleRate
+        self.channelCount = format.channelCount
+        self.commonFormat = format.commonFormat
+        self.interleaved = format.isInterleaved
     }
 }
 

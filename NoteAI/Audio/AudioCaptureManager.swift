@@ -21,6 +21,10 @@ enum CapturedAudioSource: Equatable {
     }
 }
 
+enum AppAudioCaptureSource: Equatable {
+    case processID(pid_t, displayName: String)
+}
+
 /// Orchestrates audio capture:
 /// 1. ProcessTap (macOS 14.2+) for direct per-process audio capture from a meeting app
 /// 2. ScreenCaptureKit ALL desktop audio capture as fallback (any app, any speaker)
@@ -71,7 +75,7 @@ final class AudioCaptureManager: NSObject {
         interleaved: false
     )!
 
-    func startCapture() async throws {
+    func startCapture(preferredSource: AppAudioCaptureSource? = nil) async throws {
         guard !isCapturing else { return }
         updateDiagnostics { snapshot in
             snapshot = RecordingDiagnosticsSnapshot.currentPermissions()
@@ -80,7 +84,7 @@ final class AudioCaptureManager: NSObject {
         }
 
         // Try to capture meeting app audio
-        let appCaptureStarted = await startAppAudioCapture()
+        let appCaptureStarted = await startAppAudioCapture(preferredSource: preferredSource)
         if !appCaptureStarted {
             log("WARNING: No app audio — mic only (meeting participants won't be transcribed)")
             print("[AudioCapture] No app audio capture available — mic only mode")
@@ -150,7 +154,7 @@ final class AudioCaptureManager: NSObject {
 
     // MARK: - App audio capture (Teams/browser)
 
-    private func startAppAudioCapture() async -> Bool {
+    private func startAppAudioCapture(preferredSource: AppAudioCaptureSource? = nil) async -> Bool {
         // ScreenCaptureKit needs screen capture access, but Core Audio process taps
         // use the system-audio permission added in macOS 14.2. Try taps first so
         // audio-only grants are not blocked by a screen preflight failure.
@@ -161,6 +165,33 @@ final class AudioCaptureManager: NSObject {
 
         // Strategy 1: ProcessTap (macOS 14.2+) — direct per-PID capture, best quality
         if #available(macOS 14.2, *) {
+            if let preferredSource {
+                do {
+                    let tap = ProcessTapProvider()
+                    let sourceDescription = preferredSource.displayName
+                    try tap.startTap(processID: preferredSource.processID) { [weak self] buffer in
+                        self?.handleAppAudioBuffer(buffer)
+                    }
+                    processTap = tap
+                    RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(true)
+                    updateDiagnostics { snapshot in
+                        snapshot.updatePermission(.screenRecording, status: .granted)
+                        snapshot.updatePermission(.processTap, status: .granted)
+                        snapshot.updateCapture(.systemAudio, status: .capturing)
+                    }
+                    log("ProcessTap OK: PID=\(preferredSource.processID) app=\(sourceDescription)")
+                    print("[AudioCapture] ProcessTap capturing PID \(preferredSource.processID) (\(sourceDescription))")
+                    return true
+                } catch {
+                    RecordingDiagnosticsSnapshot.recordSystemAudioAccessConfirmed(false)
+                    updateDiagnostics { snapshot in
+                        snapshot.updatePermission(.processTap, status: .unavailable(error.localizedDescription))
+                    }
+                    log("Preferred ProcessTap FAILED: \(error)")
+                    print("[AudioCapture] Preferred ProcessTap failed: \(error) — trying detected app/fallback")
+                }
+            }
+
             if let app = ProcessMonitor.findMeetingApp() {
                 do {
                     let tap = ProcessTapProvider()
@@ -363,6 +394,22 @@ final class AudioCaptureManager: NSObject {
         let snapshot = diagnostics
         diagnosticsLock.unlock()
         log("Diagnostics \(event): \(snapshot.troubleshootingLines().joined(separator: " | "))")
+    }
+}
+
+private extension AppAudioCaptureSource {
+    var processID: pid_t {
+        switch self {
+        case .processID(let pid, _):
+            return pid
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .processID(_, let displayName):
+            return displayName
+        }
     }
 }
 

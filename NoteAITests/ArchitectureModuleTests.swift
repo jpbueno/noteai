@@ -3,6 +3,37 @@ import SwiftUI
 @testable import NoteAI
 
 final class ArchitectureModuleTests: XCTestCase {
+    func testV5AutoDetectionDefaultsArmTeamsSmartWhenNoEngineWasChosen() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "NoteAI.v5.auto-detect.default.\(UUID().uuidString)"))
+
+        XCTAssertNil(defaults.object(forKey: AutoDetectionDefaults.engineKey))
+        XCTAssertFalse(defaults.bool(forKey: AutoDetectionDefaults.autoDetectKey))
+
+        AutoDetectionDefaults.migrateToV5DefaultsIfNeeded(defaults)
+
+        XCTAssertTrue(defaults.bool(forKey: AutoDetectionDefaults.autoDetectKey))
+        XCTAssertEqual(defaults.string(forKey: AutoDetectionDefaults.engineKey), AutoDetectionEngine.teamsV5.rawValue)
+    }
+
+    func testV5AutoDetectionMigrationPreservesExplicitEngineChoice() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "NoteAI.v5.auto-detect.explicit.\(UUID().uuidString)"))
+        defaults.set(false, forKey: AutoDetectionDefaults.autoDetectKey)
+        defaults.set(AutoDetectionEngine.classicV4.rawValue, forKey: AutoDetectionDefaults.engineKey)
+
+        AutoDetectionDefaults.migrateToV5DefaultsIfNeeded(defaults)
+
+        XCTAssertFalse(defaults.bool(forKey: AutoDetectionDefaults.autoDetectKey))
+        XCTAssertEqual(defaults.string(forKey: AutoDetectionDefaults.engineKey), AutoDetectionEngine.classicV4.rawValue)
+    }
+
+    func testSidebarBrandShowsV5ReleaseLabel() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+
+        XCTAssertTrue(source.contains("Text(\"v5.0\")"))
+        XCTAssertFalse(source.contains("Text(\"v4.0\")"))
+    }
+
     func testNVIDIAModelCatalogIncludesOpus47BeforeOpus46() throws {
         let models = OpenRouterModels.models(for: .nvidia)
 

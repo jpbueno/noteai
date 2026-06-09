@@ -12,6 +12,7 @@ final class ChatManager: ObservableObject {
     private let summarizationEngine = SummarizationEngine()
     weak var meetingManager: MeetingManager?
     private var currentChatTask: _Concurrency.Task<Void, Never>?
+    private var pendingOutlookTaskCandidates: [OutlookTaskCandidate] = []
 
     private enum ChatError: Error {
         case timeout
@@ -32,6 +33,8 @@ final class ChatManager: ObservableObject {
     - create_todo: {"action":"create_todo", "title":"...", "due_date":"YYYY-MM-DD or ISO-8601"}
     - list_tasks: {"action":"list_tasks", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "status":"open|completed|all", "include_completed":true, "include_source":true} — lists durable Tasks as copy-ready Markdown with date lines and indented bullets
     - list_todos: {"action":"list_todos", "status":"open|completed|all"} — lists lightweight reminder todos
+    - search_outlook_tasks: {"action":"search_outlook_tasks", "query":"customer, project, topic, sender, or keywords", "after":"YYYY-MM-DD or MM/DD/YYYY", "before":"YYYY-MM-DD or MM/DD/YYYY", "sender":"optional sender filter", "limit":10} — searches Outlook via Microsoft Graph on explicit user request and returns task candidates for review; do not create tasks until the user approves them
+    - approve_outlook_tasks: {"action":"approve_outlook_tasks", "selection":"all"} or {"action":"approve_outlook_tasks", "indexes":[1,2,3]} — creates durable Tasks from the most recent Outlook candidates after user approval
     - create_t5t: {"action":"create_t5t"} — generates a full T5T report from durable Tasks using JP's default NVIDIA Top 5 Things style.
     - search: {"action":"search", "query":"..."} — searches meetings and notes
     - list_meetings: {"action":"list_meetings"} — shows recent meetings
@@ -49,6 +52,8 @@ final class ChatManager: ObservableObject {
     - When asked to create a T5T report, use create_t5t (NOT create_note); T5Ts are generated from durable Tasks, not meetings or notes
     - When asked to create a task or todo, use create_task or create_todo (NOT create_note); task requests use create_task and todo requests use create_todo
     - When converting Outlook email conversations into work items, use create_tasks to create durable Tasks and preserve available email source metadata
+    - When asked to search Outlook or email conversations, use search_outlook_tasks first and ask the user to approve candidates before creating tasks
+    - After the user approves Outlook candidates, use approve_outlook_tasks; do not store full email bodies by default
     - When asked to list tasks, use list_tasks and read from durable Tasks
     - When asked to list todos, use list_todos and read from lightweight Todos
     - Be concise and helpful
@@ -225,6 +230,42 @@ final class ChatManager: ObservableObject {
         case "list_todos":
             let filters = AssistantTodoListFormatter.filters(from: json)
             return AssistantTodoListFormatter.format(todos: manager.todos, filters: filters)
+
+        case "search_outlook_tasks":
+            do {
+                let search = AssistantOutlookActionParser.searchRequest(from: json)
+                let auth = OutlookGraphAuthManager()
+                let client = OutlookGraphClient(accessTokenProvider: {
+                    try await auth.validAccessToken()
+                })
+                let candidates = try await client.searchTaskCandidates(search)
+                pendingOutlookTaskCandidates = candidates
+                return AssistantOutlookCandidateFormatter.format(candidates: candidates)
+            } catch {
+                return "Outlook search failed: \(error.localizedDescription)"
+            }
+
+        case "approve_outlook_tasks":
+            let selectedCandidates = AssistantOutlookActionParser.selectedCandidates(
+                from: json,
+                candidates: pendingOutlookTaskCandidates
+            )
+            guard !selectedCandidates.isEmpty else {
+                return pendingOutlookTaskCandidates.isEmpty
+                    ? "No pending Outlook task candidates. Search Outlook first."
+                    : "No matching Outlook task candidates were selected."
+            }
+            for candidate in selectedCandidates {
+                manager.createTask(
+                    title: candidate.title,
+                    description: candidate.description,
+                    status: .open,
+                    workDate: candidate.workDate,
+                    sourceMetadata: candidate.sourceMetadata
+                )
+            }
+            pendingOutlookTaskCandidates.removeAll()
+            return "Created \(selectedCandidates.count) Outlook-sourced tasks."
 
         case "create_t5t":
             let end = Date()
@@ -440,6 +481,117 @@ enum AssistantTaskActionParser {
             }
         }
         return nil
+    }
+}
+
+enum AssistantOutlookActionParser {
+    static func searchRequest(from json: [String: Any]) -> OutlookMailSearchRequest {
+        OutlookMailSearchRequest(
+            query: stringValue(json["query"] ?? json["q"] ?? json["keywords"]) ?? "",
+            after: parseDate(stringValue(json["after"] ?? json["from"])),
+            before: parseDate(stringValue(json["before"] ?? json["to"])),
+            sender: stringValue(json["sender"] ?? json["from_sender"]),
+            limit: intValue(json["limit"]) ?? 10
+        )
+    }
+
+    static func selectedCandidates(from json: [String: Any], candidates: [OutlookTaskCandidate]) -> [OutlookTaskCandidate] {
+        if let selection = stringValue(json["selection"])?.lowercased(),
+           selection == "all" || selection == "approved" {
+            return candidates
+        }
+
+        let indexes = intArray(json["indexes"] ?? json["index"] ?? json["selected"])
+        guard !indexes.isEmpty else { return [] }
+
+        return indexes.compactMap { index in
+            let zeroBased = index - 1
+            guard candidates.indices.contains(zeroBased) else { return nil }
+            return candidates[zeroBased]
+        }
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        let trimmed = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return nil
+    }
+
+    private static func intArray(_ value: Any?) -> [Int] {
+        if let values = value as? [Int] { return values }
+        if let values = value as? [NSNumber] { return values.map(\.intValue) }
+        if let value = intValue(value) { return [value] }
+        if let values = value as? [String] {
+            return values.compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        return []
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        if let date = isoFormatter.date(from: value) {
+            return date
+        }
+
+        for format in ["yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy"] {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .current
+            formatter.dateFormat = format
+            formatter.isLenient = false
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
+    }
+}
+
+enum AssistantOutlookCandidateFormatter {
+    static func format(candidates: [OutlookTaskCandidate]) -> String {
+        guard !candidates.isEmpty else {
+            return "No Outlook task candidates found."
+        }
+
+        let entries = candidates.enumerated().map { offset, candidate in
+            var lines = [
+                "\(offset + 1). \(candidate.title)",
+            ]
+            if let workDate = candidate.workDate {
+                lines.append("   Date: \(displayDate(workDate))")
+            }
+            if let sender = candidate.sourceMetadata.sender {
+                lines.append("   From: \(sender)")
+            }
+            if !candidate.description.isEmpty {
+                lines.append("   \(candidate.description)")
+            }
+            return lines.joined(separator: "\n")
+        }
+
+        return """
+        Outlook task candidates
+
+        \(entries.joined(separator: "\n\n"))
+
+        Reply with which candidates to create, or approve all.
+        """
+    }
+
+    private static func displayDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM/dd/yyyy"
+        return formatter.string(from: date)
     }
 }
 

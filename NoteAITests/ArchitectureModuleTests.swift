@@ -1430,6 +1430,84 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(filters.status, .all)
     }
 
+    func testOutlookGraphAdapterUsesExplicitBoundedMailReadSearch() throws {
+        let source = try outlookGraphIntegrationSource()
+
+        XCTAssertTrue(source.contains("Mail.Read"))
+        XCTAssertTrue(source.contains("offline_access"))
+        XCTAssertTrue(source.contains("outlook_graph_access_token"))
+        XCTAssertTrue(source.contains("outlook_graph_refresh_token"))
+        XCTAssertTrue(source.contains("KeychainHelper.save(key: accessTokenKey"))
+        XCTAssertTrue(source.contains("https://graph.microsoft.com/v1.0/me/messages"))
+        XCTAssertTrue(source.contains("$top"))
+        XCTAssertTrue(source.contains("$select"))
+        XCTAssertTrue(source.contains("id,conversationId,subject,from,sentDateTime,bodyPreview,webLink"))
+        XCTAssertFalse(source.contains("body,"))
+        XCTAssertFalse(source.contains("https://graph.microsoft.com/v1.0/me/mailFolders"))
+    }
+
+    func testOutlookGraphAdapterBuildsSearchURLWithoutMailboxSync() throws {
+        let client = OutlookGraphClient(accessTokenProvider: { "token" })
+        let request = OutlookMailSearchRequest(query: "Nscale routing", limit: 50)
+        let url = client.searchURL(for: request)
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let items = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        XCTAssertEqual(components.path, "/v1.0/me/messages")
+        XCTAssertEqual(items["$top"], "25")
+        XCTAssertEqual(items["$search"], "\"Nscale routing\"")
+        XCTAssertEqual(items["$select"], "id,conversationId,subject,from,sentDateTime,bodyPreview,webLink")
+        XCTAssertNil(items["$expand"])
+    }
+
+    func testOutlookGraphCandidatePreservesOnlyTaskContentAndMinimalSourceMetadata() throws {
+        let data = """
+        {"value":[{"id":"message-1","conversationId":"thread-1","subject":"RE: Nscale routing follow-up","from":{"emailAddress":{"name":"Alex","address":"alex@example.com"}},"sentDateTime":"2026-05-18T14:30:00Z","bodyPreview":" Please send the gateway routing summary.   Thanks. ","webLink":"https://outlook.office.com/mail/message-1"}]}
+        """.data(using: .utf8)!
+
+        let message = try XCTUnwrap(OutlookGraphClient.decodeMessages(from: data).first)
+        let candidate = OutlookTaskCandidate.from(message: message)
+
+        XCTAssertEqual(candidate.title, "Nscale routing follow-up")
+        XCTAssertEqual(candidate.description, "Please send the gateway routing summary. Thanks.")
+        XCTAssertEqual(candidate.sourceMetadata.kind, .email)
+        XCTAssertEqual(candidate.sourceMetadata.provider, "outlook")
+        XCTAssertEqual(candidate.sourceMetadata.threadID, "thread-1")
+        XCTAssertEqual(candidate.sourceMetadata.messageID, "message-1")
+        XCTAssertEqual(candidate.sourceMetadata.subject, "RE: Nscale routing follow-up")
+        XCTAssertEqual(candidate.sourceMetadata.sender, "Alex <alex@example.com>")
+        XCTAssertEqual(candidate.sourceMetadata.url, "https://outlook.office.com/mail/message-1")
+    }
+
+    func testChatAssistantExposesOutlookSearchReviewAndApprovalActions() throws {
+        let source = try chatManagerSource()
+
+        XCTAssertTrue(source.contains("- search_outlook_tasks: {\"action\":\"search_outlook_tasks\""))
+        XCTAssertTrue(source.contains("- approve_outlook_tasks: {\"action\":\"approve_outlook_tasks\""))
+        XCTAssertTrue(source.contains("use search_outlook_tasks first and ask the user to approve candidates"))
+        XCTAssertTrue(source.contains("do not store full email bodies by default"))
+        XCTAssertTrue(source.contains("private var pendingOutlookTaskCandidates"))
+        XCTAssertTrue(source.contains("case \"search_outlook_tasks\""))
+        XCTAssertTrue(source.contains("OutlookGraphClient"))
+        XCTAssertTrue(source.contains("AssistantOutlookCandidateFormatter.format"))
+        XCTAssertTrue(source.contains("case \"approve_outlook_tasks\""))
+        XCTAssertTrue(source.contains("sourceMetadata: candidate.sourceMetadata"))
+    }
+
+    func testSettingsExposesMicrosoftGraphConfigurationWithoutSecretsInDefaults() throws {
+        let settingsSource = try settingsSource()
+
+        XCTAssertTrue(settingsSource.contains("@AppStorage(OutlookGraphSettings.clientIDKey)"))
+        XCTAssertTrue(settingsSource.contains("@AppStorage(OutlookGraphSettings.tenantIDKey)"))
+        XCTAssertTrue(settingsSource.contains("Microsoft Outlook"))
+        XCTAssertTrue(settingsSource.contains("Sign In with Microsoft"))
+        XCTAssertTrue(settingsSource.contains("stores tokens in Keychain"))
+        XCTAssertFalse(settingsSource.contains("@AppStorage(\"outlook_graph_access_token\")"))
+        XCTAssertFalse(settingsSource.contains("@AppStorage(\"outlook_graph_refresh_token\")"))
+    }
+
     func testSidebarDividerIsFullHeightShellChrome() throws {
         let source = try meetingLibrarySource()
 
@@ -1500,6 +1578,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let chatManagerFile = projectRoot.appendingPathComponent("NoteAI/UI/Chat/ChatManager.swift")
         return try String(contentsOf: chatManagerFile, encoding: .utf8)
+    }
+
+    private func outlookGraphIntegrationSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let integrationFile = projectRoot.appendingPathComponent("NoteAI/Integrations/Outlook/OutlookGraphIntegration.swift")
+        return try String(contentsOf: integrationFile, encoding: .utf8)
     }
 
     private func t5tComposerSource() throws -> String {

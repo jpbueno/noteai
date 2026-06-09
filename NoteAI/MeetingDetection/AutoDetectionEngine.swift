@@ -24,3 +24,29 @@ enum AutoDetectionEngine: String, CaseIterable, Identifiable {
         }
     }
 }
+
+enum AutoDetectionDefaults {
+    static let autoDetectKey = "autoDetectMeetings"
+    static let engineKey = "autoDetectionEngine"
+    private static let v5MigrationKey = "autoDetectionV5DefaultMigrated"
+
+    static func migrateToV5DefaultsIfNeeded(_ defaults: UserDefaults = .standard) {
+        guard defaults.bool(forKey: v5MigrationKey) == false else { return }
+
+        if defaults.object(forKey: engineKey) == nil {
+            defaults.set(true, forKey: autoDetectKey)
+            defaults.set(AutoDetectionEngine.teamsV5.rawValue, forKey: engineKey)
+        }
+
+        defaults.set(true, forKey: v5MigrationKey)
+    }
+
+    static func isEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: autoDetectKey)
+    }
+
+    static func engine(_ defaults: UserDefaults = .standard) -> AutoDetectionEngine {
+        let engineRaw = defaults.string(forKey: engineKey) ?? AutoDetectionEngine.teamsV5.rawValue
+        return AutoDetectionEngine(rawValue: engineRaw) ?? .teamsV5
+    }
+}

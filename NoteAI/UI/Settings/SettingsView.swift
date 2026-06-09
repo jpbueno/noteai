@@ -167,7 +167,7 @@ struct AccountSettingsView: View {
 
 struct GeneralSettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("autoDetectMeetings") private var autoDetect = false
+    @AppStorage("autoDetectMeetings") private var autoDetect = true
     @AppStorage("autoDetectionEngine") private var autoDetectionEngineRaw = AutoDetectionEngine.teamsV5.rawValue
     @AppStorage("autoStopSilenceDuration") private var autoStopDuration = 60.0
     @AppStorage("globalShortcutEnabled") private var globalShortcutEnabled = true

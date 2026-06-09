@@ -147,9 +147,9 @@ final class MeetingManager: ObservableObject {
     }
 
     init() {
-        self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
-        let engineRaw = UserDefaults.standard.string(forKey: "autoDetectionEngine") ?? AutoDetectionEngine.teamsV5.rawValue
-        self.autoDetectionEngine = AutoDetectionEngine(rawValue: engineRaw) ?? .teamsV5
+        AutoDetectionDefaults.migrateToV5DefaultsIfNeeded()
+        self.autoDetectEnabled = AutoDetectionDefaults.isEnabled()
+        self.autoDetectionEngine = AutoDetectionDefaults.engine()
         // Default coach to enabled; users can turn it off from the recording screen.
         if UserDefaults.standard.object(forKey: "aiCoachEnabled") == nil {
             self.coachEnabled = true
@@ -1051,9 +1051,8 @@ final class MeetingManager: ObservableObject {
     }
 
     private func syncAutoDetectionSettingsFromUserDefaults() {
-        let enabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
-        let engineRaw = UserDefaults.standard.string(forKey: "autoDetectionEngine") ?? AutoDetectionEngine.teamsV5.rawValue
-        let engine = AutoDetectionEngine(rawValue: engineRaw) ?? .teamsV5
+        let enabled = AutoDetectionDefaults.isEnabled()
+        let engine = AutoDetectionDefaults.engine()
 
         if autoDetectionEngine != engine {
             autoDetectionEngine = engine

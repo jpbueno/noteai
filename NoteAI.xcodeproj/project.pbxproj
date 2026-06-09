@@ -92,6 +92,7 @@
 		EBABA6C9C4BA258DE5DD6C64 /* CoachInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAA851BE02CC5560A2384D /* CoachInsight.swift */; };
 		F190F59640D9CC736B924E8A /* T5TEntryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFADEBEBCA9727CC2302DDDD /* T5TEntryEditor.swift */; };
 		F1D5C7E7EB34A71FE17C673A /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */; };
+		F33C79C2BE63D832F5DF56DC /* OutlookGraphIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2640448E3C9C3B2B8C13AEA /* OutlookGraphIntegration.swift */; };
 		F3DB18F1FFD2F553F7F8CE0C /* NotificationDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B071D338F9B3BC984C0225C /* NotificationDelivery.swift */; };
 		F9E4BF3F19ABD2A299BA9593 /* AICoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 161E870D01B1967F0967FCC4 /* AICoachEngine.swift */; };
 /* End PBXBuildFile section */
@@ -164,6 +165,7 @@
 		AB03CD62FC1F277ADA607670 /* MeetingSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSelectorView.swift; sourceTree = "<group>"; };
 		AFADEBEBCA9727CC2302DDDD /* T5TEntryEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T5TEntryEditor.swift; sourceTree = "<group>"; };
 		B251B7871D2FB4DF3DC5CDBA /* LocalCaptureHelperPairingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCaptureHelperPairingStore.swift; sourceTree = "<group>"; };
+		B2640448E3C9C3B2B8C13AEA /* OutlookGraphIntegration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlookGraphIntegration.swift; sourceTree = "<group>"; };
 		B3BCFC8432B6C6B4F6EC3037 /* MeetingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingManager.swift; sourceTree = "<group>"; };
 		B584089B6160536C12154E08 /* NoteSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteSelectorView.swift; sourceTree = "<group>"; };
 		B8F52C1801F8EDDC027BA910 /* Repositories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Repositories.swift; sourceTree = "<group>"; };
@@ -275,6 +277,7 @@
 				05B75E2CC1ED74A802EEFB62 /* Audio */,
 				8C81709483BA02F6961D3BFA /* Auth */,
 				0676241CE606D1DE56DFAE13 /* Delivery */,
+				32D41B009698600F60978510 /* Integrations */,
 				0C5C7A5A8157B96833F41EDF /* LocalHelper */,
 				6FDC50A4A2DC08060F0780F2 /* MeetingDetection */,
 				5FCB34E485C43261A7033C63 /* Storage */,
@@ -308,6 +311,14 @@
 				2518E6F5F675E601EC1854CD /* CoachPanelView.swift */,
 			);
 			path = AICoach;
+			sourceTree = "<group>";
+		};
+		32D41B009698600F60978510 /* Integrations */ = {
+			isa = PBXGroup;
+			children = (
+				7058E123FFCC2D5DD1A1BAF7 /* Outlook */,
+			);
+			path = Integrations;
 			sourceTree = "<group>";
 		};
 		3B720DA86429780447B3E26F /* Tasks */ = {
@@ -385,6 +396,14 @@
 				1FED0F8E1FB46C2798DA0565 /* TeamsCallUIEvidenceProvider.swift */,
 			);
 			path = MeetingDetection;
+			sourceTree = "<group>";
+		};
+		7058E123FFCC2D5DD1A1BAF7 /* Outlook */ = {
+			isa = PBXGroup;
+			children = (
+				B2640448E3C9C3B2B8C13AEA /* OutlookGraphIntegration.swift */,
+			);
+			path = Outlook;
 			sourceTree = "<group>";
 		};
 		74971E9A4A6217D9AA9C6051 /* Home */ = {
@@ -675,6 +694,7 @@
 				444C7F9565306BC390A9A290 /* OnboardingChecklist.swift in Sources */,
 				5331907B9D3D5B8C22DC2CBB /* OpenRouterClient.swift in Sources */,
 				30DEABC2A70123702B3D745E /* OpenRouterModelFetcher.swift in Sources */,
+				F33C79C2BE63D832F5DF56DC /* OutlookGraphIntegration.swift in Sources */,
 				664C220DF267E6A9B2CAD3A8 /* ProcessMonitor.swift in Sources */,
 				31EDFD9020903946F060E7E2 /* ProcessTapProvider.swift in Sources */,
 				57780360B98106EC17992C9E /* RecordingDiagnostics.swift in Sources */,

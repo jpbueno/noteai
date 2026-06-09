@@ -2,11 +2,29 @@ import AppKit
 import ApplicationServices
 
 enum TeamsCallUIEvidenceProvider {
-    static func hasCallEvidence(for processID: pid_t) -> Bool {
-        if hasAccessibilityCallEvidence(for: processID) {
-            return true
+    struct Evidence: Equatable {
+        var callControlEvidence: Bool
+        var callWindowTitleEvidence: Bool
+
+        static let none = Evidence(
+            callControlEvidence: false,
+            callWindowTitleEvidence: false
+        )
+
+        var hasCallEvidence: Bool {
+            callControlEvidence || callWindowTitleEvidence
         }
-        return hasWindowTitleCallEvidence(for: processID)
+    }
+
+    static func evidence(for processID: pid_t) -> Evidence {
+        Evidence(
+            callControlEvidence: hasAccessibilityCallEvidence(for: processID),
+            callWindowTitleEvidence: hasWindowTitleCallEvidence(for: processID)
+        )
+    }
+
+    static func hasCallEvidence(for processID: pid_t) -> Bool {
+        evidence(for: processID).hasCallEvidence
     }
 
     private static func hasAccessibilityCallEvidence(for processID: pid_t) -> Bool {

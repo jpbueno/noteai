@@ -49,6 +49,32 @@ final class TeamsCallStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.state.kind, .callEnded)
     }
 
+    func testRecordingStopsWhenOnlyMeetingWindowTitleRemainsAfterCallEnds() {
+        var machine = TeamsCallStateMachine(configuration: .test)
+        let first = Date(timeIntervalSince1970: 10)
+        _ = machine.process(.teamsCallEvidence(at: first))
+        _ = machine.process(.teamsCallEvidence(at: first.addingTimeInterval(2)))
+
+        let titleOnly = machine.process(.teamsMeetingWindowTitleOnly(at: first.addingTimeInterval(4)))
+        let stopEvents = machine.process(.teamsMeetingWindowTitleOnly(at: first.addingTimeInterval(9)))
+
+        XCTAssertTrue(titleOnly.isEmpty)
+        XCTAssertEqual(stopEvents.map(\.kind), [.stopRecording])
+        XCTAssertEqual(machine.state.kind, .callEnded)
+    }
+
+    func testRecordingContinuesWithTeamsAudioEvenWithoutCallControls() {
+        var machine = TeamsCallStateMachine(configuration: .test)
+        let first = Date(timeIntervalSince1970: 10)
+        _ = machine.process(.teamsCallEvidence(at: first))
+        _ = machine.process(.teamsCallEvidence(at: first.addingTimeInterval(2)))
+
+        let events = machine.process(.teamsAudioAndTitleEvidence(at: first.addingTimeInterval(9)))
+
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertEqual(machine.state.kind, .recording)
+    }
+
     func testRecordingDoesNotStopWhenEvidenceReturnsBeforeGrace() {
         var machine = TeamsCallStateMachine(configuration: .test)
         let first = Date(timeIntervalSince1970: 10)
@@ -113,7 +139,8 @@ private extension TeamsCallEvidenceSnapshot {
             ),
             teamsAudioActive: false,
             genericOutputAudioActive: false,
-            callWindowEvidence: false,
+            callControlEvidence: false,
+            callWindowTitleEvidence: false,
             calendarArmed: false,
             explicitStart: false,
             explicitEnd: false
@@ -131,7 +158,46 @@ private extension TeamsCallEvidenceSnapshot {
             ),
             teamsAudioActive: true,
             genericOutputAudioActive: true,
-            callWindowEvidence: true,
+            callControlEvidence: true,
+            callWindowTitleEvidence: true,
+            calendarArmed: false,
+            explicitStart: false,
+            explicitEnd: false
+        )
+    }
+
+    static func teamsMeetingWindowTitleOnly(at date: Date) -> TeamsCallEvidenceSnapshot {
+        TeamsCallEvidenceSnapshot(
+            observedAt: date,
+            teamsProcess: TeamsProcessEvidence(
+                pid: 42,
+                bundleIdentifier: "com.microsoft.teams2",
+                displayName: "Microsoft Teams",
+                frontmost: true
+            ),
+            teamsAudioActive: false,
+            genericOutputAudioActive: true,
+            callControlEvidence: false,
+            callWindowTitleEvidence: true,
+            calendarArmed: false,
+            explicitStart: false,
+            explicitEnd: false
+        )
+    }
+
+    static func teamsAudioAndTitleEvidence(at date: Date) -> TeamsCallEvidenceSnapshot {
+        TeamsCallEvidenceSnapshot(
+            observedAt: date,
+            teamsProcess: TeamsProcessEvidence(
+                pid: 42,
+                bundleIdentifier: "com.microsoft.teams2",
+                displayName: "Microsoft Teams",
+                frontmost: true
+            ),
+            teamsAudioActive: true,
+            genericOutputAudioActive: true,
+            callControlEvidence: false,
+            callWindowTitleEvidence: true,
             calendarArmed: false,
             explicitStart: false,
             explicitEnd: false
@@ -144,7 +210,8 @@ private extension TeamsCallEvidenceSnapshot {
             teamsProcess: nil,
             teamsAudioActive: false,
             genericOutputAudioActive: true,
-            callWindowEvidence: false,
+            callControlEvidence: false,
+            callWindowTitleEvidence: false,
             calendarArmed: false,
             explicitStart: false,
             explicitEnd: false
@@ -157,7 +224,8 @@ private extension TeamsCallEvidenceSnapshot {
             teamsProcess: nil,
             teamsAudioActive: false,
             genericOutputAudioActive: false,
-            callWindowEvidence: false,
+            callControlEvidence: false,
+            callWindowTitleEvidence: false,
             calendarArmed: false,
             explicitStart: false,
             explicitEnd: false

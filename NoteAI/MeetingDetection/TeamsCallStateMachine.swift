@@ -12,10 +12,15 @@ struct TeamsCallEvidenceSnapshot: Equatable {
     var teamsProcess: TeamsProcessEvidence?
     var teamsAudioActive: Bool
     var genericOutputAudioActive: Bool
-    var callWindowEvidence: Bool
+    var callControlEvidence: Bool
+    var callWindowTitleEvidence: Bool
     var calendarArmed: Bool
     var explicitStart: Bool
     var explicitEnd: Bool
+
+    var callWindowEvidence: Bool {
+        callControlEvidence || callWindowTitleEvidence
+    }
 
     var confidenceScore: Double {
         guard teamsProcess != nil else { return 0 }
@@ -26,8 +31,10 @@ struct TeamsCallEvidenceSnapshot: Equatable {
         } else if genericOutputAudioActive {
             score += 0.10
         }
-        if callWindowEvidence {
-            score += 0.25
+        if callControlEvidence {
+            score += 0.30
+        } else if callWindowTitleEvidence {
+            score += 0.20
         }
         if calendarArmed {
             score += 0.15
@@ -55,7 +62,7 @@ struct TeamsCallStateMachine {
             detectionThreshold: 0.55,
             startThreshold: 0.65,
             startDebounce: 5,
-            endGrace: 90,
+            endGrace: 18,
             crashGrace: 20,
             cooldown: 15
         )
@@ -189,7 +196,7 @@ struct TeamsCallStateMachine {
             return [.stopRecording(reason: .endedSignal)]
         }
 
-        if isDetectionEvidence(snapshot) {
+        if isOngoingRecordingEvidence(snapshot) {
             state = .recording(
                 startedAt: startedAt,
                 lastEvidenceAt: snapshot.observedAt,
@@ -228,6 +235,17 @@ struct TeamsCallStateMachine {
 
     private func isStartEvidence(_ snapshot: TeamsCallEvidenceSnapshot) -> Bool {
         snapshot.confidenceScore >= configuration.startThreshold
+    }
+
+    private func isOngoingRecordingEvidence(_ snapshot: TeamsCallEvidenceSnapshot) -> Bool {
+        guard snapshot.teamsProcess != nil else { return false }
+        if snapshot.explicitStart || snapshot.teamsAudioActive || snapshot.callControlEvidence {
+            return true
+        }
+        if snapshot.calendarArmed && snapshot.confidenceScore >= configuration.startThreshold {
+            return true
+        }
+        return false
     }
 
     private func strongerSnapshot(

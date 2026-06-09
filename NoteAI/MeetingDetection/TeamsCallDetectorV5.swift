@@ -115,14 +115,20 @@ final class TeamsCallDetectorV5: ObservableObject {
     private func currentSnapshot() -> TeamsCallEvidenceSnapshot {
         let process = currentTeamsProcess()
         let genericAudio = isDefaultOutputRunning()
-        let callWindow = process.map { TeamsCallUIEvidenceProvider.hasCallEvidence(for: $0.pid) } ?? false
+        let uiEvidence = process.map {
+            TeamsCallUIEvidenceProvider.evidence(for: $0.pid)
+        } ?? .none
+        let teamsAudio = process.map {
+            isProcessOutputRunning(pid: $0.pid)
+        } ?? false
 
         return TeamsCallEvidenceSnapshot(
             observedAt: Date(),
             teamsProcess: process,
-            teamsAudioActive: false,
+            teamsAudioActive: teamsAudio,
             genericOutputAudioActive: genericAudio,
-            callWindowEvidence: callWindow,
+            callControlEvidence: uiEvidence.callControlEvidence,
+            callWindowTitleEvidence: uiEvidence.callWindowTitleEvidence,
             calendarArmed: false,
             explicitStart: false,
             explicitEnd: false
@@ -171,6 +177,58 @@ final class TeamsCallDetectorV5: ObservableObject {
         return runStatus == noErr && isRunning != 0
     }
 
+    private func isProcessOutputRunning(pid: pid_t) -> Bool {
+        guard let processObjectID = audioProcessObjectID(for: pid) else { return false }
+        if let isOutputRunning = boolAudioProperty(
+            objectID: processObjectID,
+            selector: kAudioProcessPropertyIsRunningOutput
+        ) {
+            return isOutputRunning
+        }
+        return boolAudioProperty(
+            objectID: processObjectID,
+            selector: kAudioProcessPropertyIsRunning
+        ) ?? false
+    }
+
+    private func audioProcessObjectID(for pid: pid_t) -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var processID = pid
+        var objectID = AudioObjectID(kAudioObjectUnknown)
+        var objectIDSize = UInt32(MemoryLayout<AudioObjectID>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            UInt32(MemoryLayout<pid_t>.size),
+            &processID,
+            &objectIDSize,
+            &objectID
+        )
+        guard status == noErr, objectID != kAudioObjectUnknown else { return nil }
+        return objectID
+    }
+
+    private func boolAudioProperty(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector
+    ) -> Bool? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &value)
+        guard status == noErr else { return nil }
+        return value != 0
+    }
+
     private func summary(for snapshot: TeamsCallEvidenceSnapshot) -> String {
         var parts: [String] = []
         if let process = snapshot.teamsProcess {
@@ -181,8 +239,13 @@ final class TeamsCallDetectorV5: ObservableObject {
         } else {
             parts.append("Teams not running")
         }
-        if snapshot.callWindowEvidence {
+        if snapshot.teamsAudioActive {
+            parts.append("Teams output active")
+        }
+        if snapshot.callControlEvidence {
             parts.append("call controls visible")
+        } else if snapshot.callWindowTitleEvidence {
+            parts.append("meeting window title")
         }
         if snapshot.genericOutputAudioActive {
             parts.append("output audio active")

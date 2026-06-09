@@ -163,6 +163,7 @@ struct AccountSettingsView: View {
 struct GeneralSettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("autoDetectMeetings") private var autoDetect = false
+    @AppStorage("autoDetectionEngine") private var autoDetectionEngineRaw = AutoDetectionEngine.teamsV5.rawValue
     @AppStorage("autoStopSilenceDuration") private var autoStopDuration = 60.0
     @AppStorage("globalShortcutEnabled") private var globalShortcutEnabled = true
     @StateObject private var testCapture = RecordingDiagnosticsTestCapture()
@@ -176,7 +177,14 @@ struct GeneralSettingsView: View {
             Section("Auto-Detection") {
                 Toggle("Automatically detect and record meetings", isOn: $autoDetect)
 
-                Text("When enabled, NoteAI monitors for audio activity in Teams, Google Meet (Chrome/Edge/Arc), and Safari. Recording starts automatically when a call is detected and stops after a configurable silence period.")
+                Picker("Detection engine", selection: $autoDetectionEngineRaw) {
+                    ForEach(AutoDetectionEngine.allCases) { engine in
+                        Text(engine.displayName).tag(engine.rawValue)
+                    }
+                }
+                .disabled(!autoDetect)
+
+                Text(autoDetectionDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -224,6 +232,16 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private var autoDetectionDescription: String {
+        let engine = AutoDetectionEngine(rawValue: autoDetectionEngineRaw) ?? .teamsV5
+        switch engine {
+        case .classicV4:
+            return "When enabled, NoteAI uses the existing v4 detector for Teams, Google Meet, Chrome, Edge, Arc, and Safari activity."
+        case .teamsV5:
+            return "When enabled, NoteAI uses the v5 Teams detector. It combines Teams process, call-window, and audio evidence before starting recording. Accessibility permission improves call UI detection."
+        }
     }
 }
 

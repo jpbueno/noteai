@@ -65,15 +65,19 @@ final class MeetingManager: ObservableObject {
     @Published var autoDetectEnabled: Bool {
         didSet {
             UserDefaults.standard.set(autoDetectEnabled, forKey: "autoDetectMeetings")
-            if autoDetectEnabled {
-                meetingDetector.startMonitoring()
-            } else {
-                meetingDetector.stopMonitoring()
-            }
+            updateAutoDetectionMonitoring()
+        }
+    }
+
+    @Published var autoDetectionEngine: AutoDetectionEngine {
+        didSet {
+            UserDefaults.standard.set(autoDetectionEngine.rawValue, forKey: "autoDetectionEngine")
+            updateAutoDetectionMonitoring()
         }
     }
 
     let meetingDetector = MeetingDetector()
+    let teamsCallDetectorV5 = TeamsCallDetectorV5()
 
     // AI Coach state (real-time Solutions Architect insights during recording)
     @Published var coachInsights: [CoachInsight] = []
@@ -93,6 +97,8 @@ final class MeetingManager: ObservableObject {
     private let notificationManager = NotificationDelivery()
 
     private var currentMeetingStart: Date?
+    private var currentDetectedAppName: String?
+    private var currentPreferredCaptureSource: AppAudioCaptureSource?
     private var localHelperSessionId: UUID?
     private var recordingTimer: Timer?
     private var coachTimer: Timer?
@@ -104,6 +110,8 @@ final class MeetingManager: ObservableObject {
 
     init() {
         self.autoDetectEnabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
+        let engineRaw = UserDefaults.standard.string(forKey: "autoDetectionEngine") ?? AutoDetectionEngine.teamsV5.rawValue
+        self.autoDetectionEngine = AutoDetectionEngine(rawValue: engineRaw) ?? .teamsV5
         // Default coach to enabled; users can turn it off from the recording screen.
         if UserDefaults.standard.object(forKey: "aiCoachEnabled") == nil {
             self.coachEnabled = true
@@ -206,6 +214,13 @@ final class MeetingManager: ObservableObject {
     }
 
     func startRecording() {
+        startRecording(detectedAppName: nil, preferredCaptureSource: nil)
+    }
+
+    private func startRecording(
+        detectedAppName: String?,
+        preferredCaptureSource: AppAudioCaptureSource?
+    ) {
         guard state == .idle else { return }
         lastError = nil
         if let blocker = onboardingChecklist.firstRecordingBlocker {
@@ -215,6 +230,8 @@ final class MeetingManager: ObservableObject {
         state = .recording
         currentTranscript = []
         currentMeetingStart = Date()
+        currentDetectedAppName = detectedAppName
+        currentPreferredCaptureSource = preferredCaptureSource
         recordingDuration = 0
 
         // Reset AI Coach state for the new recording
@@ -238,7 +255,7 @@ final class MeetingManager: ObservableObject {
             await transcriptionEngine.warmup()
 
             do {
-                try await audioCaptureManager.startCapture()
+                try await audioCaptureManager.startCapture(preferredSource: preferredCaptureSource)
                 print("[MeetingManager] Audio capture started successfully")
             } catch {
                 print("[MeetingManager] Failed to start audio capture: \(error)")
@@ -246,6 +263,8 @@ final class MeetingManager: ObservableObject {
                 stopDurationTimer()
                 stopCoachLoop()
                 state = .idle
+                currentDetectedAppName = nil
+                currentPreferredCaptureSource = nil
             }
         }
     }
@@ -257,7 +276,7 @@ final class MeetingManager: ObservableObject {
         stopCoachLoop()
         audioCaptureManager.stopCapture()
 
-        let appName = meetingDetector.detectedApp ?? "Meeting"
+        let appName = currentDetectedAppName ?? meetingDetector.detectedApp ?? teamsCallDetectorV5.detectedApp ?? "Meeting"
         let dateStr = currentMeetingStart?.formatted(date: .abbreviated, time: .shortened) ?? Date().formatted(date: .abbreviated, time: .shortened)
         pendingMeetingName = "\(appName) — \(dateStr)"
         showMeetingNamePrompt = true
@@ -269,6 +288,8 @@ final class MeetingManager: ObservableObject {
             ? pendingMeetingName
             : name.trimmingCharacters(in: .whitespacesAndNewlines)
         state = .processing
+        currentDetectedAppName = nil
+        currentPreferredCaptureSource = nil
 
         Task {
             await transcriptionEngine.reset()
@@ -671,6 +692,26 @@ final class MeetingManager: ObservableObject {
                 self?.toggleRecording()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.syncAutoDetectionSettingsFromUserDefaults()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func syncAutoDetectionSettingsFromUserDefaults() {
+        let enabled = UserDefaults.standard.bool(forKey: "autoDetectMeetings")
+        let engineRaw = UserDefaults.standard.string(forKey: "autoDetectionEngine") ?? AutoDetectionEngine.teamsV5.rawValue
+        let engine = AutoDetectionEngine(rawValue: engineRaw) ?? .teamsV5
+
+        if autoDetectionEngine != engine {
+            autoDetectionEngine = engine
+        }
+        if autoDetectEnabled != enabled {
+            autoDetectEnabled = enabled
+        }
     }
 
     private func setupTranscriptionPipeline() {
@@ -835,7 +876,10 @@ final class MeetingManager: ObservableObject {
         meetingDetector.onMeetingStarted = { [weak self] in
             guard let self else { return }
             print("[MeetingManager] Auto-detection triggered — starting recording")
-            self.startRecording()
+            self.startRecording(
+                detectedAppName: self.meetingDetector.detectedApp,
+                preferredCaptureSource: nil
+            )
         }
 
         meetingDetector.onMeetingEnded = { [weak self] in
@@ -844,9 +888,36 @@ final class MeetingManager: ObservableObject {
             self.stopRecording()
         }
 
+        teamsCallDetectorV5.onCallStarted = { [weak self] context in
+            guard let self else { return }
+            print("[MeetingManager] V5 Teams detection triggered — starting recording")
+            self.startRecording(
+                detectedAppName: context.displayName,
+                preferredCaptureSource: .processID(context.processID, displayName: context.displayName)
+            )
+        }
+
+        teamsCallDetectorV5.onCallEnded = { [weak self] in
+            guard let self else { return }
+            print("[MeetingManager] V5 Teams detection: call ended — stopping recording")
+            self.stopRecording()
+        }
+
         // Start monitoring if previously enabled
-        if autoDetectEnabled {
+        updateAutoDetectionMonitoring()
+    }
+
+    private func updateAutoDetectionMonitoring() {
+        meetingDetector.stopMonitoring()
+        teamsCallDetectorV5.stopMonitoring()
+
+        guard autoDetectEnabled else { return }
+
+        switch autoDetectionEngine {
+        case .classicV4:
             meetingDetector.startMonitoring()
+        case .teamsV5:
+            teamsCallDetectorV5.startMonitoring()
         }
     }
 }

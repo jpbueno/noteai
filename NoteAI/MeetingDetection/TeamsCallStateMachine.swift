@@ -196,7 +196,7 @@ struct TeamsCallStateMachine {
             return [.stopRecording(reason: .endedSignal)]
         }
 
-        if isOngoingRecordingEvidence(snapshot) {
+        if isOngoingRecordingEvidence(snapshot, previousSnapshot: previousSnapshot) {
             state = .recording(
                 startedAt: startedAt,
                 lastEvidenceAt: snapshot.observedAt,
@@ -237,10 +237,16 @@ struct TeamsCallStateMachine {
         snapshot.confidenceScore >= configuration.startThreshold
     }
 
-    private func isOngoingRecordingEvidence(_ snapshot: TeamsCallEvidenceSnapshot) -> Bool {
+    private func isOngoingRecordingEvidence(
+        _ snapshot: TeamsCallEvidenceSnapshot,
+        previousSnapshot: TeamsCallEvidenceSnapshot
+    ) -> Bool {
         guard snapshot.teamsProcess != nil else { return false }
-        if snapshot.explicitStart || snapshot.teamsAudioActive || snapshot.callControlEvidence {
+        if snapshot.explicitStart || snapshot.callControlEvidence {
             return true
+        }
+        if snapshot.teamsAudioActive {
+            return previousSnapshot.callWindowEvidence ? snapshot.callWindowEvidence : true
         }
         if snapshot.calendarArmed && snapshot.confidenceScore >= configuration.startThreshold {
             return true

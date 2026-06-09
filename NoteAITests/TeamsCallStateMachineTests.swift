@@ -75,6 +75,32 @@ final class TeamsCallStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.state.kind, .recording)
     }
 
+    func testRecordingStopsWhenTeamsAudioRemainsAfterUIBackedCallEnds() {
+        var machine = TeamsCallStateMachine(configuration: .test)
+        let first = Date(timeIntervalSince1970: 10)
+        _ = machine.process(.teamsCallEvidence(at: first))
+        _ = machine.process(.teamsCallEvidence(at: first.addingTimeInterval(2)))
+
+        let staleAudio = machine.process(.teamsAudioOnly(at: first.addingTimeInterval(4)))
+        let stopEvents = machine.process(.teamsAudioOnly(at: first.addingTimeInterval(9)))
+
+        XCTAssertTrue(staleAudio.isEmpty)
+        XCTAssertEqual(stopEvents.map(\.kind), [.stopRecording])
+        XCTAssertEqual(machine.state.kind, .callEnded)
+    }
+
+    func testAudioOnlyRecordingContinuesWhenUIEvidenceWasNeverAvailable() {
+        var machine = TeamsCallStateMachine(configuration: .test)
+        let first = Date(timeIntervalSince1970: 10)
+        _ = machine.process(.teamsAudioOnly(at: first, frontmost: true))
+        _ = machine.process(.teamsAudioOnly(at: first.addingTimeInterval(2), frontmost: true))
+
+        let events = machine.process(.teamsAudioOnly(at: first.addingTimeInterval(9), frontmost: false))
+
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertEqual(machine.state.kind, .recording)
+    }
+
     func testRecordingDoesNotStopWhenEvidenceReturnsBeforeGrace() {
         var machine = TeamsCallStateMachine(configuration: .test)
         let first = Date(timeIntervalSince1970: 10)
@@ -209,6 +235,25 @@ private extension TeamsCallEvidenceSnapshot {
             observedAt: date,
             teamsProcess: nil,
             teamsAudioActive: false,
+            genericOutputAudioActive: true,
+            callControlEvidence: false,
+            callWindowTitleEvidence: false,
+            calendarArmed: false,
+            explicitStart: false,
+            explicitEnd: false
+        )
+    }
+
+    static func teamsAudioOnly(at date: Date, frontmost: Bool = false) -> TeamsCallEvidenceSnapshot {
+        TeamsCallEvidenceSnapshot(
+            observedAt: date,
+            teamsProcess: TeamsProcessEvidence(
+                pid: 42,
+                bundleIdentifier: "com.microsoft.teams2",
+                displayName: "Microsoft Teams",
+                frontmost: frontmost
+            ),
+            teamsAudioActive: true,
             genericOutputAudioActive: true,
             callControlEvidence: false,
             callWindowTitleEvidence: false,

@@ -57,7 +57,7 @@ struct MenuBarView: View {
             if meetingManager.autoDetectEnabled {
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(meetingManager.meetingDetector.state == .detected ? .red : .blue)
+                        .fill(autoDetectIndicatorColor)
                         .frame(width: 6, height: 6)
                     Text(autoDetectStatusText)
                         .font(.caption2)
@@ -141,12 +141,47 @@ struct MenuBarView: View {
     }
 
     private var autoDetectStatusText: String {
-        switch meetingManager.meetingDetector.state {
-        case .monitoring: return "Monitoring for meetings..."
-        case .detected:
-            let app = meetingManager.meetingDetector.detectedApp ?? "Meeting"
-            return "Recording \(app)"
-        case .disabled: return ""
+        switch meetingManager.autoDetectionEngine {
+        case .classicV4:
+            switch meetingManager.meetingDetector.state {
+            case .monitoring: return "v4 monitoring for meetings..."
+            case .detected:
+                let app = meetingManager.meetingDetector.detectedApp ?? "Meeting"
+                return "v4 recording \(app)"
+            case .disabled: return ""
+            }
+        case .teamsV5:
+            switch meetingManager.teamsCallDetectorV5.state {
+            case .monitoring:
+                return "v5 Teams monitoring"
+            case .callDetected:
+                return "v5 Teams detected"
+            case .recording:
+                let app = meetingManager.teamsCallDetectorV5.detectedApp ?? "Teams"
+                return "v5 recording \(app)"
+            case .cooldown:
+                return "v5 Teams cooldown"
+            case .disabled:
+                return ""
+            }
+        }
+    }
+
+    private var autoDetectIndicatorColor: Color {
+        switch meetingManager.autoDetectionEngine {
+        case .classicV4:
+            return meetingManager.meetingDetector.state == .detected ? .red : .blue
+        case .teamsV5:
+            switch meetingManager.teamsCallDetectorV5.state {
+            case .callDetected, .recording:
+                return .red
+            case .cooldown:
+                return .orange
+            case .monitoring:
+                return .blue
+            case .disabled:
+                return .secondary
+            }
         }
     }
 

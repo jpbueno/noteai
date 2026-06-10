@@ -26,6 +26,7 @@ xcuserdata/
 # Local tooling state
 .claude/
 .worktrees/
+versions/
 
 # Runtime, profiling, logs
 default.profraw

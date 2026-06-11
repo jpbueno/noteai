@@ -95,10 +95,14 @@ final class ArchitectureModuleTests: XCTestCase {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/MicrophoneCaptureManager.swift"))
 
+        let duckingConfigurationRange = try XCTUnwrap(source.range(of: "voiceProcessingOtherAudioDuckingConfiguration"))
         let voiceProcessingRange = try XCTUnwrap(source.range(of: "setVoiceProcessingEnabled(true)"))
         let formatRange = try XCTUnwrap(source.range(of: "let format = inputNode.outputFormat(forBus: 0)"))
 
+        XCTAssertLessThan(duckingConfigurationRange.lowerBound, voiceProcessingRange.lowerBound)
         XCTAssertLessThan(voiceProcessingRange.lowerBound, formatRange.lowerBound)
+        XCTAssertTrue(source.contains("enableAdvancedDucking: false"))
+        XCTAssertTrue(source.contains("duckingLevel: .min"))
     }
 
     func testLegacyNoteDecodesWithoutSpace() throws {

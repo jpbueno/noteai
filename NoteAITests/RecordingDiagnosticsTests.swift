@@ -31,4 +31,13 @@ final class RecordingDiagnosticsTests: XCTestCase {
         XCTAssertFalse(snapshot.warnings.contains { $0.contains("Process tap access is unavailable") })
         XCTAssertTrue(snapshot.warnings.isEmpty)
     }
+
+    func testSpeakerVolumeProtectionRestoresOnlyUnexpectedDrops() {
+        XCTAssertTrue(SpeakerVolumeProtection.shouldRestore(baseline: 0.72, current: 0.40))
+        XCTAssertTrue(SpeakerVolumeProtection.shouldRestore(baseline: 0.72, current: 0.67))
+
+        XCTAssertFalse(SpeakerVolumeProtection.shouldRestore(baseline: 0.72, current: 0.70))
+        XCTAssertFalse(SpeakerVolumeProtection.shouldRestore(baseline: 0.72, current: 0.72))
+        XCTAssertFalse(SpeakerVolumeProtection.shouldRestore(baseline: 0.72, current: 0.80))
+    }
 }

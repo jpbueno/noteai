@@ -62,8 +62,13 @@ final class MicrophoneCaptureManager {
         let inputNode = engine.inputNode
 
         do {
+            inputNode.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false,
+                    duckingLevel: .min
+                )
             try inputNode.setVoiceProcessingEnabled(true)
-            print("[MicCapture] Voice processing enabled for microphone capture")
+            print("[MicCapture] Voice processing enabled with minimum other-audio ducking")
         } catch {
             print("[MicCapture] Voice processing unavailable for current input: \(error)")
         }

@@ -44,6 +44,9 @@ final class AudioCaptureManager: NSObject {
     private let micAudioRing = AudioBufferRing(capacity: 60)
     private var diagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
     private let diagnosticsLock = NSLock()
+    private lazy var outputVolumePreserver = SystemOutputVolumePreserver { [weak self] message in
+        self?.log(message)
+    }
 
     private func log(_ msg: String) {
         let logDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -78,6 +81,7 @@ final class AudioCaptureManager: NSObject {
 
     func startCapture(preferredSource: AppAudioCaptureSource? = nil) async throws {
         guard !isCapturing else { return }
+        outputVolumePreserver.captureBaseline()
         updateDiagnostics { snapshot in
             snapshot = RecordingDiagnosticsSnapshot.currentPermissions()
             snapshot.updateCapture(.microphone, status: .idle)
@@ -90,6 +94,7 @@ final class AudioCaptureManager: NSObject {
             log("WARNING: No app audio — mic only (meeting participants won't be transcribed)")
             print("[AudioCapture] No app audio capture available — mic only mode")
         }
+        outputVolumePreserver.restoreIfUnexpectedlyLowered()
 
         // Always start microphone — captures the local user's voice
         let hasMicAccess = await MicrophoneCaptureManager.requestAccessIfNeeded()
@@ -100,6 +105,7 @@ final class AudioCaptureManager: NSObject {
             updateDiagnostics { snapshot in
                 snapshot.updateCapture(.microphone, status: .unavailable("Permission denied"))
             }
+            outputVolumePreserver.clearBaseline()
             writeDiagnosticsLog("Microphone unavailable")
             throw AudioCaptureError.microphoneAccessDenied
         }
@@ -113,11 +119,14 @@ final class AudioCaptureManager: NSObject {
             updateDiagnostics { snapshot in
                 snapshot.updateCapture(.microphone, status: .unavailable(error.localizedDescription))
             }
+            outputVolumePreserver.clearBaseline()
             writeDiagnosticsLog("Microphone start failed")
             throw error
         }
         microphoneCapture = mic
         isCapturing = true
+        outputVolumePreserver.restoreIfUnexpectedlyLowered()
+        schedulePostStartOutputVolumeCheck()
         updateDiagnostics { snapshot in
             snapshot.updateCapture(.microphone, status: .capturing)
         }
@@ -144,6 +153,7 @@ final class AudioCaptureManager: NSObject {
         appAudioRing.clear()
         micAudioRing.clear()
         converterCache.removeAll()
+        outputVolumePreserver.clearBaseline()
         isCapturing = false
         updateDiagnostics { snapshot in
             snapshot.updateCapture(.microphone, status: .idle)
@@ -396,6 +406,161 @@ final class AudioCaptureManager: NSObject {
         let snapshot = diagnostics
         diagnosticsLock.unlock()
         log("Diagnostics \(event): \(snapshot.troubleshootingLines().joined(separator: " | "))")
+    }
+
+    private func schedulePostStartOutputVolumeCheck() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            self?.outputVolumePreserver.restoreIfUnexpectedlyLowered()
+            self?.outputVolumePreserver.clearBaseline()
+        }
+    }
+}
+
+// MARK: - Speaker volume preservation
+
+struct SpeakerVolumeProtection {
+    static let defaultDropThreshold: Float32 = 0.03
+
+    static func shouldRestore(
+        baseline: Float32,
+        current: Float32,
+        threshold: Float32 = defaultDropThreshold
+    ) -> Bool {
+        current < baseline - threshold
+    }
+}
+
+private final class SystemOutputVolumePreserver {
+    private struct Baseline {
+        let deviceID: AudioObjectID
+        let channelVolumes: [AudioObjectPropertyElement: Float32]
+    }
+
+    private var baseline: Baseline?
+    private let logger: (String) -> Void
+
+    init(logger: @escaping (String) -> Void = { _ in }) {
+        self.logger = logger
+    }
+
+    func captureBaseline() {
+        baseline = readBaseline()
+        if let baseline {
+            logger("Speaker volume baseline captured: device=\(baseline.deviceID) channels=\(baseline.channelVolumes.keys.sorted())")
+        } else {
+            logger("Speaker volume baseline unavailable")
+        }
+    }
+
+    func restoreIfUnexpectedlyLowered() {
+        guard let baseline else { return }
+        guard let currentDeviceID = defaultOutputDeviceID(), currentDeviceID == baseline.deviceID else {
+            logger("Speaker volume restore skipped: default output device changed")
+            return
+        }
+
+        for (channel, baselineVolume) in baseline.channelVolumes {
+            guard let currentVolume = outputVolume(deviceID: baseline.deviceID, channel: channel) else { continue }
+            guard SpeakerVolumeProtection.shouldRestore(baseline: baselineVolume, current: currentVolume) else { continue }
+            guard setOutputVolume(deviceID: baseline.deviceID, channel: channel, volume: baselineVolume) else {
+                logger("Speaker volume restore failed: device=\(baseline.deviceID) channel=\(channel)")
+                continue
+            }
+            logger("Speaker volume restored: device=\(baseline.deviceID) channel=\(channel) \(currentVolume)->\(baselineVolume)")
+        }
+    }
+
+    func clearBaseline() {
+        baseline = nil
+    }
+
+    private func readBaseline() -> Baseline? {
+        guard let deviceID = defaultOutputDeviceID() else { return nil }
+        var channelVolumes: [AudioObjectPropertyElement: Float32] = [:]
+
+        for channel in outputVolumeChannels {
+            guard isOutputVolumeSettable(deviceID: deviceID, channel: channel),
+                  let volume = outputVolume(deviceID: deviceID, channel: channel) else {
+                continue
+            }
+            channelVolumes[channel] = volume
+        }
+
+        guard !channelVolumes.isEmpty else { return nil }
+        return Baseline(deviceID: deviceID, channelVolumes: channelVolumes)
+    }
+
+    private var outputVolumeChannels: [AudioObjectPropertyElement] {
+        var seen = Set<AudioObjectPropertyElement>()
+        return [kAudioObjectPropertyElementMain, 1, 2].filter { seen.insert($0).inserted }
+    }
+
+    private func defaultOutputDeviceID() -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        guard status == noErr, deviceID != 0 else { return nil }
+        return deviceID
+    }
+
+    private func outputVolume(deviceID: AudioObjectID, channel: AudioObjectPropertyElement) -> Float32? {
+        var address = volumeAddress(channel: channel)
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+
+        var volume = Float32(0)
+        var size = UInt32(MemoryLayout<Float32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
+        guard status == noErr else { return nil }
+        return volume
+    }
+
+    private func setOutputVolume(
+        deviceID: AudioObjectID,
+        channel: AudioObjectPropertyElement,
+        volume: Float32
+    ) -> Bool {
+        var address = volumeAddress(channel: channel)
+        guard AudioObjectHasProperty(deviceID, &address),
+              isOutputVolumeSettable(deviceID: deviceID, channel: channel) else {
+            return false
+        }
+
+        var restoredVolume = min(max(volume, 0), 1)
+        let size = UInt32(MemoryLayout<Float32>.size)
+        let status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &restoredVolume)
+        return status == noErr
+    }
+
+    private func isOutputVolumeSettable(
+        deviceID: AudioObjectID,
+        channel: AudioObjectPropertyElement
+    ) -> Bool {
+        var address = volumeAddress(channel: channel)
+        guard AudioObjectHasProperty(deviceID, &address) else { return false }
+        var isSettable = DarwinBoolean(false)
+        let status = AudioObjectIsPropertySettable(deviceID, &address, &isSettable)
+        return status == noErr && isSettable.boolValue
+    }
+
+    private func volumeAddress(channel: AudioObjectPropertyElement) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: channel
+        )
     }
 }
 

@@ -226,6 +226,9 @@ struct NotionPageView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.top, 8)
         } else {
+            speakerProfilesSection
+            verticalSpace()
+
             ForEach(meeting.transcript) { segment in
                 transcriptLine(segment)
             }
@@ -293,6 +296,127 @@ struct NotionPageView: View {
             .buttonStyle(.plain)
             .foregroundStyle(Theme.textSecondary)
             .disabled(regeneratingSection != nil)
+        }
+    }
+
+    @ViewBuilder
+    private var speakerProfilesSection: some View {
+        let speakerIDs = speakerIDsInTranscript
+        if !speakerIDs.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    heading2("Speakers")
+                    Text("Used for transcript labels and regenerated summaries")
+                        .font(.system(size: Theme.smallSize))
+                        .foregroundStyle(Theme.textTertiary)
+
+                    Spacer()
+
+                    Button {
+                        regenerateSummary()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isRegeneratingSummary {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 12))
+                            }
+                            Text("Regenerate summary")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textSecondary)
+                    .disabled(isRegeneratingSummary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(speakerIDs, id: \.self) { speakerID in
+                        speakerProfileEditor(speakerID)
+                    }
+                }
+            }
+        }
+    }
+
+    private var speakerIDsInTranscript: [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        for segment in meeting.transcript {
+            let id = meeting.speakerID(for: segment)
+            guard id.lowercased() != "system", !seen.contains(id) else { continue }
+            seen.insert(id)
+            ids.append(id)
+        }
+        return ids
+    }
+
+    private func speakerProfileEditor(_ speakerID: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(TranscriptSpeakerLabels.displayName(for: speakerID, labels: [:]))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: 96, alignment: .leading)
+
+                speakerProfileField("Name", text: speakerProfileTextBinding(speakerID: speakerID, keyPath: \.name))
+                speakerProfileField("Role", text: speakerProfileTextBinding(speakerID: speakerID, keyPath: \.role))
+                speakerProfileField("Company", text: speakerProfileTextBinding(speakerID: speakerID, keyPath: \.company))
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                    .frame(width: 96)
+                speakerProfileField("Notes or context", text: speakerProfileTextBinding(speakerID: speakerID, keyPath: \.notes))
+            }
+        }
+        .padding(10)
+        .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+    }
+
+    private func speakerProfileField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: Theme.smallSize))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.border, lineWidth: 1))
+    }
+
+    private func speakerProfileTextBinding(
+        speakerID: String,
+        keyPath: WritableKeyPath<SpeakerProfile, String?>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                let profile = meeting.speakerProfile(for: speakerID)
+                return profile[keyPath: keyPath] ?? ""
+            },
+            set: { newValue in
+                updateSpeakerProfile(speakerID: speakerID) { profile in
+                    profile[keyPath: keyPath] = Self.trimmedOptional(newValue)
+                }
+            }
+        )
+    }
+
+    private func updateSpeakerProfile(speakerID: String, mutate: (inout SpeakerProfile) -> Void) {
+        var profile = meeting.speakerProfile(for: speakerID)
+        mutate(&profile)
+
+        if let manager = meetingManager {
+            meeting = manager.updateSpeakerProfile(meeting: meeting, profile: profile)
+        } else {
+            meeting.setSpeakerProfile(profile)
         }
     }
 

@@ -144,6 +144,21 @@ struct LiveTranscriptView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     let segments = meetingManager.currentTranscript
+                    if let profile = meetingManager.pendingSpeakerProfile {
+                        LiveSpeakerTagPrompt(
+                            profile: profile,
+                            defaultDisplayName: TranscriptSpeakerLabels.displayName(for: profile.speakerID, labels: [:]),
+                            onSave: { updatedProfile in
+                                meetingManager.saveCurrentSpeakerProfile(updatedProfile)
+                            },
+                            onDefer: {
+                                meetingManager.deferCurrentSpeakerPrompt()
+                            }
+                        )
+                        .id(profile.speakerID)
+                        .padding(.bottom, 16)
+                    }
+
                     if segments.isEmpty {
                         VStack(spacing: 10) {
                             Image(systemName: "mic")
@@ -163,11 +178,16 @@ struct LiveTranscriptView: View {
                                     .foregroundStyle(Theme.textTertiary)
                                     .frame(width: 46, alignment: .trailing)
                                     .padding(.top, 2)
-                                Text(segment.text)
-                                    .font(.system(size: Theme.bodySize))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .lineSpacing(4)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(meetingManager.currentSpeakerDisplayName(for: segment))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Theme.textSecondary)
+                                    Text(segment.text)
+                                        .font(.system(size: Theme.bodySize))
+                                        .foregroundStyle(Theme.textPrimary)
+                                        .lineSpacing(4)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                             .padding(.vertical, 2)
                             .id(segment.id)
@@ -238,6 +258,118 @@ struct LiveTranscriptView: View {
             return String(format: "%d:%02d:%02d", h, m, s)
         }
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+private struct LiveSpeakerTagPrompt: View {
+    let profile: SpeakerProfile
+    let defaultDisplayName: String
+    let onSave: (SpeakerProfile) -> Void
+    let onDefer: () -> Void
+
+    @State private var name: String
+    @State private var role: String
+    @State private var company: String
+    @State private var notes: String
+
+    init(
+        profile: SpeakerProfile,
+        defaultDisplayName: String,
+        onSave: @escaping (SpeakerProfile) -> Void,
+        onDefer: @escaping () -> Void
+    ) {
+        self.profile = profile
+        self.defaultDisplayName = defaultDisplayName
+        self.onSave = onSave
+        self.onDefer = onDefer
+        _name = State(initialValue: profile.name ?? "")
+        _role = State(initialValue: profile.role ?? "")
+        _company = State(initialValue: profile.company ?? "")
+        _notes = State(initialValue: profile.notes ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Who is speaking?")
+                        .font(.system(size: Theme.bodySize, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Detected \(defaultDisplayName). Add what you know now; you can edit this later.")
+                        .font(.system(size: Theme.smallSize))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                speakerField("Name", text: $name)
+                speakerField("Role", text: $role)
+                speakerField("Company", text: $company)
+            }
+
+            TextField("Notes or context", text: $notes)
+                .textFieldStyle(.plain)
+                .font(.system(size: Theme.smallSize))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+
+            HStack(spacing: 8) {
+                Button("Not sure") {
+                    onDefer()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+
+                Spacer()
+
+                Button {
+                    onSave(
+                        SpeakerProfile(
+                            speakerID: profile.speakerID,
+                            name: name,
+                            role: role,
+                            company: company,
+                            notes: notes
+                        )
+                    )
+                } label: {
+                    Label("Save speaker", systemImage: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canSave ? Color.accentColor : Theme.textTertiary)
+                .disabled(!canSave)
+            }
+        }
+        .padding(14)
+        .background(Theme.sidebarBG.opacity(0.95), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+    }
+
+    private var canSave: Bool {
+        [name, role, company, notes].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func speakerField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: Theme.smallSize))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
     }
 }
 

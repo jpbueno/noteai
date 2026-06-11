@@ -47,7 +47,11 @@ final class SummarizationEngine {
         \(summaryText)
 
         TRANSCRIPT (for additional context):
-        \(meeting.transcript.prefix(60).map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }.joined(separator: "\n"))
+        \(MeetingCaptureWorkflow.transcriptText(
+            from: Array(meeting.transcript.prefix(60)),
+            speakerLabels: meeting.speakerLabels,
+            speakerProfiles: meeting.speakerProfiles
+        ))
         """
 
         return try await complete(prompt: prompt, context: request)
@@ -159,7 +163,11 @@ final class SummarizationEngine {
     }
 
     private func buildSectionPrompt(section: MeetingSummarySection, meeting: Meeting) -> String {
-        let transcriptText = MeetingCaptureWorkflow.transcriptText(from: meeting.transcript)
+        let transcriptText = MeetingCaptureWorkflow.summaryInput(
+            from: meeting.transcript,
+            speakerLabels: meeting.speakerLabels,
+            speakerProfiles: meeting.speakerProfiles
+        )
         let currentSummary = AITasks.formatSummaryForPrompt(meeting.summary)
 
         return """

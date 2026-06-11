@@ -5,26 +5,23 @@ import Foundation
 final class SummarizationEngine {
 
     func summarize(transcript: String) async throws -> MeetingSummary {
-        let client = try buildClient()
-        let model = selectedModelID()
+        let request = try buildRequestContext()
         let template = selectedTemplate()
         let prompt = buildPrompt(transcript: transcript, template: template)
-        let responseText = try await client.complete(prompt: prompt, model: model)
+        let responseText = try await complete(prompt: prompt, context: request)
         return try AITasks.parseMeetingSummary(responseText)
     }
 
     func regenerateSection(_ section: MeetingSummarySection, meeting: Meeting) async throws -> MeetingSummarySectionContent {
-        let client = try buildClient()
-        let model = selectedModelID()
+        let request = try buildRequestContext()
         let prompt = buildSectionPrompt(section: section, meeting: meeting)
-        let responseText = try await client.complete(prompt: prompt, model: model)
+        let responseText = try await complete(prompt: prompt, context: request)
         return try AITasks.parseMeetingSummarySection(responseText, section: section)
     }
 
     /// Generates a follow-up email draft based on a meeting's transcript and summary.
     func draftFollowUp(meeting: Meeting) async throws -> String {
-        let client = try buildClient()
-        let model = selectedModelID()
+        let request = try buildRequestContext()
 
         let summaryText = AITasks.formatSummaryForPrompt(meeting.summary)
         let prompt = """
@@ -53,29 +50,78 @@ final class SummarizationEngine {
         \(meeting.transcript.prefix(60).map { "[\($0.formattedTimestamp)] \($0.speaker ?? "Speaker"): \($0.text)" }.joined(separator: "\n"))
         """
 
-        return try await client.complete(prompt: prompt, model: model)
+        return try await complete(prompt: prompt, context: request)
     }
 
     // MARK: - Client construction
 
-    private func buildClient() throws -> LLMClient {
+    private struct LLMRequestContext {
+        let provider: LLMProviderType
+        let model: String
+        let client: LLMClient
+    }
+
+    private func buildRequestContext() throws -> LLMRequestContext {
         let provider = selectedProvider()
+        let model = selectedModelID()
         let apiKey = resolveAPIKey(for: provider)
 
         guard !apiKey.isEmpty else {
             throw SummarizationError.noAPIKey
         }
 
+        let client: LLMClient
         switch provider {
         case .openRouter:
-            return OpenRouterClient(apiKey: apiKey)
+            client = OpenRouterClient(apiKey: apiKey)
         case .anthropic:
-            return AnthropicClient(apiKey: apiKey)
+            client = AnthropicClient(apiKey: apiKey)
         case .openAI:
-            return OpenRouterClient(apiKey: apiKey, baseURL: LLMProviderType.openAI.baseURL)
+            client = OpenRouterClient(apiKey: apiKey, baseURL: LLMProviderType.openAI.baseURL)
         case .nvidia:
-            return OpenRouterClient(apiKey: apiKey, baseURL: LLMProviderType.nvidia.baseURL)
+            client = OpenRouterClient(apiKey: apiKey, baseURL: LLMProviderType.nvidia.baseURL)
         }
+        return LLMRequestContext(provider: provider, model: model, client: client)
+    }
+
+    private func complete(prompt: String, context: LLMRequestContext) async throws -> String {
+        let models = LLMFallbackPolicy.candidateModels(provider: context.provider, primaryModel: context.model)
+        var lastError: Error?
+
+        for (index, model) in models.enumerated() {
+            do {
+                return try await context.client.complete(prompt: prompt, model: model)
+            } catch {
+                lastError = error
+                let hasFallback = index < models.count - 1
+                guard hasFallback, LLMFallbackPolicy.shouldRetry(error, provider: context.provider) else {
+                    throw error
+                }
+                print("[SummarizationEngine] \(context.provider.displayName) model \(model) failed with retryable error: \(error.localizedDescription). Trying \(models[index + 1]).")
+            }
+        }
+
+        throw lastError ?? SummarizationError.apiError(statusCode: 0, message: "No model response")
+    }
+
+    private func chat(messages: [(role: String, content: String)], context: LLMRequestContext) async throws -> String {
+        let models = LLMFallbackPolicy.candidateModels(provider: context.provider, primaryModel: context.model)
+        var lastError: Error?
+
+        for (index, model) in models.enumerated() {
+            do {
+                return try await context.client.chat(messages: messages, model: model)
+            } catch {
+                lastError = error
+                let hasFallback = index < models.count - 1
+                guard hasFallback, LLMFallbackPolicy.shouldRetry(error, provider: context.provider) else {
+                    throw error
+                }
+                print("[SummarizationEngine] \(context.provider.displayName) chat model \(model) failed with retryable error: \(error.localizedDescription). Trying \(models[index + 1]).")
+            }
+        }
+
+        throw lastError ?? SummarizationError.apiError(statusCode: 0, message: "No chat response")
     }
 
     private func selectedProvider() -> LLMProviderType {
@@ -140,17 +186,15 @@ final class SummarizationEngine {
 
     /// Multi-turn chat with the configured LLM provider.
     func chat(messages: [(role: String, content: String)]) async throws -> String {
-        let client = try buildClient()
-        let model = selectedModelID()
-        return try await client.chat(messages: messages, model: model)
+        let request = try buildRequestContext()
+        return try await chat(messages: messages, context: request)
     }
 
     // MARK: - T5T Generation
 
     /// Generates a T5T (Top 5 Things) report from durable task records in a reporting period.
     func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
-        let client = try buildClient()
-        let model = selectedModelID()
+        let request = try buildRequestContext()
         let prompt = T5TPrompt.buildPrompt(
             tasks: tasks,
             config: config,
@@ -158,7 +202,7 @@ final class SummarizationEngine {
             periodEnd: periodEnd
         )
 
-        let responseText = try await client.complete(prompt: prompt, model: model)
+        let responseText = try await complete(prompt: prompt, context: request)
         return try AITasks.parseT5TSections(responseText)
     }
 
@@ -190,11 +234,93 @@ enum SummarizationError: LocalizedError {
         case .noAPIKey:
             return "No API key configured. Set it in Settings or via the appropriate environment variable."
         case .apiError(let code, let message):
-            return "API error (\(code)): \(message)"
+            return "API error (\(code)): \(SummarizationError.readableAPIMessage(from: message))"
         case .parseError:
             return "Failed to parse summary from LLM response"
         case .invalidURL(let url):
             return "Invalid API URL: \(url)"
         }
+    }
+
+    var statusCode: Int? {
+        if case .apiError(let code, _) = self { return code }
+        return nil
+    }
+
+    var apiMessage: String? {
+        if case .apiError(_, let message) = self { return message }
+        return nil
+    }
+
+    static func readableAPIMessage(from message: String) -> String {
+        guard let data = message.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return message
+        }
+
+        if let detail = root["detail"] as? String { return detail }
+        if let message = root["message"] as? String { return message }
+        if let error = root["error"] as? String { return error }
+        if let error = root["error"] as? [String: Any] {
+            if let message = error["message"] as? String { return message }
+            if let detail = error["detail"] as? String { return detail }
+        }
+        return message
+    }
+}
+
+enum LLMFallbackPolicy {
+    static let nvidiaOpus47 = "aws/anthropic/bedrock-claude-opus-4-7"
+    static let nvidiaOpus46 = "azure/anthropic/claude-opus-4-6"
+    static let nvidiaNemotronSuper = "nvcf/nvidia/llama-3.3-nemotron-super-49b-v1.5"
+
+    static func candidateModels(provider: LLMProviderType, primaryModel: String) -> [String] {
+        guard provider == .nvidia else { return [primaryModel] }
+
+        let fallbacks: [String]
+        if primaryModel == nvidiaOpus47 {
+            fallbacks = [nvidiaOpus46, nvidiaNemotronSuper]
+        } else {
+            fallbacks = [nvidiaNemotronSuper]
+        }
+
+        return ([primaryModel] + fallbacks).reduce(into: [String]()) { models, model in
+            if !models.contains(model) {
+                models.append(model)
+            }
+        }
+    }
+
+    static func shouldRetry(_ error: Error, provider: LLMProviderType) -> Bool {
+        guard provider == .nvidia else { return false }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorTimedOut,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorNotConnectedToInternet,
+            ].contains(nsError.code)
+        }
+
+        guard let summaryError = error as? SummarizationError,
+              case .apiError(let statusCode, let rawMessage) = summaryError else {
+            return false
+        }
+
+        if [429, 500, 502, 503, 504].contains(statusCode) {
+            return true
+        }
+
+        let message = SummarizationError.readableAPIMessage(from: rawMessage).lowercased()
+        return message.contains("serviceunavailable")
+            || message.contains("service unavailable")
+            || message.contains("bedrock is unable")
+            || message.contains("temporarily unavailable")
+            || message.contains("overloaded")
+            || message.contains("rate limit")
     }
 }

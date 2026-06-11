@@ -242,3 +242,57 @@ final class OnboardingChecklistTests: XCTestCase {
         XCTAssertEqual(item(.screenRecording, in: checklist).actionTarget, .requestScreenRecordingPermission)
     }
 }
+
+final class LLMFallbackPolicyTests: XCTestCase {
+    func testNvidiaOpus47UsesClientSideFallbacks() {
+        XCTAssertEqual(
+            LLMFallbackPolicy.candidateModels(
+                provider: .nvidia,
+                primaryModel: "aws/anthropic/bedrock-claude-opus-4-7"
+            ),
+            [
+                "aws/anthropic/bedrock-claude-opus-4-7",
+                "azure/anthropic/claude-opus-4-6",
+                "nvcf/nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            ]
+        )
+    }
+
+    func testNonNvidiaProviderDoesNotFallback() {
+        XCTAssertEqual(
+            LLMFallbackPolicy.candidateModels(
+                provider: .openRouter,
+                primaryModel: "anthropic/claude-sonnet-4"
+            ),
+            ["anthropic/claude-sonnet-4"]
+        )
+    }
+
+    func testNvidiaBedrockServiceUnavailableIsRetryable() {
+        let error = SummarizationError.apiError(
+            statusCode: 503,
+            message: """
+            {"error":{"message":"litellm.ServiceUnavailableError: BedrockException - {\\\"message\\\":\\\"Bedrock is unable to process your request.\\\"}. Received Model Group=aws/anthropic/bedrock-claude-opus-4-7\\nAvailable Model Group Fallbacks=None"}}
+            """
+        )
+
+        XCTAssertTrue(LLMFallbackPolicy.shouldRetry(error, provider: .nvidia))
+    }
+
+    func testUnauthorizedProviderErrorsAreNotRetryable() {
+        let error = SummarizationError.apiError(
+            statusCode: 401,
+            message: "{\"error\":{\"message\":\"Invalid API key\"}}"
+        )
+
+        XCTAssertFalse(LLMFallbackPolicy.shouldRetry(error, provider: .nvidia))
+    }
+
+    func testReadableAPIMessageExtractsNestedProviderMessage() {
+        let message = SummarizationError.readableAPIMessage(
+            from: "{\"error\":{\"message\":\"Bedrock is unable to process your request.\"}}"
+        )
+
+        XCTAssertEqual(message, "Bedrock is unable to process your request.")
+    }
+}

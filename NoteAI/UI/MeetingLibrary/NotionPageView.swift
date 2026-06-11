@@ -12,8 +12,6 @@ struct NotionPageView: View {
     @State private var isGeneratingFollowUp = false
     @State private var followUpError: String?
     @State private var isRegeneratingSummary = false
-    @State private var regeneratingSection: MeetingSummarySection?
-    @State private var sectionRegenerateError: (section: MeetingSummarySection, message: String)?
 
     enum PageTab: String, CaseIterable {
         case summary = "Summary"
@@ -82,6 +80,10 @@ struct NotionPageView: View {
                 Spacer()
 
                 if let manager = meetingManager {
+                    if selectedTab == .summary, !meeting.summary.isEmpty {
+                        summaryRegenerateButton
+                    }
+
                     Button {
                         let note = manager.createNoteFromMeeting(meeting)
                         NotificationCenter.default.post(name: .navigateToNote, object: note.id)
@@ -271,29 +273,6 @@ struct NotionPageView: View {
                 .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 5))
 
             Spacer()
-
-            Button {
-                regenerateSection(section)
-            } label: {
-                HStack(spacing: 5) {
-                    if regeneratingSection == section {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12))
-                    }
-                    Text("Regenerate")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.textSecondary)
-            .disabled(regeneratingSection != nil)
         }
     }
 
@@ -309,29 +288,6 @@ struct NotionPageView: View {
                         .foregroundStyle(Theme.textTertiary)
 
                     Spacer()
-
-                    Button {
-                        regenerateSummary()
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isRegeneratingSummary {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 12))
-                            }
-                            Text("Regenerate summary")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textSecondary)
-                    .disabled(isRegeneratingSummary)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -433,8 +389,6 @@ struct NotionPageView: View {
             .padding(10)
             .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-
-            sectionErrorText(for: section)
         }
     }
 
@@ -463,8 +417,6 @@ struct NotionPageView: View {
             .padding(10)
             .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-
-            sectionErrorText(for: .actionItems)
         }
     }
 
@@ -562,15 +514,6 @@ struct NotionPageView: View {
         }
         .padding(.leading, 4)
         .padding(.vertical, 3)
-    }
-
-    @ViewBuilder
-    private func sectionErrorText(for section: MeetingSummarySection) -> some View {
-        if let error = sectionRegenerateError, error.section == section {
-            Text(error.message)
-                .font(.system(size: Theme.smallSize))
-                .foregroundStyle(.red)
-        }
     }
 
     private func textValues(for section: MeetingSummarySection) -> [String] {
@@ -798,6 +741,31 @@ struct NotionPageView: View {
 
     @State private var regenerateError: String?
 
+    private var summaryRegenerateButton: some View {
+        Button {
+            regenerateSummary()
+        } label: {
+            HStack(spacing: 6) {
+                if isRegeneratingSummary {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                }
+                Text("Regenerate summary")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.textSecondary)
+        .disabled(isRegeneratingSummary)
+    }
+
     @ViewBuilder
     private var retryButton: some View {
         if isRegeneratingSummary {
@@ -854,26 +822,6 @@ struct NotionPageView: View {
                 print("[NotionPageView] Resummarize failed: \(error)")
                 regenerateError = error.localizedDescription
                 isRegeneratingSummary = false
-            }
-        }
-    }
-
-    private func regenerateSection(_ section: MeetingSummarySection) {
-        guard let manager = meetingManager else {
-            sectionRegenerateError = (section, "Internal error: meeting manager unavailable")
-            return
-        }
-        regeneratingSection = section
-        sectionRegenerateError = nil
-
-        Task { @MainActor in
-            do {
-                let updatedMeeting = try await manager.regenerateSummarySection(section, meeting: meeting)
-                meeting = updatedMeeting
-                regeneratingSection = nil
-            } catch {
-                sectionRegenerateError = (section, error.localizedDescription)
-                regeneratingSection = nil
             }
         }
     }

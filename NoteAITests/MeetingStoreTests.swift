@@ -161,6 +161,42 @@ final class MeetingStoreTests: XCTestCase {
         try store.delete(meetingId: meeting.id)
     }
 
+    func testSpeakerProfilesPersistWithMeetingJSONAndDriveDisplayNames() throws {
+        let store = MeetingStore()
+        var meeting = Meeting(
+            id: UUID(),
+            title: "Speaker Profile Persistence",
+            date: Date(timeIntervalSince1970: 0),
+            duration: 60,
+            transcript: [
+                TranscriptSegment(id: 1, text: "We should prioritize the beta.", startTime: 0, speaker: "speaker-remote", confidence: 0.9)
+            ],
+            summary: MeetingSummary(),
+            speakerLabels: ["speaker-remote": "Customer"]
+        )
+
+        meeting.setSpeakerProfile(
+            SpeakerProfile(
+                speakerID: "speaker-remote",
+                name: "Sarah Chen",
+                role: "VP of Product",
+                company: "Acme",
+                notes: "Decision maker for the beta plan."
+            )
+        )
+
+        try store.save(meeting: meeting)
+        let fetched = try XCTUnwrap(store.fetch(meetingId: meeting.id))
+
+        XCTAssertEqual(fetched.speakerProfiles["speaker-remote"]?.name, "Sarah Chen")
+        XCTAssertEqual(fetched.speakerProfiles["speaker-remote"]?.role, "VP of Product")
+        XCTAssertEqual(fetched.speakerProfiles["speaker-remote"]?.company, "Acme")
+        XCTAssertEqual(fetched.speakerProfiles["speaker-remote"]?.notes, "Decision maker for the beta plan.")
+        XCTAssertEqual(fetched.speakerDisplayName(for: fetched.transcript[0]), "Sarah Chen")
+
+        try store.delete(meetingId: meeting.id)
+    }
+
     func testLegacyMeetingDecodesWithEmptySpeakerLabels() throws {
         let data = """
         {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","date":0,"duration":60,"transcript":[],"summary":{"decisions":[],"actionItems":[],"topics":[],"openQuestions":[],"wasSummarized":false}}
@@ -171,6 +207,7 @@ final class MeetingStoreTests: XCTestCase {
         let meeting = try decoder.decode(Meeting.self, from: data)
 
         XCTAssertEqual(meeting.speakerLabels, [:])
+        XCTAssertEqual(meeting.speakerProfiles, [:])
     }
 
     func testPDFExportCreatesShareableMeetingRecord() throws {

@@ -8,6 +8,7 @@ struct Meeting: Identifiable, Codable {
     var transcript: [TranscriptSegment]
     var summary: MeetingSummary
     var speakerLabels: [String: String]
+    var speakerProfiles: [String: SpeakerProfile]
 
     init(
         id: UUID,
@@ -16,7 +17,8 @@ struct Meeting: Identifiable, Codable {
         duration: TimeInterval,
         transcript: [TranscriptSegment],
         summary: MeetingSummary,
-        speakerLabels: [String: String] = [:]
+        speakerLabels: [String: String] = [:],
+        speakerProfiles: [String: SpeakerProfile] = [:]
     ) {
         self.id = id
         self.title = title
@@ -25,6 +27,7 @@ struct Meeting: Identifiable, Codable {
         self.transcript = transcript
         self.summary = summary
         self.speakerLabels = TranscriptSpeakerLabels.normalizedLabels(speakerLabels)
+        self.speakerProfiles = TranscriptSpeakerLabels.normalizedProfiles(speakerProfiles)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -35,6 +38,7 @@ struct Meeting: Identifiable, Codable {
         case transcript
         case summary
         case speakerLabels
+        case speakerProfiles
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +51,9 @@ struct Meeting: Identifiable, Codable {
         summary = try container.decode(MeetingSummary.self, forKey: .summary)
         speakerLabels = TranscriptSpeakerLabels.normalizedLabels(
             try container.decodeIfPresent([String: String].self, forKey: .speakerLabels) ?? [:]
+        )
+        speakerProfiles = TranscriptSpeakerLabels.normalizedProfiles(
+            try container.decodeIfPresent([String: SpeakerProfile].self, forKey: .speakerProfiles) ?? [:]
         )
     }
 
@@ -67,7 +74,7 @@ struct Meeting: Identifiable, Codable {
 
     func speakerDisplayName(for segment: TranscriptSegment) -> String {
         let id = speakerID(for: segment)
-        return TranscriptSpeakerLabels.displayName(for: id, labels: speakerLabels)
+        return TranscriptSpeakerLabels.displayName(for: id, labels: speakerLabels, profiles: speakerProfiles)
     }
 
     mutating func setSpeakerLabel(speakerID: String, displayName: String) {
@@ -76,6 +83,82 @@ struct Meeting: Identifiable, Codable {
             for: speakerID,
             in: speakerLabels
         )
+        let id = TranscriptSpeakerLabels.normalizedSpeakerID(speakerID) ?? TranscriptSpeakerLabels.fallbackSpeakerID
+        if let label = TranscriptSpeakerLabels.normalizedLabel(displayName) {
+            speakerProfiles[id] = TranscriptSpeakerLabels.profile(
+                speakerProfiles[id] ?? SpeakerProfile(speakerID: id),
+                settingName: label
+            )
+        } else if let existing = speakerProfiles[id] {
+            speakerProfiles[id] = TranscriptSpeakerLabels.profile(existing, settingName: nil)
+        }
+        speakerProfiles = TranscriptSpeakerLabels.normalizedProfiles(speakerProfiles)
+    }
+
+    mutating func setSpeakerProfile(_ profile: SpeakerProfile) {
+        speakerProfiles = TranscriptSpeakerLabels.settingProfile(profile, in: speakerProfiles)
+        if let id = TranscriptSpeakerLabels.normalizedSpeakerID(profile.speakerID) {
+            speakerLabels = TranscriptSpeakerLabels.settingLabel(
+                profile.name ?? "",
+                for: id,
+                in: speakerLabels
+            )
+        }
+    }
+
+    func speakerProfile(for speakerID: String) -> SpeakerProfile {
+        let id = TranscriptSpeakerLabels.normalizedSpeakerID(speakerID) ?? TranscriptSpeakerLabels.fallbackSpeakerID
+        return speakerProfiles[id] ?? SpeakerProfile(speakerID: id, name: speakerLabels[id])
+    }
+}
+
+struct SpeakerProfile: Identifiable, Codable, Equatable {
+    var id: String { speakerID }
+    let speakerID: String
+    var name: String?
+    var role: String?
+    var company: String?
+    var notes: String?
+
+    init(
+        speakerID: String,
+        name: String? = nil,
+        role: String? = nil,
+        company: String? = nil,
+        notes: String? = nil
+    ) {
+        self.speakerID = TranscriptSpeakerLabels.normalizedSpeakerID(speakerID) ?? TranscriptSpeakerLabels.fallbackSpeakerID
+        self.name = TranscriptSpeakerLabels.normalizedLabel(name)
+        self.role = TranscriptSpeakerLabels.normalizedLabel(role)
+        self.company = TranscriptSpeakerLabels.normalizedLabel(company)
+        self.notes = TranscriptSpeakerLabels.normalizedLabel(notes)
+    }
+
+    var hasUserMetadata: Bool {
+        name != nil || role != nil || company != nil || notes != nil
+    }
+
+    func displayName(defaultName: String) -> String {
+        name ?? defaultName
+    }
+
+    func summaryLine(defaultName: String) -> String? {
+        guard hasUserMetadata else { return nil }
+        let displayName = displayName(defaultName: defaultName)
+        let affiliation = [role, company]
+            .compactMap { $0 }
+            .joined(separator: ", ")
+        let suffix = [affiliation, notes]
+            .compactMap { value -> String? in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: ". ")
+
+        if suffix.isEmpty {
+            return displayName
+        }
+        return "\(displayName) — \(suffix)."
     }
 }
 
@@ -149,6 +232,16 @@ enum TranscriptSpeakerLabels {
         return defaultDisplayName(for: id)
     }
 
+    static func displayName(
+        for speakerID: String,
+        labels: [String: String],
+        profiles: [String: SpeakerProfile]
+    ) -> String {
+        let id = normalizedSpeakerID(speakerID) ?? fallbackSpeakerID
+        let defaultName = displayName(for: id, labels: labels)
+        return profiles[id]?.displayName(defaultName: defaultName) ?? defaultName
+    }
+
     static func normalizedLabels(_ labels: [String: String]) -> [String: String] {
         labels.reduce(into: [:]) { result, entry in
             guard let id = normalizedSpeakerID(entry.key),
@@ -168,13 +261,90 @@ enum TranscriptSpeakerLabels {
         return next
     }
 
-    private static func normalizedSpeakerID(_ speaker: String?) -> String? {
+    static func normalizedProfiles(_ profiles: [String: SpeakerProfile]) -> [String: SpeakerProfile] {
+        profiles.reduce(into: [:]) { result, entry in
+            let candidateID = normalizedSpeakerID(entry.value.speakerID) ?? normalizedSpeakerID(entry.key)
+            guard let id = candidateID else { return }
+            let profile = SpeakerProfile(
+                speakerID: id,
+                name: entry.value.name,
+                role: entry.value.role,
+                company: entry.value.company,
+                notes: entry.value.notes
+            )
+            if profile.hasUserMetadata {
+                result[id] = profile
+            }
+        }
+    }
+
+    static func settingProfile(_ profile: SpeakerProfile, in profiles: [String: SpeakerProfile]) -> [String: SpeakerProfile] {
+        guard let id = normalizedSpeakerID(profile.speakerID) else { return normalizedProfiles(profiles) }
+        var next = normalizedProfiles(profiles)
+        let normalized = SpeakerProfile(
+            speakerID: id,
+            name: profile.name,
+            role: profile.role,
+            company: profile.company,
+            notes: profile.notes
+        )
+        if normalized.hasUserMetadata {
+            next[id] = normalized
+        } else {
+            next.removeValue(forKey: id)
+        }
+        return next
+    }
+
+    static func profile(_ profile: SpeakerProfile, settingName name: String?) -> SpeakerProfile {
+        SpeakerProfile(
+            speakerID: profile.speakerID,
+            name: name,
+            role: profile.role,
+            company: profile.company,
+            notes: profile.notes
+        )
+    }
+
+    static func untaggedSpeakerIDs(
+        in transcript: [TranscriptSegment],
+        labels: [String: String] = [:],
+        profiles: [String: SpeakerProfile],
+        deferredSpeakerIDs: Set<String>
+    ) -> [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+
+        for segment in transcript {
+            let id = speakerID(for: segment)
+            guard id.lowercased() != "system",
+                  !deferredSpeakerIDs.contains(id),
+                  !seen.contains(id),
+                  !isTagged(speakerID: id, labels: labels, profiles: profiles) else {
+                continue
+            }
+            seen.insert(id)
+            ids.append(id)
+        }
+
+        return ids
+    }
+
+    static func isTagged(speakerID: String, labels: [String: String], profiles: [String: SpeakerProfile]) -> Bool {
+        let id = normalizedSpeakerID(speakerID) ?? fallbackSpeakerID
+        if profiles[id]?.hasUserMetadata == true {
+            return true
+        }
+        return normalizedLabel(labels[id]) != nil
+    }
+
+    static func normalizedSpeakerID(_ speaker: String?) -> String? {
         guard let speaker else { return nil }
         let trimmed = speaker.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func normalizedLabel(_ label: String?) -> String? {
+    static func normalizedLabel(_ label: String?) -> String? {
         guard let label else { return nil }
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

@@ -265,6 +265,31 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(fallback.wasSummarized)
     }
 
+    func testMeetingCaptureWorkflowIncludesSpeakerContextForSummaries() {
+        let segments = [
+            TranscriptSegment(id: 1, text: "We should prioritize the beta.", startTime: 3, speaker: "speaker-remote", confidence: 0.9)
+        ]
+        let profiles = [
+            "speaker-remote": SpeakerProfile(
+                speakerID: "speaker-remote",
+                name: "Sarah Chen",
+                role: "VP of Product",
+                company: "Acme",
+                notes: "Decision maker for the beta plan."
+            )
+        ]
+
+        let input = MeetingCaptureWorkflow.summaryInput(
+            from: segments,
+            speakerLabels: [:],
+            speakerProfiles: profiles
+        )
+
+        XCTAssertTrue(input.contains("SPEAKER CONTEXT"))
+        XCTAssertTrue(input.contains("Sarah Chen — VP of Product, Acme. Decision maker for the beta plan."))
+        XCTAssertTrue(input.contains("[00:03] Sarah Chen: We should prioritize the beta."))
+    }
+
     func testRecordingReadinessFallsBackToManualWhenCalendarAndDetectionAreMissing() {
         let readiness = MeetingRecordingReadiness.resolve(
             recordingState: .idle,
@@ -378,6 +403,26 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(remoteSegments[0].speaker, "speaker-remote")
         XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-local", labels: [:]), "You")
         XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-remote", labels: [:]), "Remote audio")
+    }
+
+    func testTranscriptSpeakerLabelsFindsUntaggedSpeakersInFirstSeenOrder() {
+        let segments = [
+            TranscriptSegment(id: 1, text: "Local voice.", startTime: 0, speaker: "speaker-local", confidence: 0.9),
+            TranscriptSegment(id: 2, text: "Remote voice.", startTime: 4, speaker: "speaker-remote", confidence: 0.9),
+            TranscriptSegment(id: 3, text: "More remote voice.", startTime: 6, speaker: "speaker-remote", confidence: 0.9),
+            TranscriptSegment(id: 4, text: "Warning.", startTime: 7, speaker: "System", confidence: 1)
+        ]
+        let profiles = [
+            "speaker-local": SpeakerProfile(speakerID: "speaker-local", name: "JP")
+        ]
+
+        let untagged = TranscriptSpeakerLabels.untaggedSpeakerIDs(
+            in: segments,
+            profiles: profiles,
+            deferredSpeakerIDs: []
+        )
+
+        XCTAssertEqual(untagged, ["speaker-remote"])
     }
 
     func testTranscriptionWindowPlannerSplitsLongBuffersIntoBoundedWindows() {

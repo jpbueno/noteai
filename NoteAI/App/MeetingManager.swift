@@ -15,6 +15,8 @@ final class MeetingManager: ObservableObject {
 
     @Published var state: State = .idle
     @Published var currentTranscript: [TranscriptSegment] = []
+    @Published var currentSpeakerProfiles: [String: SpeakerProfile] = [:]
+    @Published var pendingSpeakerTagID: String?
     @Published var meetings: [Meeting] = []
     @Published var lastError: String?
     @Published var recordingDuration: TimeInterval = 0
@@ -132,6 +134,7 @@ final class MeetingManager: ObservableObject {
     private var coachAnalyzingInFlight = false
     private var coachLastAnalyzedSegmentCount = 0
     private var coachLastAnalyzedTime: Date?
+    private var deferredSpeakerTagIDs = Set<String>()
     private var cancellables = Set<AnyCancellable>()
     private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
 
@@ -269,6 +272,9 @@ final class MeetingManager: ObservableObject {
         }
         state = .recording
         currentTranscript = []
+        currentSpeakerProfiles = [:]
+        pendingSpeakerTagID = nil
+        deferredSpeakerTagIDs = []
         currentMeetingStart = Date()
         currentDetectedAppName = detectedAppName
         currentPreferredCaptureSource = preferredCaptureSource
@@ -335,7 +341,12 @@ final class MeetingManager: ObservableObject {
             await transcriptionEngine.reset()
 
             let transcript = currentTranscript
-            let transcriptText = MeetingCaptureWorkflow.transcriptText(from: transcript)
+            let speakerProfiles = currentSpeakerProfiles
+            let transcriptText = MeetingCaptureWorkflow.summaryInput(
+                from: transcript,
+                speakerLabels: [:],
+                speakerProfiles: speakerProfiles
+            )
 
             let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
             summarizationStatus = .summarizing(model: modelName)
@@ -355,7 +366,8 @@ final class MeetingManager: ObservableObject {
                 title: title,
                 startedAt: currentMeetingStart,
                 transcript: transcript,
-                summary: summary
+                summary: summary,
+                speakerProfiles: speakerProfiles
             )
 
             do {
@@ -369,6 +381,8 @@ final class MeetingManager: ObservableObject {
             ExportManager.autoExportIfEnabled(meeting)
             await notificationManager.sendSummaryReady(meetingTitle: meeting.title)
             state = .idle
+            pendingSpeakerTagID = nil
+            deferredSpeakerTagIDs = []
         }
     }
 
@@ -400,9 +414,10 @@ final class MeetingManager: ObservableObject {
     func resummarize(meeting: Meeting) async throws -> Meeting {
         debugLog("resummarize called for meeting \(meeting.id), transcript count=\(meeting.transcript.count)")
 
-        let transcriptText = MeetingCaptureWorkflow.transcriptText(
+        let transcriptText = MeetingCaptureWorkflow.summaryInput(
             from: meeting.transcript,
-            speakerLabels: meeting.speakerLabels
+            speakerLabels: meeting.speakerLabels,
+            speakerProfiles: meeting.speakerProfiles
         )
 
         debugLog("transcript text length=\(transcriptText.count)")
@@ -418,6 +433,9 @@ final class MeetingManager: ObservableObject {
 
         var updated = meeting
         updated.summary = summary
+        for section in MeetingSummarySection.allCases {
+            updated.summary.mark(section, state: .generated)
+        }
 
         try meetingStore.save(meeting: updated)
 
@@ -491,6 +509,70 @@ final class MeetingManager: ObservableObject {
         }
 
         return updated
+    }
+
+    @discardableResult
+    func updateSpeakerProfile(meeting: Meeting, profile: SpeakerProfile) -> Meeting {
+        var updated = meeting
+        updated.setSpeakerProfile(profile)
+
+        do {
+            try meetingStore.save(meeting: updated)
+            if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
+                meetings[index] = updated
+            }
+        } catch {
+            print("Failed to save speaker profile: \(error)")
+        }
+
+        return updated
+    }
+
+    var pendingSpeakerProfile: SpeakerProfile? {
+        guard let pendingSpeakerTagID else { return nil }
+        return currentSpeakerProfiles[pendingSpeakerTagID] ?? SpeakerProfile(speakerID: pendingSpeakerTagID)
+    }
+
+    func currentSpeakerDisplayName(for segment: TranscriptSegment) -> String {
+        TranscriptSpeakerLabels.displayName(
+            for: TranscriptSpeakerLabels.speakerID(for: segment),
+            labels: [:],
+            profiles: currentSpeakerProfiles
+        )
+    }
+
+    func saveCurrentSpeakerProfile(_ profile: SpeakerProfile) {
+        currentSpeakerProfiles = TranscriptSpeakerLabels.settingProfile(profile, in: currentSpeakerProfiles)
+        deferredSpeakerTagIDs.remove(profile.speakerID)
+        if pendingSpeakerTagID == profile.speakerID {
+            pendingSpeakerTagID = nil
+        }
+        refreshPendingSpeakerTag()
+    }
+
+    func deferCurrentSpeakerPrompt() {
+        guard let speakerID = pendingSpeakerTagID else { return }
+        deferredSpeakerTagIDs.insert(speakerID)
+        pendingSpeakerTagID = nil
+        refreshPendingSpeakerTag()
+    }
+
+    private func refreshPendingSpeakerTag() {
+        if let pendingSpeakerTagID,
+           TranscriptSpeakerLabels.isTagged(
+                speakerID: pendingSpeakerTagID,
+                labels: [:],
+                profiles: currentSpeakerProfiles
+           ) {
+            self.pendingSpeakerTagID = nil
+        }
+
+        guard pendingSpeakerTagID == nil else { return }
+        pendingSpeakerTagID = TranscriptSpeakerLabels.untaggedSpeakerIDs(
+            in: currentTranscript,
+            profiles: currentSpeakerProfiles,
+            deferredSpeakerIDs: deferredSpeakerTagIDs
+        ).first
     }
 
     private func debugLog(_ message: String) {
@@ -1075,6 +1157,7 @@ final class MeetingManager: ObservableObject {
                                 fallbackSpeakerID: buffer.source.fallbackSpeakerID
                             )
                         )
+                        self.refreshPendingSpeakerTag()
                     }
                 } catch {
                     print("Transcription error: \(error)")
@@ -1315,6 +1398,9 @@ extension MeetingManager: LocalCaptureControlling {
         localHelperSessionId = sessionId
         state = .recording
         currentTranscript = []
+        currentSpeakerProfiles = [:]
+        pendingSpeakerTagID = nil
+        deferredSpeakerTagIDs = []
         currentMeetingStart = startedAt
         recordingDuration = 0
         resetCoachStateForRecording()

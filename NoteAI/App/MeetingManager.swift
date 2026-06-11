@@ -373,7 +373,6 @@ final class MeetingManager: ObservableObject {
             do {
                 try meetingStore.save(meeting: meeting)
                 meetings.insert(meeting, at: 0)
-                syncActionItemsToTasks(for: meeting)
             } catch {
                 print("Failed to save meeting: \(error)")
             }
@@ -391,17 +390,10 @@ final class MeetingManager: ObservableObject {
         guard let itemIndex = meetings[index].summary.actionItems.firstIndex(where: { $0.id == actionItemId }) else { return }
 
         meetings[index].summary.actionItems[itemIndex].isCompleted.toggle()
-        let completed = meetings[index].summary.actionItems[itemIndex].isCompleted
 
         // Persist the change
         do {
             try meetingStore.save(meeting: meetings[index])
-            syncActionItemsToTasks(for: meetings[index])
-            syncLinkedTaskCompletion(
-                meetingID: meetingId,
-                actionItemID: actionItemId,
-                completed: completed
-            )
         } catch {
             print("Failed to save action item toggle: \(error)")
         }
@@ -443,8 +435,6 @@ final class MeetingManager: ObservableObject {
             meetings[index] = updated
         }
 
-        syncActionItemsToTasks(for: updated)
-
         debugLog("meeting updated and saved")
         return updated
     }
@@ -460,10 +450,6 @@ final class MeetingManager: ObservableObject {
 
         if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
             meetings[index] = updated
-        }
-
-        if section == .actionItems {
-            syncActionItemsToTasks(for: updated)
         }
 
         debugLog("regenerated section \(section.rawValue) and saved")
@@ -483,9 +469,6 @@ final class MeetingManager: ObservableObject {
             try meetingStore.save(meeting: updated)
             if let index = meetings.firstIndex(where: { $0.id == meeting.id }) {
                 meetings[index] = updated
-            }
-            if section == .actionItems {
-                syncActionItemsToTasks(for: updated)
             }
         } catch {
             print("Failed to save edited summary section: \(error)")
@@ -868,7 +851,6 @@ final class MeetingManager: ObservableObject {
         }
         updated.modifiedDate = Date()
         updateTask(updated)
-        syncActionItemCompletionFromTask(updated)
     }
 
     func deleteTask(_ task: TaskItem) {
@@ -893,60 +875,6 @@ final class MeetingManager: ObservableObject {
             tasks = try meetingStore.fetchAllTasks()
         } catch {
             print("Failed to load tasks: \(error)")
-        }
-    }
-
-    private func syncActionItemsToTasks(for meeting: Meeting) {
-        let merged = TaskItem.mergingActionLinkedTasks(existing: tasks, meeting: meeting)
-        let existingByID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
-        let changedTasks = merged.filter { existingByID[$0.id] != $0 }
-        guard !changedTasks.isEmpty else { return }
-
-        do {
-            for task in changedTasks {
-                try meetingStore.saveTask(task)
-            }
-            tasks = merged
-        } catch {
-            print("Failed to sync action item tasks: \(error)")
-        }
-    }
-
-    private func syncLinkedTaskCompletion(meetingID: UUID, actionItemID: String, completed: Bool) {
-        for index in tasks.indices {
-            guard tasks[index].sourceMeetingID == meetingID,
-                  tasks[index].sourceActionItemID == actionItemID,
-                  tasks[index].isCompleted != completed else { continue }
-
-            var updated = tasks[index]
-            updated.status = completed ? .completed : .open
-            updated.completedDate = completed ? Date() : nil
-            updated.modifiedDate = Date()
-
-            do {
-                try meetingStore.saveTask(updated)
-                tasks[index] = updated
-            } catch {
-                print("Failed to sync linked task completion: \(error)")
-            }
-        }
-    }
-
-    private func syncActionItemCompletionFromTask(_ task: TaskItem) {
-        guard let sourceMeetingID = task.sourceMeetingID,
-              let sourceActionItemID = task.sourceActionItemID,
-              let meetingIndex = meetings.firstIndex(where: { $0.id == sourceMeetingID }),
-              let actionIndex = meetings[meetingIndex].summary.actionItems.firstIndex(where: { $0.id == sourceActionItemID }),
-              meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted != task.isCompleted else {
-            return
-        }
-
-        meetings[meetingIndex].summary.actionItems[actionIndex].isCompleted = task.isCompleted
-
-        do {
-            try meetingStore.save(meeting: meetings[meetingIndex])
-        } catch {
-            print("Failed to sync task completion back to action item: \(error)")
         }
     }
 

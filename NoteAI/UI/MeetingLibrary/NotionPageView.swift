@@ -209,8 +209,6 @@ struct NotionPageView: View {
             editableTextSection(.openQuestions)
             verticalSpace()
 
-            linkedTasksSection
-
             // Follow-up email section
             followUpSection
         }
@@ -519,57 +517,6 @@ struct NotionPageView: View {
             .buttonStyle(.plain)
             .padding(.top, 6)
         }
-        .padding(.vertical, 3)
-    }
-
-    @ViewBuilder
-    private var linkedTasksSection: some View {
-        let linkedTasks = meetingManager?.tasksLinked(to: meeting.id) ?? []
-        if !linkedTasks.isEmpty {
-            heading2("Linked Tasks")
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(linkedTasks) { task in
-                    linkedTaskRow(task)
-                }
-            }
-            verticalSpace()
-        }
-    }
-
-    private func linkedTaskRow(_ task: TaskItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                meetingManager?.toggleTaskCompletion(task)
-            } label: {
-                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14))
-                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
-                    .padding(.top, 1)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task.title.isEmpty ? "Untitled task" : task.title)
-                    .font(.system(size: Theme.bodySize))
-                    .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
-                    .strikethrough(task.isCompleted, color: Theme.textTertiary)
-                    .lineSpacing(4)
-
-                HStack(spacing: 8) {
-                    if let owner = task.owner {
-                        Text("@\(owner)")
-                            .font(.system(size: Theme.smallSize))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    if let workDate = task.workDate {
-                        Text(workDate.formatted(date: .abbreviated, time: .omitted))
-                            .font(.system(size: Theme.smallSize))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                }
-            }
-        }
-        .padding(.leading, 4)
         .padding(.vertical, 3)
     }
 

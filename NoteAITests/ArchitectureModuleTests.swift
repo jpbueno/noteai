@@ -696,6 +696,25 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("tasksLinked(to: meeting.id)"))
     }
 
+    func testMeetingSummaryUsesSingleFullRegenerateAction() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/NotionPageView.swift"))
+
+        XCTAssertTrue(source.contains("summaryRegenerateButton"))
+        XCTAssertTrue(source.contains("Text(\"Regenerate summary\")"))
+        XCTAssertTrue(source.contains("regenerateSummary()"))
+        XCTAssertEqual(source.components(separatedBy: "Text(\"Regenerate summary\")").count - 1, 1)
+    }
+
+    func testMeetingSummaryDoesNotExposePerSectionRegenerateActions() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/NotionPageView.swift"))
+
+        XCTAssertFalse(source.contains("regenerateSection("))
+        XCTAssertFalse(source.contains("regeneratingSection"))
+        XCTAssertFalse(source.contains("sectionRegenerateError"))
+    }
+
     func testCommandCenterSnapshotPrioritizesFocusQueueAndNextMove() throws {
         let calendar = Calendar(identifier: .gregorian)
         let today = calendar.startOfDay(for: Date())

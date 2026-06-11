@@ -679,6 +679,23 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(merged[0].modifiedDate, Date(timeIntervalSince1970: 200))
     }
 
+    func testMeetingSummaryActionItemsAreNotAutoSyncedIntoTasks() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
+
+        XCTAssertFalse(source.contains("syncActionItemsToTasks"))
+        XCTAssertFalse(source.contains("mergingActionLinkedTasks(existing: tasks, meeting: meeting)"))
+    }
+
+    func testMeetingSummaryDoesNotShowAutoLinkedTaskSection() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/NotionPageView.swift"))
+
+        XCTAssertFalse(source.contains("linkedTasksSection"))
+        XCTAssertFalse(source.contains("Linked Tasks"))
+        XCTAssertFalse(source.contains("tasksLinked(to: meeting.id)"))
+    }
+
     func testCommandCenterSnapshotPrioritizesFocusQueueAndNextMove() throws {
         let calendar = Calendar(identifier: .gregorian)
         let today = calendar.startOfDay(for: Date())

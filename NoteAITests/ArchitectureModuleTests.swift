@@ -340,6 +340,40 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(readiness.badgeTitle, "Armed")
     }
 
+    func testMeetingSpeakerSuggestionsNormalizeAndDeduplicateCalendarAttendees() {
+        let suggestions = MeetingSpeakerSuggestion.deduplicated([
+            MeetingSpeakerSuggestion(name: " Sarah Chen ", email: " Sarah.Chen@Acme.COM "),
+            MeetingSpeakerSuggestion(name: "Sarah Chen", email: "sarah.chen@acme.com"),
+            MeetingSpeakerSuggestion(name: "JP Santana", email: "jp@example.com"),
+            MeetingSpeakerSuggestion(name: "", email: "empty@example.com"),
+        ])
+
+        XCTAssertEqual(suggestions.map(\.displayName), ["Sarah Chen", "JP Santana"])
+        XCTAssertEqual(suggestions.first?.email, "sarah.chen@acme.com")
+        XCTAssertEqual(suggestions.first?.subtitle, "sarah.chen@acme.com")
+    }
+
+    func testMeetingSpeakerSuggestionCreatesSpeakerProfileWithoutPersistingCalendarEmailAsName() throws {
+        let suggestion = try XCTUnwrap(MeetingSpeakerSuggestion(name: "Sarah Chen", email: "sarah.chen@acme.com"))
+        let profile = suggestion.profile(for: "speaker-remote")
+
+        XCTAssertEqual(profile.speakerID, "speaker-remote")
+        XCTAssertEqual(profile.name, "Sarah Chen")
+        XCTAssertNil(profile.role)
+        XCTAssertNil(profile.company)
+        XCTAssertEqual(profile.notes, "Calendar attendee: sarah.chen@acme.com")
+    }
+
+    func testLiveSpeakerPromptAcceptsCalendarSuggestions() throws {
+        let source = try transcriptViewSource()
+        let suggestionSource = try meetingSpeakerSuggestionSource()
+
+        XCTAssertTrue(source.contains("speakerSuggestions: meetingManager.pendingSpeakerSuggestions"))
+        XCTAssertTrue(source.contains("ForEach(speakerSuggestions)"))
+        XCTAssertTrue(source.contains("applySuggestion"))
+        XCTAssertTrue(suggestionSource.contains("Calendar attendee:"))
+    }
+
     func testSpeakerLabelingResolvesStablePlaceholdersAndOverrides() {
         var meeting = Meeting(
             id: UUID(),
@@ -1688,6 +1722,20 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let integrationFile = projectRoot.appendingPathComponent("NoteAI/Integrations/Outlook/OutlookGraphIntegration.swift")
         return try String(contentsOf: integrationFile, encoding: .utf8)
+    }
+
+    private func transcriptViewSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let transcriptFile = projectRoot.appendingPathComponent("NoteAI/UI/TranscriptViewer/TranscriptView.swift")
+        return try String(contentsOf: transcriptFile, encoding: .utf8)
+    }
+
+    private func meetingSpeakerSuggestionSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let suggestionFile = projectRoot.appendingPathComponent("NoteAI/MeetingDetection/MeetingSpeakerSuggestion.swift")
+        return try String(contentsOf: suggestionFile, encoding: .utf8)
     }
 
     private func t5tComposerSource() throws -> String {

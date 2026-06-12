@@ -7,6 +7,22 @@ struct CalendarMeetingSignal: Equatable {
     let title: String
     let startDate: Date
     let endDate: Date
+
+    /// Candidate speaker names from the calendar roster. These are suggestions only;
+    /// NoteAI still requires the user to confirm a speaker before applying a name.
+    let speakerSuggestions: [MeetingSpeakerSuggestion]
+
+    init(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        speakerSuggestions: [MeetingSpeakerSuggestion] = []
+    ) {
+        self.title = title
+        self.startDate = startDate
+        self.endDate = endDate
+        self.speakerSuggestions = MeetingSpeakerSuggestion.deduplicated(speakerSuggestions)
+    }
 }
 
 enum CalendarMeetingAuthorization: Equatable {
@@ -284,6 +300,11 @@ final class MeetingDetector: ObservableObject {
             .map(Self.calendarSignal)
     }
 
+    func speakerSuggestionsForCurrentMeeting(now: Date = Date()) -> [MeetingSpeakerSuggestion] {
+        refreshCalendarSignal(now: now)
+        return upcomingCalendarEvent?.speakerSuggestions ?? []
+    }
+
     private func requestCalendarAccessIfNeeded() {
         guard Self.calendarAuthorizationStatus() == .notDetermined else { return }
 
@@ -339,7 +360,8 @@ final class MeetingDetector: ObservableObject {
                 ? "Calendar meeting"
                 : title,
             startDate: event.startDate,
-            endDate: event.endDate
+            endDate: event.endDate,
+            speakerSuggestions: MeetingSpeakerSuggestion.calendarAttendees(event.attendees)
         )
     }
 

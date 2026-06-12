@@ -148,6 +148,7 @@ struct LiveTranscriptView: View {
                         LiveSpeakerTagPrompt(
                             profile: profile,
                             defaultDisplayName: TranscriptSpeakerLabels.displayName(for: profile.speakerID, labels: [:]),
+                            speakerSuggestions: meetingManager.pendingSpeakerSuggestions,
                             onSave: { updatedProfile in
                                 meetingManager.saveCurrentSpeakerProfile(updatedProfile)
                             },
@@ -264,6 +265,7 @@ struct LiveTranscriptView: View {
 private struct LiveSpeakerTagPrompt: View {
     let profile: SpeakerProfile
     let defaultDisplayName: String
+    let speakerSuggestions: [MeetingSpeakerSuggestion]
     let onSave: (SpeakerProfile) -> Void
     let onDefer: () -> Void
 
@@ -275,11 +277,13 @@ private struct LiveSpeakerTagPrompt: View {
     init(
         profile: SpeakerProfile,
         defaultDisplayName: String,
+        speakerSuggestions: [MeetingSpeakerSuggestion],
         onSave: @escaping (SpeakerProfile) -> Void,
         onDefer: @escaping () -> Void
     ) {
         self.profile = profile
         self.defaultDisplayName = defaultDisplayName
+        self.speakerSuggestions = speakerSuggestions
         self.onSave = onSave
         self.onDefer = onDefer
         _name = State(initialValue: profile.name ?? "")
@@ -306,6 +310,39 @@ private struct LiveSpeakerTagPrompt: View {
                 }
 
                 Spacer()
+            }
+
+            if !speakerSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Calendar attendees")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.textTertiary)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(speakerSuggestions) { suggestion in
+                                Button {
+                                    applySuggestion(suggestion)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(suggestion.displayName)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(Theme.textPrimary)
+                                        Text(suggestion.subtitle)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Theme.textTertiary)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 6)
+                                    .background(Theme.contentBG, in: RoundedRectangle(cornerRadius: 7))
+                                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
             }
 
             HStack(spacing: 8) {
@@ -359,6 +396,16 @@ private struct LiveSpeakerTagPrompt: View {
 
     private var canSave: Bool {
         [name, role, company, notes].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func applySuggestion(_ suggestion: MeetingSpeakerSuggestion) {
+        let suggestedProfile = suggestion.profile(for: profile.speakerID)
+        name = suggestedProfile.name ?? name
+        if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            notes = suggestedProfile.notes ?? ""
+        } else if let suggestedNotes = suggestedProfile.notes, !notes.contains(suggestedNotes) {
+            notes += "\n\(suggestedNotes)"
+        }
     }
 
     private func speakerField(_ placeholder: String, text: Binding<String>) -> some View {

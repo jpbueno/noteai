@@ -61,18 +61,8 @@ final class MicrophoneCaptureManager {
     private func installTapAndStart(engine: AVAudioEngine, onBuffer: @escaping (AVAudioPCMBuffer) -> Void) throws {
         let inputNode = engine.inputNode
 
-        do {
-            inputNode.voiceProcessingOtherAudioDuckingConfiguration =
-                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
-                    enableAdvancedDucking: false,
-                    duckingLevel: .min
-                )
-            try inputNode.setVoiceProcessingEnabled(true)
-            print("[MicCapture] Voice processing enabled with minimum other-audio ducking")
-        } catch {
-            print("[MicCapture] Voice processing unavailable for current input: \(error)")
-        }
-
+        // Raw microphone capture avoids AVAudioEngine voice-processing ducking,
+        // which can lower Teams speaker audio while NoteAI is recording.
         let format = inputNode.outputFormat(forBus: 0)
 
         print("[MicCapture] Mic format: \(format.sampleRate)Hz, \(format.channelCount)ch, \(format.commonFormat.rawValue)")

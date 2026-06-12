@@ -91,18 +91,14 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("converterCache[srcFormat.sampleRate]"))
     }
 
-    func testMicrophoneCaptureEnablesVoiceProcessingBeforeReadingInputFormat() throws {
+    func testMicrophoneCaptureAvoidsVoiceProcessingDucking() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/MicrophoneCaptureManager.swift"))
 
-        let duckingConfigurationRange = try XCTUnwrap(source.range(of: "voiceProcessingOtherAudioDuckingConfiguration"))
-        let voiceProcessingRange = try XCTUnwrap(source.range(of: "setVoiceProcessingEnabled(true)"))
-        let formatRange = try XCTUnwrap(source.range(of: "let format = inputNode.outputFormat(forBus: 0)"))
-
-        XCTAssertLessThan(duckingConfigurationRange.lowerBound, voiceProcessingRange.lowerBound)
-        XCTAssertLessThan(voiceProcessingRange.lowerBound, formatRange.lowerBound)
-        XCTAssertTrue(source.contains("enableAdvancedDucking: false"))
-        XCTAssertTrue(source.contains("duckingLevel: .min"))
+        XCTAssertFalse(source.contains("setVoiceProcessingEnabled(true)"))
+        XCTAssertFalse(source.contains("voiceProcessingOtherAudioDuckingConfiguration"))
+        XCTAssertTrue(source.contains("Raw microphone capture avoids AVAudioEngine voice-processing ducking"))
+        XCTAssertTrue(source.contains("let format = inputNode.outputFormat(forBus: 0)"))
     }
 
     func testLegacyNoteDecodesWithoutSpace() throws {

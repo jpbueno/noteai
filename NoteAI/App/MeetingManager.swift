@@ -16,6 +16,7 @@ final class MeetingManager: ObservableObject {
     @Published var state: State = .idle
     @Published var currentTranscript: [TranscriptSegment] = []
     @Published var currentSpeakerProfiles: [String: SpeakerProfile] = [:]
+    @Published var currentSpeakerSuggestions: [MeetingSpeakerSuggestion] = []
     @Published var pendingSpeakerTagID: String?
     @Published var meetings: [Meeting] = []
     @Published var lastError: String?
@@ -273,6 +274,7 @@ final class MeetingManager: ObservableObject {
         state = .recording
         currentTranscript = []
         currentSpeakerProfiles = [:]
+        currentSpeakerSuggestions = meetingDetector.speakerSuggestionsForCurrentMeeting()
         pendingSpeakerTagID = nil
         deferredSpeakerTagIDs = []
         currentMeetingStart = Date()
@@ -311,6 +313,7 @@ final class MeetingManager: ObservableObject {
                 state = .idle
                 currentDetectedAppName = nil
                 currentPreferredCaptureSource = nil
+                currentSpeakerSuggestions = []
             }
         }
     }
@@ -382,6 +385,7 @@ final class MeetingManager: ObservableObject {
             state = .idle
             pendingSpeakerTagID = nil
             deferredSpeakerTagIDs = []
+            currentSpeakerSuggestions = []
         }
     }
 
@@ -514,6 +518,16 @@ final class MeetingManager: ObservableObject {
     var pendingSpeakerProfile: SpeakerProfile? {
         guard let pendingSpeakerTagID else { return nil }
         return currentSpeakerProfiles[pendingSpeakerTagID] ?? SpeakerProfile(speakerID: pendingSpeakerTagID)
+    }
+
+    var pendingSpeakerSuggestions: [MeetingSpeakerSuggestion] {
+        let usedNames = Set(currentSpeakerProfiles.values.compactMap { profile in
+            profile.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+
+        return currentSpeakerSuggestions.filter { suggestion in
+            !usedNames.contains(suggestion.displayName.lowercased())
+        }
     }
 
     func currentSpeakerDisplayName(for segment: TranscriptSegment) -> String {
@@ -1327,6 +1341,7 @@ extension MeetingManager: LocalCaptureControlling {
         state = .recording
         currentTranscript = []
         currentSpeakerProfiles = [:]
+        currentSpeakerSuggestions = []
         pendingSpeakerTagID = nil
         deferredSpeakerTagIDs = []
         currentMeetingStart = startedAt

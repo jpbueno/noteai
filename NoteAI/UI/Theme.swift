@@ -73,32 +73,42 @@ enum CommandCenterLayoutPreset: String, CaseIterable, Identifiable {
     }
 }
 
-/// NoteAI v4 Command Center design tokens.
+/// NoteAI Command Center design tokens.
 enum Theme {
-    // Mirrors web/src/app/globals.css.
-    static let sidebarBG = Color(light: "F8FAFC", dark: "10161B")
-    static let contentBG = Color(light: "F3F6F8", dark: "0B0F12")
-    static let contentBGNSColor = NSColor(noteAIAdaptiveHexLight: "F3F6F8", dark: "0B0F12")
-    static let hoverBG = Color(light: "E8EEF3", dark: "151D23")
-    static let selectedBG = Color(light: "DDEFF9", dark: "1B252D")
-    static let border = Color(light: "CFDAE3", dark: "26333D")
-    static let panelBG = Color(light: "FFFFFF", dark: "10161B").opacity(0.86)
-    static let rowBG = Color(light: "FFFFFF", dark: "0F1519")
-    static let rowBorder = Color(light: "D8E2EA", dark: "202D36")
+    // Notion-inspired workspace palette.
+    static let notionWindowBG = Color(light: "F7F7F5", dark: "191919")
+    static let notionTopBarBG = Color(light: "F1F1EF", dark: "202020")
+    static let notionSidebarBG = Color(light: "F7F7F5", dark: "202020")
+    static let notionSurfaceBG = Color(light: "FFFFFF", dark: "191919")
+    static let notionHoverBG = Color(light: "EDEDEB", dark: "2A2A2A")
+    static let notionSelectedBG = Color(light: "E8E7E4", dark: "2F2F2F")
+    static let notionActiveTabBG = Color(light: "FFFFFF", dark: "2F2F2F")
+    static let notionBorder = Color(light: "DDDDD9", dark: "343434")
+    static let notionIconAccent = Color(light: "C46A13", dark: "D9730D")
+
+    static let sidebarBG = notionSidebarBG
+    static let contentBG = notionWindowBG
+    static let contentBGNSColor = NSColor(noteAIAdaptiveHexLight: "F7F7F5", dark: "191919")
+    static let hoverBG = notionHoverBG
+    static let selectedBG = notionSelectedBG
+    static let border = notionBorder
+    static let panelBG = notionSurfaceBG
+    static let rowBG = notionSurfaceBG
+    static let rowBorder = notionBorder
 
     // Text
-    static let textPrimary = Color(light: "18232D", dark: "F3F7F9")
-    static let textSecondary = Color(light: "45525E", dark: "C4CCD2")
-    static let textTertiary = Color(light: "6E7C89", dark: "84919C")
+    static let textPrimary = Color(light: "1F1F1F", dark: "EDEDEC")
+    static let textSecondary = Color(light: "4F4F4F", dark: "C9C9C7")
+    static let textTertiary = Color(light: "787774", dark: "9B9A97")
 
     // Sidebar section headers
-    static let sectionHeader = Color(light: "5F6D79", dark: "9BA7AF")
+    static let sectionHeader = Color(light: "787774", dark: "9B9A97")
 
     // Status
-    static let accent = Color(light: "0284C7", dark: "64D2FF")
-    static let danger = Color(light: "D64555", dark: "FF5C66")
-    static let success = Color(light: "168A46", dark: "4ADE80")
-    static let warning = Color(light: "B7791F", dark: "FACC15")
+    static let accent = Color(light: "2563EB", dark: "2EAADC")
+    static let danger = Color(light: "C92A2A", dark: "FF7369")
+    static let success = Color(light: "2F8A4C", dark: "4ADE80")
+    static let warning = Color(light: "A16207", dark: "D9730D")
 
     // Content typography
     static let pageTitleSize: CGFloat = 40

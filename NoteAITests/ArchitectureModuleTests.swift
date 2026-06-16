@@ -929,6 +929,48 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
 
+    func testNotionInspiredThemeTokensUseCharcoalPalette() throws {
+        let source = try themeSource()
+
+        XCTAssertTrue(source.contains("notionWindowBG"))
+        XCTAssertTrue(source.contains("notionTopBarBG"))
+        XCTAssertTrue(source.contains("notionActiveTabBG"))
+        XCTAssertTrue(source.contains("notionIconAccent"))
+        XCTAssertTrue(source.contains("dark: \"191919\""))
+        XCTAssertTrue(source.contains("dark: \"202020\""))
+        XCTAssertTrue(source.contains("dark: \"2F2F2F\""))
+        XCTAssertFalse(source.contains("dark: \"0B0F12\""))
+        XCTAssertFalse(source.contains("dark: \"10161B\""))
+    }
+
+    func testCommandCenterRendersNotionStyleTabStripInTopChrome() throws {
+        let source = try meetingLibrarySource()
+        let commandBarStart = try XCTUnwrap(source.range(of: "private func commandBar(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabStrip", range: commandBarStart.upperBound..<source.endIndex))
+        let commandBarSource = String(source[commandBarStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertTrue(commandBarSource.contains("notionTabStrip(layout: layout)"))
+        XCTAssertTrue(commandBarSource.contains("topBarRecordingControl(layout: layout)"))
+        XCTAssertTrue(commandBarSource.contains("Label(\"AI copilot\", systemImage: \"message\")"))
+        XCTAssertTrue(source.contains("private func notionTabStrip(layout: CommandCenterLayout) -> some View"))
+        XCTAssertTrue(source.contains("private func notionTabTitle() -> String"))
+        XCTAssertTrue(source.contains("private func notionTabIcon() -> String"))
+        XCTAssertTrue(source.contains("private func notionTabAccent() -> Color"))
+        XCTAssertTrue(source.contains("Theme.notionActiveTabBG"))
+    }
+
+    func testNotionShellUsesFlatterSidebarAndDocumentSurfaces() throws {
+        let meetingSource = try meetingLibrarySource()
+        let homeSource = try homeDashboardSource()
+
+        XCTAssertTrue(meetingSource.contains(".background(Theme.notionSidebarBG)"))
+        XCTAssertTrue(meetingSource.contains("Theme.notionHoverBG"))
+        XCTAssertTrue(meetingSource.contains("Theme.notionSelectedBG"))
+        XCTAssertTrue(meetingSource.contains(".background(Theme.notionWindowBG)"))
+        XCTAssertTrue(homeSource.contains(".background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 6))"))
+        XCTAssertFalse(homeSource.contains("cornerRadius: 14"))
+    }
+
     func testDashboardPanelsUseSharedDotFirstHeaderTonesAndKeepSetupItemIcons() throws {
         let source = try homeDashboardSource()
 

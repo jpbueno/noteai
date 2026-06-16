@@ -252,7 +252,7 @@ struct HomeDashboardView: View {
             .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Theme.contentBG)
+        .background(Theme.notionWindowBG)
     }
 
     private var header: some View {
@@ -418,8 +418,8 @@ struct HomeDashboardView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+                    .background(Theme.notionSurfaceBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 10)
@@ -460,7 +460,7 @@ struct HomeDashboardView: View {
                             .font(.system(size: layout.smallFontSize, weight: .bold))
                             .foregroundStyle(Theme.textSecondary)
                             .frame(width: 26, height: 26)
-                            .background(Theme.rowBG, in: Circle())
+                            .background(Theme.notionSurfaceBG, in: Circle())
                             .overlay(Circle().stroke(Theme.rowBorder, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
@@ -534,8 +534,8 @@ struct HomeDashboardView: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: max(72, round(82 * layout.scale)), alignment: .topLeading)
-            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rowBorder, lineWidth: 1))
+            .background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.rowBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .disabled(item.status == .complete || item.actionTarget == nil)
@@ -583,7 +583,7 @@ struct HomeDashboardView: View {
             .font(.system(size: layout.smallFontSize, weight: .bold))
             .foregroundStyle(Theme.textSecondary)
             .frame(width: 24, height: 24)
-            .background(Theme.rowBG.opacity(0.85), in: Circle())
+            .background(Theme.notionSurfaceBG.opacity(0.85), in: Circle())
             .overlay(Circle().stroke(Theme.rowBorder.opacity(0.85), lineWidth: 1))
             .help("Drag panel")
             .onDrag {
@@ -623,8 +623,8 @@ struct HomeDashboardView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.rowBG, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rowBorder, lineWidth: 1))
+            .background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.rowBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -723,9 +723,8 @@ private struct CommandCenterPanel<Content: View>: View {
         }
         .padding(layout.panelPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panelBG, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
+        .background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -822,8 +821,8 @@ private struct MetricTile: View {
         }
         .padding(round(12 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.contentBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+        .background(Theme.notionSurfaceBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
     }
 }
 

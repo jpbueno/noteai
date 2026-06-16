@@ -148,7 +148,7 @@ struct MeetingLibraryView: View {
             }
             .environment(\.commandCenterLayout, layout)
         }
-        .background(Theme.contentBG)
+        .background(Theme.notionWindowBG)
         .animation(.easeInOut(duration: 0.2), value: showChatDrawer)
         .onReceive(NotificationCenter.default.publisher(for: .navigateToNote)) { notification in
             if let noteID = notification.object as? UUID {
@@ -243,12 +243,14 @@ struct MeetingLibraryView: View {
                         .font(.system(size: layout.sectionTitleFontSize + 2, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: layout.controlHeight, height: layout.controlHeight)
-                        .background(Theme.sidebarBG.opacity(0.95), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                        .background(Theme.notionSurfaceBG.opacity(0.95), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .help("Show sidebar")
             }
+
+            notionTabStrip(layout: layout)
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -266,8 +268,8 @@ struct MeetingLibraryView: View {
             .frame(minWidth: min(layout.commandSearchMaxWidth, round(320 * layout.scale)), maxWidth: layout.commandSearchMaxWidth)
             .frame(height: layout.controlHeight)
             .padding(.horizontal, round(14 * layout.scale))
-            .background(Theme.sidebarBG.opacity(0.70), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
 
             Spacer()
 
@@ -285,10 +287,10 @@ struct MeetingLibraryView: View {
                     .padding(.horizontal, round(12 * layout.scale))
                     .background(
                         showChatDrawer ? Theme.accent.opacity(0.12) : Theme.accent,
-                        in: RoundedRectangle(cornerRadius: 12)
+                        in: RoundedRectangle(cornerRadius: 6)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 6)
                             .stroke(showChatDrawer ? Theme.accent.opacity(0.45) : Color.clear, lineWidth: 1)
                     )
             }
@@ -297,11 +299,140 @@ struct MeetingLibraryView: View {
         .padding(.leading, sidebarCollapsed ? round(10 * layout.scale) : round(18 * layout.scale))
         .padding(.trailing, round(18 * layout.scale))
         .frame(height: max(48, round(52 * layout.scale)))
-        .background(Theme.contentBG.opacity(0.88))
+        .background(Theme.notionTopBarBG)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Theme.border.opacity(0.70))
+                .fill(Theme.border)
                 .frame(height: 1)
+        }
+    }
+
+    private func notionTabStrip(layout: CommandCenterLayout) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { sidebarCollapsed.toggle() }
+            } label: {
+                Image(systemName: sidebarCollapsed ? "sidebar.left" : "sidebar.leading")
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: round(36 * layout.scale), height: max(34, layout.controlHeight))
+            }
+            .buttonStyle(.plain)
+            .help(sidebarCollapsed ? "Show sidebar" : "Hide sidebar")
+
+            notionTabButton(layout: layout)
+
+            Button {
+                createNewNote()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: round(40 * layout.scale), height: max(34, layout.controlHeight))
+            }
+            .buttonStyle(.plain)
+            .help("New note")
+        }
+        .background(Theme.notionTopBarBG)
+    }
+
+    private func notionTabButton(layout: CommandCenterLayout) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: notionTabIcon())
+                .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
+                .foregroundStyle(notionTabAccent())
+            Text(notionTabTitle())
+                .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, round(14 * layout.scale))
+        .frame(minWidth: round(210 * layout.scale), maxWidth: round(300 * layout.scale), minHeight: max(34, layout.controlHeight))
+        .background(Theme.notionActiveTabBG)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Theme.notionActiveTabBG)
+                .frame(height: 1)
+        }
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Theme.border)
+                .frame(width: 1)
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Theme.border)
+                .frame(width: 1)
+        }
+    }
+
+    private func notionTabTitle() -> String {
+        guard let selection else { return meetingManager.state == .recording ? "Live Recording" : "Today" }
+
+        switch selection {
+        case .home:
+            return "Today"
+        case .t5tList:
+            return "T5T Reports"
+        case .notesList:
+            return "Notes"
+        case .tasksList:
+            return "Tasks"
+        case .todosList:
+            return "Todos"
+        case .meetingsList:
+            return "Meetings"
+        case .meeting(let id):
+            return meetingManager.meetings.first(where: { $0.id == id })?.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams") ?? "Meeting"
+        case .t5tReport(let id):
+            return meetingManager.t5tReports.first(where: { $0.id == id })?.title ?? "T5T Report"
+        case .newT5T:
+            return "New T5T"
+        case .note(let id):
+            return meetingManager.notes.first(where: { $0.id == id })?.title ?? "Note"
+        case .task(let id):
+            return meetingManager.tasks.first(where: { $0.id == id })?.title ?? "Task"
+        case .todo(let id):
+            return meetingManager.todos.first(where: { $0.id == id })?.title ?? "Todo"
+        }
+    }
+
+    private func notionTabIcon() -> String {
+        guard let selection else { return meetingManager.state == .recording ? "waveform" : "house" }
+
+        switch selection {
+        case .home:
+            return "house"
+        case .t5tList, .t5tReport, .newT5T:
+            return "list.bullet.rectangle"
+        case .notesList, .note:
+            return "doc.text"
+        case .tasksList, .task:
+            return "checklist"
+        case .todosList, .todo:
+            return "checkmark.square"
+        case .meetingsList, .meeting:
+            return "waveform"
+        }
+    }
+
+    private func notionTabAccent() -> Color {
+        guard let selection else { return meetingManager.state == .recording ? Theme.danger : Theme.notionIconAccent }
+
+        switch selection {
+        case .home:
+            return Theme.textTertiary
+        case .t5tList, .t5tReport, .newT5T:
+            return Theme.notionIconAccent
+        case .notesList, .note:
+            return Theme.textTertiary
+        case .tasksList, .task:
+            return Theme.success
+        case .todosList, .todo:
+            return Theme.accent
+        case .meetingsList, .meeting:
+            return Theme.notionIconAccent
         }
     }
 
@@ -330,8 +461,8 @@ struct MeetingLibraryView: View {
                 }
                 .padding(.horizontal, round(10 * layout.scale))
                 .frame(height: layout.controlHeight)
-                .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
+                .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
                 .accessibilityLabel(Text("Recording \(formattedDuration)"))
                 .help("Recording \(formattedDuration)")
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
@@ -463,7 +594,7 @@ struct MeetingLibraryView: View {
             }
             .padding(.vertical, 4)
         }
-        .background(Theme.sidebarBG)
+        .background(Theme.notionSidebarBG)
     }
 
     private var searchIsActive: Bool {
@@ -615,8 +746,8 @@ struct MeetingLibraryView: View {
             }
             .padding(.horizontal, round(10 * layout.scale))
             .frame(height: max(32, layout.controlHeight - 2))
-            .background(Theme.contentBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
 
             HStack(spacing: 6) {
                 ForEach(CommandCenterQuickFilter.allCases, id: \.self) { filter in
@@ -640,8 +771,8 @@ struct MeetingLibraryView: View {
                 .frame(height: max(28, round(28 * layout.scale)))
                 .foregroundStyle(quickFilter == filter ? Theme.accent : Theme.textTertiary)
                 .background(
-                    quickFilter == filter ? Theme.accent.opacity(0.12) : Theme.contentBG.opacity(0.35),
-                    in: RoundedRectangle(cornerRadius: 9)
+                    quickFilter == filter ? Theme.accent.opacity(0.12) : Theme.notionSurfaceBG.opacity(0.38),
+                    in: RoundedRectangle(cornerRadius: 6)
                 )
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(quickFilter == filter ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
         }
@@ -687,7 +818,7 @@ struct MeetingLibraryView: View {
                             .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, round(7 * layout.scale))
                             .padding(.vertical, round(4 * layout.scale))
-                            .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 8))
+                            .background(Theme.notionHoverBG, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                 }
@@ -746,7 +877,7 @@ struct MeetingLibraryView: View {
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, round(7 * layout.scale))
                         .padding(.vertical, round(4 * layout.scale))
-                        .background(Theme.hoverBG, in: RoundedRectangle(cornerRadius: 8))
+                        .background(Theme.notionHoverBG, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -825,7 +956,7 @@ struct MeetingLibraryView: View {
         .padding(.bottom, round(2 * layout.scale))
         .background(
             isTargeted ? Theme.accent.opacity(0.12) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8)
+            in: RoundedRectangle(cornerRadius: 6)
         )
         .contentShape(Rectangle())
         .contextMenu {
@@ -874,9 +1005,9 @@ struct MeetingLibraryView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .t5tReport(report.id)
-                    ? Theme.selectedBG
+                    ? Theme.notionSelectedBG
                     : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
+                in: RoundedRectangle(cornerRadius: 6)
             )
         }
         .buttonStyle(.plain)
@@ -908,9 +1039,9 @@ struct MeetingLibraryView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .meeting(meeting.id)
-                    ? Theme.selectedBG
+                    ? Theme.notionSelectedBG
                     : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
+                in: RoundedRectangle(cornerRadius: 6)
             )
         }
         .buttonStyle(.plain)
@@ -949,9 +1080,9 @@ struct MeetingLibraryView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selection == .note(note.id)
-                    ? Theme.selectedBG
+                    ? Theme.notionSelectedBG
                     : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
+                in: RoundedRectangle(cornerRadius: 6)
             )
         }
         .buttonStyle(.plain)
@@ -990,15 +1121,15 @@ struct MeetingLibraryView: View {
                         .foregroundStyle(Theme.textTertiary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Theme.hoverBG, in: Capsule())
+                        .background(Theme.notionHoverBG, in: Capsule())
                 }
             }
             .padding(.horizontal, round(14 * layout.scale))
             .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                selection == .home ? Theme.selectedBG : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
+                selection == .home ? Theme.notionSelectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
             )
         }
         .buttonStyle(.plain)
@@ -1072,8 +1203,8 @@ struct MeetingLibraryView: View {
             .padding(.vertical, round(6 * layout.scale))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                selection == .todo(todo.id) ? Theme.selectedBG : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
+                selection == .todo(todo.id) ? Theme.notionSelectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
             )
         }
         .buttonStyle(.plain)
@@ -1137,8 +1268,8 @@ struct MeetingLibraryView: View {
         .padding(.vertical, round(6 * layout.scale))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            selection == .task(task.id) ? Theme.selectedBG : Color.clear,
-            in: RoundedRectangle(cornerRadius: 12)
+            selection == .task(task.id) ? Theme.notionSelectedBG : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6)
         )
         .padding(.horizontal, 4)
         .contextMenu {
@@ -1239,7 +1370,7 @@ struct MeetingLibraryView: View {
                 .id(meeting.id)
         } else if meetingManager.state == .recording && selection == nil {
             LiveTranscriptView(meetingManager: meetingManager)
-                .background(Theme.contentBG)
+                .background(Theme.notionWindowBG)
         } else {
             HomeDashboardView(
                 meetingManager: meetingManager,
@@ -1418,7 +1549,7 @@ struct MeetingLibraryView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.vertical, 42)
         }
-        .background(Theme.contentBG)
+        .background(Theme.notionWindowBG)
     }
 
     private func collectionGroupHeader(_ title: String, count: Int) -> some View {
@@ -1475,8 +1606,8 @@ struct MeetingLibraryView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.sidebarBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.85), lineWidth: 1))
+            .background(Theme.notionSurfaceBG.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border.opacity(0.85), lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1494,8 +1625,8 @@ struct MeetingLibraryView: View {
                 .frame(maxWidth: 320)
         }
         .frame(maxWidth: .infinity, minHeight: 180)
-        .background(Theme.sidebarBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.70), lineWidth: 1))
+        .background(Theme.notionSurfaceBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border.opacity(0.70), lineWidth: 1))
     }
 
     private func notePreview(_ note: Note) -> String? {
@@ -1520,7 +1651,7 @@ struct MeetingLibraryView: View {
                 .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.contentBG)
+        .background(Theme.notionWindowBG)
     }
 
     private var processingView: some View {
@@ -1551,7 +1682,7 @@ struct MeetingLibraryView: View {
                 .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.contentBG)
+        .background(Theme.notionWindowBG)
     }
 
     // MARK: - Actions

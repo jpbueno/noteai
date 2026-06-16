@@ -863,6 +863,16 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight"))
     }
 
+    func testCommandCenterSidebarBrandIsCenteredAndProminent() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains(".font(.system(size: layout.sectionTitleFontSize + 8"))
+        XCTAssertTrue(source.contains(".font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))"))
+        XCTAssertTrue(source.contains(".font(.system(size: layout.tinyFontSize + 1, weight: .medium))"))
+        XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
+    }
+
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {
         let source = try meetingLibrarySource()
 

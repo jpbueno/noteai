@@ -577,23 +577,26 @@ struct MeetingLibraryView: View {
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
                 .onDisappear { pulseAnimation = false }
             } else {
-                Button {
-                    meetingManager.startRecording()
-                    selection = nil
-                } label: {
-                    Label(recordButtonLabel, systemImage: readiness.systemImage)
-                        .font(.system(size: layout.bodyFontSize, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: layout.actionButtonHeight)
-                        .background(
-                            LinearGradient(colors: [Theme.danger, Color(hex: "FF8A5C")], startPoint: .leading, endPoint: .trailing),
-                            in: RoundedRectangle(cornerRadius: 12)
-                        )
+                HStack {
+                    Button {
+                        meetingManager.startRecording()
+                        selection = nil
+                    } label: {
+                        Label(compactRecordButtonLabel, systemImage: readiness.systemImage)
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                            .foregroundStyle(Theme.danger.opacity(0.95))
+                            .labelStyle(.titleAndIcon)
+                            .padding(.horizontal, round(14 * layout.scale))
+                            .frame(height: round(34 * layout.scale))
+                            .background(Theme.danger.opacity(0.08), in: Capsule())
+                            .overlay(Capsule().stroke(Theme.danger.opacity(0.42), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(meetingManager.state == .processing)
+                    .opacity(meetingManager.state == .processing ? 0.55 : 1)
+
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                .disabled(meetingManager.state == .processing)
-                .opacity(meetingManager.state == .processing ? 0.55 : 1)
             }
         }
         .padding(.horizontal, round(10 * layout.scale))
@@ -1715,6 +1718,10 @@ struct MeetingLibraryView: View {
         case .idle:
             return meetingManager.recordingReadiness.primaryActionTitle
         }
+    }
+
+    private var compactRecordButtonLabel: String {
+        meetingManager.state == .processing ? recordButtonLabel : "Record"
     }
 
     private var formattedDuration: String {

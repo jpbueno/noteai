@@ -582,18 +582,18 @@ struct MeetingLibraryView: View {
                         meetingManager.startRecording()
                         selection = nil
                     } label: {
-                        Label(compactRecordButtonLabel, systemImage: readiness.systemImage)
-                            .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                        Image(systemName: readiness.systemImage)
+                            .font(.system(size: layout.smallFontSize, weight: .bold))
                             .foregroundStyle(Theme.danger.opacity(0.95))
-                            .labelStyle(.titleAndIcon)
-                            .padding(.horizontal, round(14 * layout.scale))
-                            .frame(height: round(34 * layout.scale))
+                            .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
                             .background(Theme.danger.opacity(0.08), in: Capsule())
                             .overlay(Capsule().stroke(Theme.danger.opacity(0.42), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                     .disabled(meetingManager.state == .processing)
                     .opacity(meetingManager.state == .processing ? 0.55 : 1)
+                    .accessibilityLabel(Text(recordButtonLabel))
+                    .help(recordButtonLabel)
 
                     Spacer()
                 }
@@ -1718,10 +1718,6 @@ struct MeetingLibraryView: View {
         case .idle:
             return meetingManager.recordingReadiness.primaryActionTitle
         }
-    }
-
-    private var compactRecordButtonLabel: String {
-        meetingManager.state == .processing ? recordButtonLabel : "Record"
     }
 
     private var formattedDuration: String {

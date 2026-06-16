@@ -271,6 +271,8 @@ struct MeetingLibraryView: View {
 
             Spacer()
 
+            topBarRecordingControl(layout: layout)
+
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     showChatDrawer.toggle()
@@ -303,13 +305,63 @@ struct MeetingLibraryView: View {
         }
     }
 
+    private func topBarRecordingControl(layout: CommandCenterLayout) -> some View {
+        let readiness = meetingManager.recordingReadiness
+        return Group {
+            if meetingManager.state == .recording {
+                HStack(spacing: round(8 * layout.scale)) {
+                    Circle()
+                        .fill(Theme.danger)
+                        .frame(width: round(8 * layout.scale), height: round(8 * layout.scale))
+                        .opacity(pulseAnimation ? 0.4 : 1.0)
+                    Text(formattedDuration)
+                        .font(.system(size: layout.tinyFontSize + 1, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Theme.danger)
+                    Button {
+                        meetingManager.stopRecording()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: round(22 * layout.scale), height: round(22 * layout.scale))
+                            .background(Theme.danger, in: RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, round(10 * layout.scale))
+                .frame(height: layout.controlHeight)
+                .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
+                .accessibilityLabel(Text("Recording \(formattedDuration)"))
+                .help("Recording \(formattedDuration)")
+                .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
+                .onDisappear { pulseAnimation = false }
+            } else {
+                Button {
+                    meetingManager.startRecording()
+                    selection = nil
+                } label: {
+                    Image(systemName: readiness.systemImage)
+                        .font(.system(size: layout.smallFontSize, weight: .bold))
+                        .foregroundStyle(Theme.danger.opacity(0.95))
+                        .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
+                        .background(Theme.danger.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().stroke(Theme.danger.opacity(0.42), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(meetingManager.state == .processing)
+                .opacity(meetingManager.state == .processing ? 0.55 : 1)
+                .accessibilityLabel(Text(recordButtonLabel))
+                .help(recordButtonLabel)
+            }
+        }
+    }
+
     // MARK: - Sidebar
 
     private func sidebar(layout: CommandCenterLayout) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             brandHeader(layout: layout)
-            recordingControls(layout: layout)
-            Divider().foregroundStyle(Theme.border)
             searchAndFilters(layout: layout)
 
             ScrollView {
@@ -536,71 +588,6 @@ struct MeetingLibraryView: View {
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")
-    }
-
-    private func recordingControls(layout: CommandCenterLayout) -> some View {
-        let readiness = meetingManager.recordingReadiness
-        return VStack(spacing: round(8 * layout.scale)) {
-            if meetingManager.state == .recording {
-                Button {
-                    selection = nil
-                } label: {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Theme.danger)
-                            .frame(width: 8, height: 8)
-                            .opacity(pulseAnimation ? 0.4 : 1.0)
-                        Text("Recording")
-                            .font(.system(size: layout.bodyFontSize, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Spacer()
-                        Text(formattedDuration)
-                            .font(.system(size: layout.tinyFontSize + 1, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Theme.danger)
-                        Button {
-                            meetingManager.stopRecording()
-                        } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: round(22 * layout.scale), height: round(22 * layout.scale))
-                                .background(Theme.danger, in: RoundedRectangle(cornerRadius: 5))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, round(10 * layout.scale))
-                    .padding(.vertical, round(8 * layout.scale))
-                    .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
-                .onDisappear { pulseAnimation = false }
-            } else {
-                HStack {
-                    Button {
-                        meetingManager.startRecording()
-                        selection = nil
-                    } label: {
-                        Image(systemName: readiness.systemImage)
-                            .font(.system(size: layout.smallFontSize, weight: .bold))
-                            .foregroundStyle(Theme.danger.opacity(0.95))
-                            .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
-                            .background(Theme.danger.opacity(0.08), in: Capsule())
-                            .overlay(Capsule().stroke(Theme.danger.opacity(0.42), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(meetingManager.state == .processing)
-                    .opacity(meetingManager.state == .processing ? 0.55 : 1)
-                    .accessibilityLabel(Text(recordButtonLabel))
-                    .help(recordButtonLabel)
-
-                    Spacer()
-                }
-            }
-        }
-        .padding(.horizontal, round(10 * layout.scale))
-        .padding(.bottom, round(10 * layout.scale))
     }
 
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {

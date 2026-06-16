@@ -894,6 +894,16 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains(".frame(height: layout.actionButtonHeight)"))
     }
 
+    func testRecordingControlLivesInTopBarBeforeAICopilot() throws {
+        let source = try meetingLibrarySource()
+
+        let recordingControl = try XCTUnwrap(source.range(of: "topBarRecordingControl(layout: layout)"))
+        let aiCopilot = try XCTUnwrap(source.range(of: "Label(\"AI copilot\", systemImage: \"message\")"))
+
+        XCTAssertLessThan(recordingControl.lowerBound, aiCopilot.lowerBound)
+        XCTAssertFalse(source.contains("recordingControls(layout: layout)"))
+    }
+
     func testCommandCenterDoesNotRenderRedundantTopLevelCreationButtons() throws {
         let meetingSource = try meetingLibrarySource()
         let homeSource = try homeDashboardSource()

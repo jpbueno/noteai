@@ -567,24 +567,26 @@ struct MeetingLibraryView: View {
             withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = true }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: layout.sectionTitleFontSize + 4))
-                    .foregroundStyle(Theme.textSecondary)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("NoteAI")
-                        .font(.system(size: layout.sectionTitleFontSize + 1, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("v5.0")
-                        .font(.system(size: layout.tinyFontSize, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 12) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: layout.sectionTitleFontSize + 8))
+                        .foregroundStyle(Theme.textSecondary)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("NoteAI")
+                            .font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("v5.0")
+                            .font(.system(size: layout.tinyFontSize + 1, weight: .medium))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.leading, layout.sidebarBrandLeadingInset)
-            .padding(.trailing, round(12 * layout.scale))
+            .padding(.trailing, layout.sidebarBrandLeadingInset)
             .padding(.top, layout.sidebarBrandHeaderTopPadding)
             .padding(.bottom, layout.sidebarBrandHeaderBottomPadding)
-            .frame(height: layout.sidebarBrandHeaderHeight, alignment: .top)
+            .frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)
         }
         .buttonStyle(.plain)
         .help("Hide sidebar")

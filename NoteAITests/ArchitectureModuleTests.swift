@@ -880,13 +880,16 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("meetingManager.startRecording()"))
     }
 
-    func testSidebarRecordingControlUsesCompactOutlinedIdleButton() throws {
+    func testSidebarRecordingControlUsesIconOnlyIdleButton() throws {
         let source = try meetingLibrarySource()
 
-        XCTAssertTrue(source.contains("compactRecordButtonLabel"))
-        XCTAssertTrue(source.contains(".frame(height: round(34 * layout.scale))"))
+        XCTAssertTrue(source.contains("Image(systemName: readiness.systemImage)"))
+        XCTAssertTrue(source.contains(".accessibilityLabel(Text(recordButtonLabel))"))
+        XCTAssertTrue(source.contains(".frame(width: round(34 * layout.scale), height: round(34 * layout.scale))"))
         XCTAssertTrue(source.contains("Theme.danger.opacity(0.08)"))
         XCTAssertTrue(source.contains("Theme.danger.opacity(0.42)"))
+        XCTAssertFalse(source.contains("Label(compactRecordButtonLabel"))
+        XCTAssertFalse(source.contains("compactRecordButtonLabel"))
         XCTAssertFalse(source.contains("LinearGradient(colors: [Theme.danger, Color(hex: \"FF8A5C\")]"))
         XCTAssertFalse(source.contains(".frame(height: layout.actionButtonHeight)"))
     }

@@ -580,7 +580,7 @@ struct MeetingLibraryView: View {
                             .foregroundStyle(Theme.textTertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, layout.sidebarBrandLeadingInset)
             .padding(.trailing, layout.sidebarBrandLeadingInset)

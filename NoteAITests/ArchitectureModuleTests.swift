@@ -863,14 +863,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight"))
     }
 
-    func testCommandCenterSidebarBrandIsCenteredAndProminent() throws {
+    func testCommandCenterSidebarBrandIsProminentAndLeftAligned() throws {
         let source = try meetingLibrarySource()
+        let brandHeaderStart = try XCTUnwrap(source.range(of: "private func brandHeader(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func searchAndFilters", range: brandHeaderStart.upperBound..<source.endIndex))
+        let brandHeaderSource = String(source[brandHeaderStart.lowerBound..<nextFunction.lowerBound])
 
-        XCTAssertTrue(source.contains(".font(.system(size: layout.sectionTitleFontSize + 8"))
-        XCTAssertTrue(source.contains(".font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))"))
-        XCTAssertTrue(source.contains(".font(.system(size: layout.tinyFontSize + 1, weight: .medium))"))
-        XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, alignment: .center)"))
-        XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
+        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.sectionTitleFontSize + 8"))
+        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))"))
+        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.tinyFontSize + 1, weight: .medium))"))
+        XCTAssertTrue(brandHeaderSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        XCTAssertFalse(brandHeaderSource.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(brandHeaderSource.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
     }
 
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {

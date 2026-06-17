@@ -946,17 +946,39 @@ final class ArchitectureModuleTests: XCTestCase {
     func testCommandCenterRendersNotionStyleTabStripInTopChrome() throws {
         let source = try meetingLibrarySource()
         let commandBarStart = try XCTUnwrap(source.range(of: "private func commandBar(layout: CommandCenterLayout) -> some View"))
-        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabStrip", range: commandBarStart.upperBound..<source.endIndex))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabBar", range: commandBarStart.upperBound..<source.endIndex))
         let commandBarSource = String(source[commandBarStart.lowerBound..<nextFunction.lowerBound])
 
-        XCTAssertTrue(commandBarSource.contains("notionTabStrip(layout: layout)"))
+        XCTAssertTrue(commandBarSource.contains("notionTabBar(layout: layout)"))
         XCTAssertTrue(commandBarSource.contains("topBarRecordingControl(layout: layout)"))
         XCTAssertTrue(commandBarSource.contains("Label(\"AI copilot\", systemImage: \"message\")"))
-        XCTAssertTrue(source.contains("private func notionTabStrip(layout: CommandCenterLayout) -> some View"))
+        XCTAssertTrue(source.contains("private func notionTabBar(layout: CommandCenterLayout) -> some View"))
         XCTAssertTrue(source.contains("private func notionTabTitle() -> String"))
         XCTAssertTrue(source.contains("private func notionTabIcon() -> String"))
         XCTAssertTrue(source.contains("private func notionTabAccent() -> Color"))
         XCTAssertTrue(source.contains("Theme.notionActiveTabBG"))
+    }
+
+    func testNotionTabsShowSideBySideWithCloseButtonsAndSidebarSearchIcon() throws {
+        let source = try meetingLibrarySource()
+        let commandBarStart = try XCTUnwrap(source.range(of: "private func commandBar(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabBar", range: commandBarStart.upperBound..<source.endIndex))
+        let commandBarSource = String(source[commandBarStart.lowerBound..<nextFunction.lowerBound])
+        let brandHeaderStart = try XCTUnwrap(source.range(of: "private func brandHeader(layout: CommandCenterLayout) -> some View"))
+        let searchAndFiltersStart = try XCTUnwrap(source.range(of: "private func searchAndFilters(layout: CommandCenterLayout) -> some View"))
+        let brandHeaderSource = String(source[brandHeaderStart.lowerBound..<searchAndFiltersStart.lowerBound])
+
+        XCTAssertTrue(source.contains("@State private var openTabs: [SidebarSelection] = [.home]"))
+        XCTAssertTrue(source.contains("ForEach(openTabs, id: \\.self)"))
+        XCTAssertTrue(source.contains("closeTab(tab)"))
+        XCTAssertTrue(source.contains("Image(systemName: \"xmark\")"))
+        XCTAssertTrue(source.contains("private func activateSelection(_ target: SidebarSelection?)"))
+        XCTAssertTrue(source.contains("private func registerOpenTab(_ target: SidebarSelection)"))
+        XCTAssertTrue(commandBarSource.contains("notionTabBar(layout: layout)"))
+        XCTAssertFalse(commandBarSource.contains("TextField("))
+        XCTAssertTrue(brandHeaderSource.contains("Image(systemName: \"magnifyingglass\")"))
+        XCTAssertTrue(brandHeaderSource.contains("sidebarSearchExpanded.toggle()"))
+        XCTAssertTrue(source.contains("if sidebarSearchExpanded || searchIsActive"))
     }
 
     func testNotionShellUsesFlatterSidebarAndDocumentSurfaces() throws {

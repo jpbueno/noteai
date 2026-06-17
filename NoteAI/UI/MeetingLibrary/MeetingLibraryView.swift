@@ -90,6 +90,8 @@ struct MeetingLibraryView: View {
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var sidebarCollapsed = false
     @State private var collapsedSections: Set<SidebarSectionID> = []
+    @State private var openTabs: [SidebarSelection] = [.home]
+    @State private var sidebarSearchExpanded = false
     @State private var quickFilter: CommandCenterQuickFilter?
     @State private var targetedNoteSpace: String?
     @State private var draggingNoteID: UUID?
@@ -174,6 +176,11 @@ struct MeetingLibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             meetingManager.refreshOnboardingChecklistState()
         }
+        .onChange(of: selection) { _, newSelection in
+            if let newSelection {
+                registerOpenTab(newSelection)
+            }
+        }
         .sheet(isPresented: $meetingManager.showMeetingNamePrompt) {
             MeetingNamePromptView(
                 suggestedName: $meetingManager.pendingMeetingName,
@@ -250,26 +257,7 @@ struct MeetingLibraryView: View {
                 .help("Show sidebar")
             }
 
-            notionTabStrip(layout: layout)
-
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
-                TextField(
-                    quickFilter?.commandBarLabel ?? "Command + K  Search meetings, notes, todos...",
-                    text: $meetingManager.searchQuery
-                )
-                .textFieldStyle(.plain)
-                .font(.system(size: layout.bodyFontSize + 1))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($searchFocused)
-            }
-            .frame(minWidth: min(layout.commandSearchMaxWidth, round(320 * layout.scale)), maxWidth: layout.commandSearchMaxWidth)
-            .frame(height: layout.controlHeight)
-            .padding(.horizontal, round(14 * layout.scale))
-            .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+            notionTabBar(layout: layout)
 
             Spacer()
 
@@ -307,7 +295,7 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func notionTabStrip(layout: CommandCenterLayout) -> some View {
+    private func notionTabBar(layout: CommandCenterLayout) -> some View {
         HStack(spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) { sidebarCollapsed.toggle() }
@@ -320,7 +308,14 @@ struct MeetingLibraryView: View {
             .buttonStyle(.plain)
             .help(sidebarCollapsed ? "Show sidebar" : "Hide sidebar")
 
-            notionTabButton(layout: layout)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(openTabs, id: \.self) { tab in
+                        notionTabButton(tab, layout: layout)
+                    }
+                }
+            }
+            .frame(maxWidth: round(620 * layout.scale))
 
             Button {
                 createNewNote()
@@ -336,23 +331,35 @@ struct MeetingLibraryView: View {
         .background(Theme.notionTopBarBG)
     }
 
-    private func notionTabButton(layout: CommandCenterLayout) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: notionTabIcon())
+    private func notionTabButton(_ tab: SidebarSelection, layout: CommandCenterLayout) -> some View {
+        let isActive = selection == tab
+        return HStack(spacing: 8) {
+            Image(systemName: notionTabIcon(for: tab))
                 .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
-                .foregroundStyle(notionTabAccent())
-            Text(notionTabTitle())
+                .foregroundStyle(notionTabAccent(for: tab))
+            Text(notionTabTitle(for: tab))
                 .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            Button {
+                closeTab(tab)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: max(8, layout.tinyFontSize), weight: .bold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(width: round(18 * layout.scale), height: round(18 * layout.scale))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close tab")
         }
         .padding(.horizontal, round(14 * layout.scale))
-        .frame(minWidth: round(210 * layout.scale), maxWidth: round(300 * layout.scale), minHeight: max(34, layout.controlHeight))
-        .background(Theme.notionActiveTabBG)
+        .frame(minWidth: round(180 * layout.scale), maxWidth: round(280 * layout.scale), minHeight: max(34, layout.controlHeight))
+        .background(isActive ? Theme.notionActiveTabBG : Theme.notionTopBarBG)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Theme.notionActiveTabBG)
+                .fill(isActive ? Theme.notionActiveTabBG : Theme.border)
                 .frame(height: 1)
         }
         .overlay(alignment: .leading) {
@@ -365,12 +372,21 @@ struct MeetingLibraryView: View {
                 .fill(Theme.border)
                 .frame(width: 1)
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            activateSelection(tab)
+        }
+        .help(notionTabTitle(for: tab))
     }
 
     private func notionTabTitle() -> String {
-        guard let selection else { return meetingManager.state == .recording ? "Live Recording" : "Today" }
+        notionTabTitle(for: selection)
+    }
 
-        switch selection {
+    private func notionTabTitle(for tab: SidebarSelection?) -> String {
+        guard let tab else { return meetingManager.state == .recording ? "Live Recording" : "Today" }
+
+        switch tab {
         case .home:
             return "Today"
         case .t5tList:
@@ -399,9 +415,13 @@ struct MeetingLibraryView: View {
     }
 
     private func notionTabIcon() -> String {
-        guard let selection else { return meetingManager.state == .recording ? "waveform" : "house" }
+        notionTabIcon(for: selection)
+    }
 
-        switch selection {
+    private func notionTabIcon(for tab: SidebarSelection?) -> String {
+        guard let tab else { return meetingManager.state == .recording ? "waveform" : "house" }
+
+        switch tab {
         case .home:
             return "house"
         case .t5tList, .t5tReport, .newT5T:
@@ -418,9 +438,13 @@ struct MeetingLibraryView: View {
     }
 
     private func notionTabAccent() -> Color {
-        guard let selection else { return meetingManager.state == .recording ? Theme.danger : Theme.notionIconAccent }
+        notionTabAccent(for: selection)
+    }
 
-        switch selection {
+    private func notionTabAccent(for tab: SidebarSelection?) -> Color {
+        guard let tab else { return meetingManager.state == .recording ? Theme.danger : Theme.notionIconAccent }
+
+        switch tab {
         case .home:
             return Theme.textTertiary
         case .t5tList, .t5tReport, .newT5T:
@@ -694,10 +718,10 @@ struct MeetingLibraryView: View {
     }
 
     private func brandHeader(layout: CommandCenterLayout) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = true }
-        } label: {
-            HStack(spacing: 10) {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = true }
+            } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "brain.head.profile")
                         .font(.system(size: layout.sectionTitleFontSize + 8))
@@ -712,42 +736,67 @@ struct MeetingLibraryView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.leading, layout.sidebarBrandLeadingInset)
-            .padding(.trailing, layout.sidebarBrandLeadingInset)
-            .padding(.top, layout.sidebarBrandHeaderTopPadding)
-            .padding(.bottom, layout.sidebarBrandHeaderBottomPadding)
-            .frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)
+            .buttonStyle(.plain)
+            .help("Hide sidebar")
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    sidebarSearchExpanded.toggle()
+                }
+                if sidebarSearchExpanded {
+                    searchFocused = true
+                }
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: layout.bodyFontSize + 2, weight: .medium))
+                    .foregroundStyle(searchIsActive || sidebarSearchExpanded ? Theme.textPrimary : Theme.textTertiary)
+                    .frame(width: round(30 * layout.scale), height: round(30 * layout.scale))
+                    .background(
+                        searchIsActive || sidebarSearchExpanded ? Theme.notionHoverBG : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Search workspace")
         }
-        .buttonStyle(.plain)
-        .help("Hide sidebar")
+        .padding(.leading, layout.sidebarBrandLeadingInset)
+        .padding(.trailing, layout.sidebarBrandLeadingInset)
+        .padding(.top, layout.sidebarBrandHeaderTopPadding)
+        .padding(.bottom, layout.sidebarBrandHeaderBottomPadding)
+        .frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)
     }
 
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {
         VStack(spacing: round(8 * layout.scale)) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: layout.smallFontSize))
-                    .foregroundStyle(Theme.textTertiary)
-                TextField("Search workspace...", text: $meetingManager.searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: layout.bodyFontSize))
-                    .focused($searchFocused)
-                if !meetingManager.searchQuery.isEmpty {
-                    Button {
-                        meetingManager.searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: layout.tinyFontSize, weight: .bold))
-                            .foregroundStyle(Theme.textTertiary)
+            if sidebarSearchExpanded || searchIsActive {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: layout.smallFontSize))
+                        .foregroundStyle(Theme.textTertiary)
+                    TextField("Search workspace...", text: $meetingManager.searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: layout.bodyFontSize))
+                        .focused($searchFocused)
+                    if !meetingManager.searchQuery.isEmpty {
+                        Button {
+                            meetingManager.searchQuery = ""
+                            sidebarSearchExpanded = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: layout.tinyFontSize, weight: .bold))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, round(10 * layout.scale))
+                .frame(height: max(32, layout.controlHeight - 2))
+                .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
             }
-            .padding(.horizontal, round(10 * layout.scale))
-            .frame(height: max(32, layout.controlHeight - 2))
-            .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
 
             HStack(spacing: 6) {
                 ForEach(CommandCenterQuickFilter.allCases, id: \.self) { filter in
@@ -1683,6 +1732,32 @@ struct MeetingLibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.notionWindowBG)
+    }
+
+    private func activateSelection(_ target: SidebarSelection?) {
+        selection = target
+        if let target {
+            registerOpenTab(target)
+        }
+    }
+
+    private func registerOpenTab(_ target: SidebarSelection) {
+        guard !openTabs.contains(target) else { return }
+        openTabs.append(target)
+    }
+
+    private func closeTab(_ target: SidebarSelection) {
+        guard let index = openTabs.firstIndex(of: target) else { return }
+        openTabs.remove(at: index)
+
+        if openTabs.isEmpty {
+            openTabs = [.home]
+        }
+
+        if selection == target {
+            let replacementIndex = min(index, openTabs.count - 1)
+            selection = openTabs[replacementIndex]
+        }
     }
 
     // MARK: - Actions

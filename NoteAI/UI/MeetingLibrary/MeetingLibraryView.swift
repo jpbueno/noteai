@@ -1496,7 +1496,7 @@ struct MeetingLibraryView: View {
                         .font(.system(size: Theme.smallSize, weight: .bold))
                         .foregroundStyle(Theme.sectionHeader)
                     Text(title)
-                        .font(.system(size: Theme.pageTitleSize, weight: .bold))
+                        .font(.system(size: Theme.pageTitleSize, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text(subtitle)
                         .font(.system(size: Theme.bodySize))

@@ -784,7 +784,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(snapshot.completed.map(\.id), [recentDone.id, olderDone.id])
     }
 
-    func testCommandCenterLayoutUsesLinearReadableTypographyScale() {
+    func testCommandCenterLayoutUsesCodexReadableTypographyScale() {
         let compact = CommandCenterLayout.metrics(forWindowWidth: 980)
         let wide = CommandCenterLayout.metrics(forWindowWidth: 1700)
 
@@ -799,9 +799,9 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(wide.maximumSidebarWidth, 320)
         XCTAssertGreaterThanOrEqual(wide.contentMaxWidth, 1300)
         XCTAssertLessThanOrEqual(wide.scale, 1)
-        XCTAssertGreaterThanOrEqual(wide.titleFontSize, 32)
-        XCTAssertGreaterThanOrEqual(wide.metricValueFontSize, 24)
-        XCTAssertGreaterThanOrEqual(wide.sectionTitleFontSize, 16)
+        XCTAssertEqual(wide.titleFontSize, 28)
+        XCTAssertEqual(wide.metricValueFontSize, 22)
+        XCTAssertEqual(wide.sectionTitleFontSize, 15)
         XCTAssertEqual(wide.bodyFontSize, 14)
         XCTAssertEqual(wide.smallFontSize, 12)
         XCTAssertEqual(wide.tinyFontSize, 11)
@@ -809,9 +809,43 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(compact.bodyFontSize, 13)
         XCTAssertGreaterThanOrEqual(compact.smallFontSize, 12)
         XCTAssertGreaterThanOrEqual(compact.tinyFontSize, 11)
+        XCTAssertLessThanOrEqual(compact.titleFontSize, 27)
 
         XCTAssertLessThanOrEqual(wide.controlHeight, 39)
         XCTAssertLessThanOrEqual(wide.actionButtonHeight, 42)
+    }
+
+    func testThemeUsesCodexLikeNeutralPaletteAndTitleScale() throws {
+        let source = try themeSource()
+
+        XCTAssertTrue(source.contains("static let notionWindowBG = Color(light: \"FFFFFF\", dark: \"101010\")"))
+        XCTAssertTrue(source.contains("static let notionTopBarBG = Color(light: \"F7F7F7\", dark: \"151515\")"))
+        XCTAssertTrue(source.contains("static let notionSidebarBG = Color(light: \"F7F7F7\", dark: \"181818\")"))
+        XCTAssertTrue(source.contains("static let notionSurfaceBG = Color(light: \"FFFFFF\", dark: \"191919\")"))
+        XCTAssertTrue(source.contains("static let notionHoverBG = Color(light: \"EFEFEF\", dark: \"252525\")"))
+        XCTAssertTrue(source.contains("static let notionSelectedBG = Color(light: \"EDEDED\", dark: \"303030\")"))
+        XCTAssertTrue(source.contains("static let notionBorder = Color(light: \"DCDCDC\", dark: \"2A2A2A\")"))
+        XCTAssertTrue(source.contains("static let textPrimary = Color(light: \"1F1F1F\", dark: \"F4F4F4\")"))
+        XCTAssertTrue(source.contains("static let textSecondary = Color(light: \"4A4A4A\", dark: \"D6D6D6\")"))
+        XCTAssertTrue(source.contains("static let textTertiary = Color(light: \"787878\", dark: \"9B9B9B\")"))
+        XCTAssertTrue(source.contains("static let pageTitleSize: CGFloat = 34"))
+        XCTAssertTrue(source.contains("static let h2Size: CGFloat = 22"))
+        XCTAssertTrue(source.contains("static let h3Size: CGFloat = 18"))
+        XCTAssertTrue(source.contains("static let bodySize: CGFloat = 14"))
+        XCTAssertTrue(source.contains("static let smallSize: CGFloat = 12"))
+    }
+
+    func testPrimaryPageTitlesUseCodexLikeSemiboldWeight() throws {
+        let homeSource = try homeDashboardSource()
+        let notePageSource = try notionPageSource()
+        let t5tSource = try t5tComposerSource()
+
+        XCTAssertTrue(homeSource.contains(".font(.system(size: layout.titleFontSize, weight: .semibold))"))
+        XCTAssertTrue(notePageSource.contains(".font(.system(size: Theme.pageTitleSize, weight: .semibold))"))
+        XCTAssertTrue(t5tSource.contains(".font(.system(size: Theme.pageTitleSize, weight: .semibold))"))
+        XCTAssertFalse(homeSource.contains(".font(.system(size: layout.titleFontSize, weight: .bold))"))
+        XCTAssertFalse(notePageSource.contains(".font(.system(size: Theme.pageTitleSize, weight: .bold))"))
+        XCTAssertFalse(t5tSource.contains(".font(.system(size: Theme.pageTitleSize, weight: .bold))"))
     }
 
     func testAppearanceModeMapsToPreferredColorScheme() {
@@ -970,16 +1004,16 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
 
-    func testNotionInspiredThemeTokensUseCharcoalPalette() throws {
+    func testNotionInspiredThemeTokensUseCodexNeutralPalette() throws {
         let source = try themeSource()
 
         XCTAssertTrue(source.contains("notionWindowBG"))
         XCTAssertTrue(source.contains("notionTopBarBG"))
         XCTAssertTrue(source.contains("notionActiveTabBG"))
         XCTAssertTrue(source.contains("notionIconAccent"))
-        XCTAssertTrue(source.contains("dark: \"191919\""))
-        XCTAssertTrue(source.contains("dark: \"202020\""))
-        XCTAssertTrue(source.contains("dark: \"2F2F2F\""))
+        XCTAssertTrue(source.contains("dark: \"101010\""))
+        XCTAssertTrue(source.contains("dark: \"151515\""))
+        XCTAssertTrue(source.contains("dark: \"303030\""))
         XCTAssertFalse(source.contains("dark: \"0B0F12\""))
         XCTAssertFalse(source.contains("dark: \"10161B\""))
     }
@@ -1875,6 +1909,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let sidebarFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift")
         return try String(contentsOf: sidebarFile, encoding: .utf8)
+    }
+
+    private func notionPageSource() throws -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
+        let pageFile = projectRoot.appendingPathComponent("NoteAI/UI/MeetingLibrary/NotionPageView.swift")
+        return try String(contentsOf: pageFile, encoding: .utf8)
     }
 
     private func homeDashboardSource() throws -> String {

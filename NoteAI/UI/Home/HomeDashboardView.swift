@@ -102,9 +102,9 @@ struct CommandCenterLayout: Equatable {
             dashboardSpacing: round(14 * scale * preset.spacingMultiplier),
             onboardingMinimumCardWidth: round(236 * scale * preset.cardWidthMultiplier),
             metricMinimumCardWidth: round(112 * scale * preset.cardWidthMultiplier),
-            titleFontSize: min(32, max(31, round(32 * typeScale))),
-            metricValueFontSize: min(24, max(23, round(24 * typeScale))),
-            sectionTitleFontSize: min(16, max(15, round(16 * typeScale))),
+            titleFontSize: min(28, max(26, round(28 * typeScale))),
+            metricValueFontSize: min(22, max(21, round(22 * typeScale))),
+            sectionTitleFontSize: min(15, max(14, round(15 * typeScale))),
             bodyFontSize: min(14, max(13, round(14 * typeScale))),
             smallFontSize: 12,
             tinyFontSize: 11
@@ -262,7 +262,7 @@ struct HomeDashboardView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .textCase(.uppercase)
             Text("Today's workspace")
-                .font(.system(size: layout.titleFontSize, weight: .bold))
+                .font(.system(size: layout.titleFontSize, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
             Text("Keep meetings, notes, todos, and T5T follow-ups moving from one place.")
                 .font(.system(size: layout.bodyFontSize + 1))

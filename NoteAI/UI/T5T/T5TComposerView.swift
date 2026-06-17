@@ -106,7 +106,7 @@ struct T5TComposerView: View {
 
             TextField("Subject line", text: $report.title)
                 .textFieldStyle(.plain)
-                .font(.system(size: Theme.pageTitleSize, weight: .bold))
+                .font(.system(size: Theme.pageTitleSize, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .onChange(of: report.title) { _, _ in
                     meetingManager.updateT5TReport(report)

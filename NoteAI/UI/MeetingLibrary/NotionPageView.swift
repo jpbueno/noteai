@@ -66,7 +66,7 @@ struct NotionPageView: View {
                 .textCase(.uppercase)
 
             Text(meeting.title)
-                .font(.system(size: Theme.pageTitleSize, weight: .bold))
+                .font(.system(size: Theme.pageTitleSize, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 4)
 

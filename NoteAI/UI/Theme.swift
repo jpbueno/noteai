@@ -75,20 +75,20 @@ enum CommandCenterLayoutPreset: String, CaseIterable, Identifiable {
 
 /// NoteAI Command Center design tokens.
 enum Theme {
-    // Notion-inspired workspace palette.
-    static let notionWindowBG = Color(light: "F7F7F5", dark: "191919")
-    static let notionTopBarBG = Color(light: "F1F1EF", dark: "202020")
-    static let notionSidebarBG = Color(light: "F7F7F5", dark: "202020")
+    // Codex-inspired workspace palette.
+    static let notionWindowBG = Color(light: "FFFFFF", dark: "101010")
+    static let notionTopBarBG = Color(light: "F7F7F7", dark: "151515")
+    static let notionSidebarBG = Color(light: "F7F7F7", dark: "181818")
     static let notionSurfaceBG = Color(light: "FFFFFF", dark: "191919")
-    static let notionHoverBG = Color(light: "EDEDEB", dark: "2A2A2A")
-    static let notionSelectedBG = Color(light: "E8E7E4", dark: "2F2F2F")
-    static let notionActiveTabBG = Color(light: "FFFFFF", dark: "2F2F2F")
-    static let notionBorder = Color(light: "DDDDD9", dark: "343434")
+    static let notionHoverBG = Color(light: "EFEFEF", dark: "252525")
+    static let notionSelectedBG = Color(light: "EDEDED", dark: "303030")
+    static let notionActiveTabBG = Color(light: "FFFFFF", dark: "303030")
+    static let notionBorder = Color(light: "DCDCDC", dark: "2A2A2A")
     static let notionIconAccent = Color(light: "C46A13", dark: "D9730D")
 
     static let sidebarBG = notionSidebarBG
     static let contentBG = notionWindowBG
-    static let contentBGNSColor = NSColor(noteAIAdaptiveHexLight: "F7F7F5", dark: "191919")
+    static let contentBGNSColor = NSColor(noteAIAdaptiveHexLight: "FFFFFF", dark: "101010")
     static let hoverBG = notionHoverBG
     static let selectedBG = notionSelectedBG
     static let border = notionBorder
@@ -97,12 +97,12 @@ enum Theme {
     static let rowBorder = notionBorder
 
     // Text
-    static let textPrimary = Color(light: "1F1F1F", dark: "EDEDEC")
-    static let textSecondary = Color(light: "4F4F4F", dark: "C9C9C7")
-    static let textTertiary = Color(light: "787774", dark: "9B9A97")
+    static let textPrimary = Color(light: "1F1F1F", dark: "F4F4F4")
+    static let textSecondary = Color(light: "4A4A4A", dark: "D6D6D6")
+    static let textTertiary = Color(light: "787878", dark: "9B9B9B")
 
     // Sidebar section headers
-    static let sectionHeader = Color(light: "787774", dark: "9B9A97")
+    static let sectionHeader = Color(light: "787878", dark: "9B9B9B")
 
     // Status
     static let accent = Color(light: "2563EB", dark: "2EAADC")
@@ -111,11 +111,11 @@ enum Theme {
     static let warning = Color(light: "A16207", dark: "D9730D")
 
     // Content typography
-    static let pageTitleSize: CGFloat = 40
-    static let h2Size: CGFloat = 24
-    static let h3Size: CGFloat = 20
-    static let bodySize: CGFloat = 15
-    static let smallSize: CGFloat = 13
+    static let pageTitleSize: CGFloat = 34
+    static let h2Size: CGFloat = 22
+    static let h3Size: CGFloat = 18
+    static let bodySize: CGFloat = 14
+    static let smallSize: CGFloat = 12
 
     // Content width for detail pages. Use full available width.
     static let maxContentWidth: CGFloat = .infinity

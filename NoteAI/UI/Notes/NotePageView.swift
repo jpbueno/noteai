@@ -51,7 +51,7 @@ struct NotePageView: View {
 
             TextField("Untitled", text: $note.title)
                 .textFieldStyle(.plain)
-                .font(.system(size: Theme.pageTitleSize, weight: .bold))
+                .font(.system(size: Theme.pageTitleSize, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .onChange(of: note.title) { _, _ in
                     saveImmediately()

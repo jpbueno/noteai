@@ -55,28 +55,6 @@ enum SidebarListLimiter {
     }
 }
 
-private enum CommandCenterQuickFilter: CaseIterable, Hashable {
-    case recent
-    case openTodos
-    case unreviewed
-
-    var label: String {
-        switch self {
-        case .recent: return "Recent"
-        case .openTodos: return "Open"
-        case .unreviewed: return "Unreviewed"
-        }
-    }
-
-    var commandBarLabel: String {
-        switch self {
-        case .recent: return "Recent meetings filter active"
-        case .openTodos: return "Open todos filter active"
-        case .unreviewed: return "Unreviewed summaries filter active"
-        }
-    }
-}
-
 struct MeetingLibraryView: View {
     @ObservedObject var meetingManager: MeetingManager
     @ObservedObject var authManager: GoogleAuthManager
@@ -92,7 +70,6 @@ struct MeetingLibraryView: View {
     @State private var collapsedSections: Set<SidebarSectionID> = []
     @State private var openTabs: [SidebarSelection] = [.home]
     @State private var sidebarSearchExpanded = false
-    @State private var quickFilter: CommandCenterQuickFilter?
     @State private var targetedNoteSpace: String?
     @State private var draggingNoteID: UUID?
     @FocusState private var searchFocused: Bool
@@ -787,36 +764,9 @@ struct MeetingLibraryView: View {
                 .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
             }
-
-            HStack(spacing: 6) {
-                ForEach(CommandCenterQuickFilter.allCases, id: \.self) { filter in
-                    quickFilterButton(filter, layout: layout)
-                }
-            }
         }
         .padding(.horizontal, round(10 * layout.scale))
         .padding(.vertical, round(10 * layout.scale))
-    }
-
-    private func quickFilterButton(_ filter: CommandCenterQuickFilter, layout: CommandCenterLayout) -> some View {
-        Button {
-            quickFilter = quickFilter == filter ? nil : filter
-        } label: {
-            Text(filter.label)
-                .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
-                .frame(height: max(28, round(28 * layout.scale)))
-                .foregroundStyle(quickFilter == filter ? Theme.accent : Theme.textTertiary)
-                .background(
-                    quickFilter == filter ? Theme.accent.opacity(0.12) : Theme.notionSurfaceBG.opacity(0.38),
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(quickFilter == filter ? Theme.accent.opacity(0.45) : Theme.border.opacity(0.70), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .help(filter.commandBarLabel)
     }
 
     private func sidebarSection<Content: View>(
@@ -1177,9 +1127,7 @@ struct MeetingLibraryView: View {
     }
 
     private var visibleTodos: [TodoItem] {
-        let todos = quickFilter == .openTodos
-            ? meetingManager.filteredTodos.filter { !$0.completed }
-            : meetingManager.filteredTodos
+        let todos = meetingManager.filteredTodos
         let pending = todos.filter { !$0.completed }
         let completed = todos.filter { $0.completed }
         let sortedPending = pending.sorted { a, b in
@@ -1207,14 +1155,7 @@ struct MeetingLibraryView: View {
     }
 
     private var visibleMeetings: [Meeting] {
-        var meetings = meetingManager.filteredMeetings
-        if quickFilter == .unreviewed {
-            meetings = meetings.filter { !$0.summary.wasSummarized }
-        }
-        if quickFilter == .recent {
-            return Array(meetings.prefix(8))
-        }
-        return meetings
+        meetingManager.filteredMeetings
     }
 
     private func todoSidebarRow(todo: TodoItem, layout: CommandCenterLayout) -> some View {
@@ -1506,7 +1447,7 @@ struct MeetingLibraryView: View {
     private var todosListPage: some View {
         collectionListPage(
             eyebrow: "Todos",
-            title: quickFilter == .openTodos ? "Open Todos" : "Todos",
+            title: "Todos",
             subtitle: "\(visibleTodos.filter { !$0.completed }.count) open • \(visibleTodos.filter(\.completed).count) completed",
             isEmpty: visibleTodos.isEmpty,
             emptyTitle: meetingManager.searchQuery.isEmpty ? "No todos yet" : "No matching todos",
@@ -1531,7 +1472,7 @@ struct MeetingLibraryView: View {
     private var meetingsListPage: some View {
         collectionListPage(
             eyebrow: "Meetings",
-            title: quickFilter == .unreviewed ? "Unreviewed Meetings" : "Meetings",
+            title: "Meetings",
             subtitle: "\(visibleMeetings.count) meetings",
             isEmpty: visibleMeetings.isEmpty,
             emptyTitle: meetingManager.searchQuery.isEmpty ? "No meetings yet" : "No matching meetings",

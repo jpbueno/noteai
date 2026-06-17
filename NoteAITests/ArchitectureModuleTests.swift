@@ -988,6 +988,20 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("if sidebarSearchExpanded || searchIsActive"))
     }
 
+    func testSidebarChromeDoesNotRenderQuickFilterButtons() throws {
+        let source = try meetingLibrarySource()
+        let searchAndFiltersStart = try XCTUnwrap(source.range(of: "private func searchAndFilters(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func sidebarSection", range: searchAndFiltersStart.upperBound..<source.endIndex))
+        let searchAndFiltersSource = String(source[searchAndFiltersStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertFalse(source.contains("CommandCenterQuickFilter"))
+        XCTAssertFalse(source.contains("@State private var quickFilter"))
+        XCTAssertFalse(source.contains("private func quickFilterButton"))
+        XCTAssertFalse(searchAndFiltersSource.contains("Recent"))
+        XCTAssertFalse(searchAndFiltersSource.contains("Open"))
+        XCTAssertFalse(searchAndFiltersSource.contains("Unreviewed"))
+    }
+
     func testNotionShellUsesFlatterSidebarAndDocumentSurfaces() throws {
         let meetingSource = try meetingLibrarySource()
         let homeSource = try homeDashboardSource()

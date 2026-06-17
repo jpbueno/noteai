@@ -32,19 +32,19 @@ struct T5TConfigSheet: View {
             Form {
                 TextField("Vertical / Platform / Account", text: $config.vertical)
                     .textFieldStyle(.roundedBorder)
-                Text("e.g., Cloud Native AI, Strategics, DGX, Healthcare, Drive")
+                Text("e.g., Inference Platform, Strategics, DGX, Healthcare, Drive")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
 
                 TextField("Region / Overlay", text: $config.region)
                     .textFieldStyle(.roundedBorder)
-                Text("e.g., NALA, EMEA, Japan, GAM")
+                Text("e.g., WWFO, NALA, EMEA, Japan, GAM")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
 
                 TextField("Job Function", text: $config.jobFunction)
                     .textFieldStyle(.roundedBorder)
-                Text("e.g., SA, AM, DevRel, OS, FAE, PBM")
+                Text("e.g., AI SAE, SA, AM, DevRel, OS, FAE, PBM")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -78,17 +78,17 @@ struct T5TConfigEditor: View {
         Form {
             Section("T5T Subject Line") {
                 TextField("Vertical / Platform / Account", text: $config.vertical)
-                Text("e.g., Cloud Native AI, Strategics, DGX, Healthcare")
+                Text("e.g., Inference Platform, Strategics, DGX, Healthcare")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 TextField("Region / Overlay", text: $config.region)
-                Text("e.g., NALA, EMEA, Japan, GAM")
+                Text("e.g., WWFO, NALA, EMEA, Japan, GAM")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 TextField("Job Function", text: $config.jobFunction)
-                Text("e.g., SA, AM, DevRel, OS, FAE")
+                Text("e.g., AI SAE, SA, AM, DevRel, OS, FAE")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

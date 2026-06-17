@@ -1290,7 +1290,7 @@ final class ArchitectureModuleTests: XCTestCase {
         let engineSource = try summarizationEngineSource()
 
         XCTAssertTrue(promptSource.contains("enum T5TPrompt"))
-        XCTAssertTrue(promptSource.contains("Top 5 Things - Inference Ops | NALA | SA"))
+        XCTAssertTrue(promptSource.contains("Top 5 Things - Inference Platform | WWFO | AI SAE"))
         XCTAssertTrue(promptSource.contains("Industry Business Development / Account Updates"))
         XCTAssertTrue(promptSource.contains("Future Plans"))
         XCTAssertTrue(promptSource.contains("Make it a priority list, not a to-do list."))
@@ -1300,6 +1300,9 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(promptSource.contains("Omit sections that do not apply"))
         XCTAssertTrue(promptSource.contains("Avoid naming Slack channels"))
         XCTAssertTrue(promptSource.contains("Avoid links in final T5Ts unless explicitly requested."))
+        XCTAssertTrue(promptSource.contains("Keep each customer, partner, or account workstream as its own top-level item."))
+        XCTAssertTrue(promptSource.contains("In futurePlans, separate next steps by account or workstream."))
+        XCTAssertTrue(promptSource.contains("When describing blockers, prefer neutral wording such as \"main blocker\", \"remaining blocker\", or \"next decision point\"."))
         XCTAssertTrue(promptSource.contains("Return ONLY valid JSON"))
 
         XCTAssertTrue(engineSource.contains("T5TPrompt.buildPrompt("))
@@ -1332,7 +1335,7 @@ final class ArchitectureModuleTests: XCTestCase {
             periodEnd: Date(timeIntervalSince1970: 86_400)
         )
 
-        XCTAssertTrue(prompt.contains("SUBJECT LINE DEFAULT:\nTop 5 Things - Inference Ops | NALA | SA"))
+        XCTAssertTrue(prompt.contains("SUBJECT LINE DEFAULT:\nTop 5 Things - Inference Platform | WWFO | AI SAE"))
         XCTAssertTrue(prompt.contains("COMPLETED TASKS - use as candidates for accountUpdates"))
         XCTAssertTrue(prompt.contains("[COMPLETED] Delivered Production Cadence JEDAI Platform"))
         XCTAssertTrue(prompt.contains("OPEN / IN-PROGRESS TASKS - use as candidates for futurePlans"))
@@ -1343,12 +1346,39 @@ final class ArchitectureModuleTests: XCTestCase {
     }
 
     func testT5TDefaultSubjectUsesExactPreferredHyphenatedFormat() throws {
-        XCTAssertEqual(T5TPrompt.defaultSubjectLine, "Top 5 Things - Inference Ops | NALA | SA")
-        XCTAssertEqual(LibraryOperations.t5tDefaultTitle(config: .empty), "Top 5 Things - Inference Ops | NALA | SA")
+        XCTAssertEqual(T5TPrompt.defaultSubjectLine, "Top 5 Things - Inference Platform | WWFO | AI SAE")
+        XCTAssertEqual(LibraryOperations.t5tDefaultTitle(config: .empty), "Top 5 Things - Inference Platform | WWFO | AI SAE")
 
         let source = try t5tConfigSheetSource()
         XCTAssertTrue(source.contains("Top 5 Things - "))
         XCTAssertFalse(source.contains("Top 5 Things – "))
+    }
+
+    func testT5TPromptEncodesSkillOutputSchemaWithoutMarkdownBulletsInJSON() throws {
+        let prompt = T5TPrompt.buildPrompt(
+            tasks: [
+                TaskItem(
+                    title: "Moved Nscale Dynamo PoC from Technical Validation to a Runtime Ownership Decision",
+                    description: "Advanced Nscale from MI300 technical validation to runtime ownership decision.",
+                    status: .completed,
+                    workDate: Date(timeIntervalSince1970: 1_800),
+                    completedDate: Date(timeIntervalSince1970: 2_000),
+                    createdDate: Date(timeIntervalSince1970: 1_000),
+                    modifiedDate: Date(timeIntervalSince1970: 2_000)
+                )
+            ],
+            config: .empty,
+            periodStart: Date(timeIntervalSince1970: 0),
+            periodEnd: Date(timeIntervalSince1970: 86_400)
+        )
+
+        XCTAssertTrue(prompt.contains("FINAL RENDERING CONTRACT:"))
+        XCTAssertTrue(prompt.contains("The app renders each JSON entry as a headline plus one bullet paragraph."))
+        XCTAssertTrue(prompt.contains("Do not include literal bullet prefixes such as \"-\" or \"•\" inside JSON explanations."))
+        XCTAssertTrue(prompt.contains("\"accountUpdates\": ["))
+        XCTAssertTrue(prompt.contains("\"headline\": \"Moved Nscale Dynamo PoC from Technical Validation to a Runtime Ownership Decision\""))
+        XCTAssertTrue(prompt.contains("\"futurePlans\": ["))
+        XCTAssertTrue(prompt.contains("\"headline\": \"Unblock Nscale Runtime Ownership Path\""))
     }
 
     func testAssistantT5TCreationUsesTasksAndCanonicalPromptPath() throws {

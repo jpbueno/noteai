@@ -1014,6 +1014,24 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(tabBarSource.contains(".help(\"New note\")"))
     }
 
+    func testNotionTabBarUsesAvailableTopChromeWidthBeforeRightControls() throws {
+        let source = try meetingLibrarySource()
+        let commandBarStart = try XCTUnwrap(source.range(of: "private func commandBar(layout: CommandCenterLayout) -> some View"))
+        let tabBarStart = try XCTUnwrap(source.range(of: "private func notionTabBar", range: commandBarStart.upperBound..<source.endIndex))
+        let commandBarSource = String(source[commandBarStart.lowerBound..<tabBarStart.lowerBound])
+        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabButton", range: tabBarStart.upperBound..<source.endIndex))
+        let tabBarSource = String(source[tabBarStart.lowerBound..<nextFunction.lowerBound])
+        let tabBarCallRange = try XCTUnwrap(commandBarSource.range(of: "notionTabBar(layout: layout)"))
+        let rightControlRange = try XCTUnwrap(commandBarSource.range(of: "topBarRecordingControl(layout: layout)"))
+        let betweenTabBarAndControls = String(commandBarSource[tabBarCallRange.upperBound..<rightControlRange.lowerBound])
+
+        XCTAssertFalse(betweenTabBarAndControls.contains("Spacer()"))
+        XCTAssertTrue(betweenTabBarAndControls.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        XCTAssertTrue(betweenTabBarAndControls.contains(".layoutPriority(1)"))
+        XCTAssertFalse(tabBarSource.contains(".frame(maxWidth: round("))
+        XCTAssertTrue(tabBarSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
+
     func testSidebarChromeDoesNotRenderQuickFilterButtons() throws {
         let source = try meetingLibrarySource()
         let searchAndFiltersStart = try XCTUnwrap(source.range(of: "private func searchAndFilters(layout: CommandCenterLayout) -> some View"))

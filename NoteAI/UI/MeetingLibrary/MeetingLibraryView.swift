@@ -235,8 +235,8 @@ struct MeetingLibraryView: View {
             }
 
             notionTabBar(layout: layout)
-
-            Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
             topBarRecordingControl(layout: layout)
 
@@ -292,7 +292,7 @@ struct MeetingLibraryView: View {
                     }
                 }
             }
-            .frame(maxWidth: round(760 * layout.scale), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
         }
         .background(Theme.notionTopBarBG)

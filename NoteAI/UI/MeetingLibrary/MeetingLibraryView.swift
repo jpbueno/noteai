@@ -736,37 +736,38 @@ struct MeetingLibraryView: View {
         .frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)
     }
 
+    @ViewBuilder
     private func searchAndFilters(layout: CommandCenterLayout) -> some View {
-        VStack(spacing: round(8 * layout.scale)) {
-            if sidebarSearchExpanded || searchIsActive {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: layout.smallFontSize))
-                        .foregroundStyle(Theme.textTertiary)
-                    TextField("Search workspace...", text: $meetingManager.searchQuery)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: layout.bodyFontSize))
-                        .focused($searchFocused)
-                    if !meetingManager.searchQuery.isEmpty {
-                        Button {
-                            meetingManager.searchQuery = ""
-                            sidebarSearchExpanded = false
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: layout.tinyFontSize, weight: .bold))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        .buttonStyle(.plain)
+        if sidebarSearchExpanded || searchIsActive {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: layout.smallFontSize))
+                    .foregroundStyle(Theme.textTertiary)
+                TextField("Search workspace...", text: $meetingManager.searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: layout.bodyFontSize))
+                    .focused($searchFocused)
+                if !meetingManager.searchQuery.isEmpty {
+                    Button {
+                        meetingManager.searchQuery = ""
+                        sidebarSearchExpanded = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: layout.tinyFontSize, weight: .bold))
+                            .foregroundStyle(Theme.textTertiary)
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, round(10 * layout.scale))
-                .frame(height: max(32, layout.controlHeight - 2))
-                .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
             }
+            .padding(.horizontal, round(10 * layout.scale))
+            .frame(height: max(32, layout.controlHeight - 2))
+            .background(Theme.notionSurfaceBG.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+            .padding(.horizontal, round(10 * layout.scale))
+            .padding(.bottom, round(8 * layout.scale))
+        } else {
+            EmptyView()
         }
-        .padding(.horizontal, round(10 * layout.scale))
-        .padding(.vertical, round(10 * layout.scale))
     }
 
     private func sidebarSection<Content: View>(

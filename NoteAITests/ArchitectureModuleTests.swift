@@ -863,6 +863,9 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(compact.sidebarBrandLeadingInset, 12)
         XCTAssertLessThanOrEqual(compact.sidebarBrandLeadingInset, 18)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandHeaderHeight, 58)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandHeaderTopPadding, 18)
+        XCTAssertLessThanOrEqual(compact.sidebarBrandHeaderBottomPadding, 8)
         XCTAssertEqual(compact.sidebarBrandLeadingInset, wide.sidebarBrandLeadingInset)
         XCTAssertTrue(source.contains(".padding(.leading, layout.sidebarBrandLeadingInset)"))
         XCTAssertTrue(source.contains(".padding(.top, layout.sidebarBrandHeaderTopPadding)"))
@@ -882,6 +885,17 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(brandHeaderSource.contains("Text(\"v5.0\")"))
         XCTAssertTrue(brandHeaderSource.contains("Image(systemName: \"magnifyingglass\")"))
         XCTAssertTrue(brandHeaderSource.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
+    }
+
+    func testCollapsedSidebarSearchDoesNotReserveVerticalSpace() throws {
+        let source = try meetingLibrarySource()
+        let searchAndFiltersStart = try XCTUnwrap(source.range(of: "private func searchAndFilters(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func sidebarSection", range: searchAndFiltersStart.upperBound..<source.endIndex))
+        let searchAndFiltersSource = String(source[searchAndFiltersStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertTrue(searchAndFiltersSource.contains("if sidebarSearchExpanded || searchIsActive"))
+        XCTAssertTrue(searchAndFiltersSource.contains("EmptyView()"))
+        XCTAssertFalse(searchAndFiltersSource.contains(".padding(.vertical, round(10 * layout.scale))"))
     }
 
     func testSidebarRecordingControlsDoNotRenderStaticSourceCards() throws {

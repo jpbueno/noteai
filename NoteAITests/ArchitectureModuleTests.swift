@@ -1002,6 +1002,18 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("if sidebarSearchExpanded || searchIsActive"))
     }
 
+    func testNotionTabBarDoesNotReserveSpaceForNewNotePlusButton() throws {
+        let source = try meetingLibrarySource()
+        let tabBarStart = try XCTUnwrap(source.range(of: "private func notionTabBar(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func notionTabButton", range: tabBarStart.upperBound..<source.endIndex))
+        let tabBarSource = String(source[tabBarStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertTrue(tabBarSource.contains("ForEach(openTabs, id: \\.self)"))
+        XCTAssertFalse(tabBarSource.contains("createNewNote()"))
+        XCTAssertFalse(tabBarSource.contains("Image(systemName: \"plus\")"))
+        XCTAssertFalse(tabBarSource.contains(".help(\"New note\")"))
+    }
+
     func testSidebarChromeDoesNotRenderQuickFilterButtons() throws {
         let source = try meetingLibrarySource()
         let searchAndFiltersStart = try XCTUnwrap(source.range(of: "private func searchAndFilters(layout: CommandCenterLayout) -> some View"))

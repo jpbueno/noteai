@@ -292,18 +292,8 @@ struct MeetingLibraryView: View {
                     }
                 }
             }
-            .frame(maxWidth: round(620 * layout.scale))
-
-            Button {
-                createNewNote()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(width: round(40 * layout.scale), height: max(34, layout.controlHeight))
-            }
-            .buttonStyle(.plain)
-            .help("New note")
+            .frame(maxWidth: round(760 * layout.scale), alignment: .leading)
+            .layoutPriority(1)
         }
         .background(Theme.notionTopBarBG)
     }

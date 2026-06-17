@@ -722,20 +722,10 @@ struct MeetingLibraryView: View {
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) { sidebarCollapsed = true }
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: layout.sectionTitleFontSize + 8))
-                        .foregroundStyle(Theme.textSecondary)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("NoteAI")
-                            .font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("v5.0")
-                            .font(.system(size: layout.tinyFontSize + 1, weight: .medium))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: layout.sectionTitleFontSize + 11, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

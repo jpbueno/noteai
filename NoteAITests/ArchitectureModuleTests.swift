@@ -26,12 +26,19 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: AutoDetectionDefaults.engineKey), AutoDetectionEngine.classicV4.rawValue)
     }
 
-    func testSidebarBrandShowsV5ReleaseLabel() throws {
+    func testSidebarBrandShowsOnlyCenteredLogo() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+        let brandHeaderStart = try XCTUnwrap(source.range(of: "private func brandHeader(layout: CommandCenterLayout) -> some View"))
+        let nextFunction = try XCTUnwrap(source.range(of: "private func searchAndFilters", range: brandHeaderStart.upperBound..<source.endIndex))
+        let brandHeaderSource = String(source[brandHeaderStart.lowerBound..<nextFunction.lowerBound])
 
-        XCTAssertTrue(source.contains("Text(\"v5.0\")"))
-        XCTAssertFalse(source.contains("Text(\"v4.0\")"))
+        XCTAssertTrue(brandHeaderSource.contains("Image(systemName: \"brain.head.profile\")"))
+        XCTAssertFalse(brandHeaderSource.contains("Text(\"NoteAI\")"))
+        XCTAssertFalse(brandHeaderSource.contains("Text(\"v5.0\")"))
+        XCTAssertFalse(brandHeaderSource.contains("VStack(alignment: .leading"))
+        XCTAssertTrue(brandHeaderSource.contains(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)"))
+        XCTAssertTrue(brandHeaderSource.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
     }
 
     func testNVIDIAModelCatalogIncludesOpus47BeforeOpus46() throws {
@@ -863,17 +870,17 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains(".frame(height: layout.sidebarBrandHeaderHeight"))
     }
 
-    func testCommandCenterSidebarBrandIsProminentAndLeftAligned() throws {
+    func testCommandCenterSidebarBrandCentersLogoOnly() throws {
         let source = try meetingLibrarySource()
         let brandHeaderStart = try XCTUnwrap(source.range(of: "private func brandHeader(layout: CommandCenterLayout) -> some View"))
         let nextFunction = try XCTUnwrap(source.range(of: "private func searchAndFilters", range: brandHeaderStart.upperBound..<source.endIndex))
         let brandHeaderSource = String(source[brandHeaderStart.lowerBound..<nextFunction.lowerBound])
 
-        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.sectionTitleFontSize + 8"))
-        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.sectionTitleFontSize + 3, weight: .semibold))"))
-        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.tinyFontSize + 1, weight: .medium))"))
-        XCTAssertTrue(brandHeaderSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
-        XCTAssertFalse(brandHeaderSource.contains(".frame(maxWidth: .infinity, alignment: .center)"))
+        XCTAssertTrue(brandHeaderSource.contains(".font(.system(size: layout.sectionTitleFontSize + 11, weight: .medium))"))
+        XCTAssertTrue(brandHeaderSource.contains(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)"))
+        XCTAssertFalse(brandHeaderSource.contains("Text(\"NoteAI\")"))
+        XCTAssertFalse(brandHeaderSource.contains("Text(\"v5.0\")"))
+        XCTAssertTrue(brandHeaderSource.contains("Image(systemName: \"magnifyingglass\")"))
         XCTAssertTrue(brandHeaderSource.contains(".frame(height: layout.sidebarBrandHeaderHeight, alignment: .center)"))
     }
 

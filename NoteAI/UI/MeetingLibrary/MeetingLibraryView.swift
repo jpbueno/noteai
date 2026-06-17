@@ -245,21 +245,16 @@ struct MeetingLibraryView: View {
                     showChatDrawer.toggle()
                 }
             } label: {
-                Label("AI copilot", systemImage: "message")
-                    .font(.system(size: layout.bodyFontSize, weight: .semibold))
-                    .foregroundStyle(showChatDrawer ? Theme.accent : .black)
-                    .frame(height: layout.controlHeight)
-                    .padding(.horizontal, round(12 * layout.scale))
-                    .background(
-                        showChatDrawer ? Theme.accent.opacity(0.12) : Theme.accent,
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(showChatDrawer ? Theme.accent.opacity(0.45) : Color.clear, lineWidth: 1)
-                    )
+                Image(systemName: "message")
+                    .font(.system(size: layout.smallFontSize, weight: .bold))
+                    .foregroundStyle(Theme.accent.opacity(showChatDrawer ? 1.0 : 0.95))
+                    .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
+                    .background(Color.clear, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.accent.opacity(0.42), lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("AI copilot"))
+            .help("AI copilot")
         }
         .padding(.leading, sidebarCollapsed ? round(10 * layout.scale) : round(18 * layout.scale))
         .padding(.trailing, round(18 * layout.scale))

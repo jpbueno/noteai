@@ -933,10 +933,30 @@ final class ArchitectureModuleTests: XCTestCase {
         let source = try meetingLibrarySource()
 
         let recordingControl = try XCTUnwrap(source.range(of: "topBarRecordingControl(layout: layout)"))
-        let aiCopilot = try XCTUnwrap(source.range(of: "Label(\"AI copilot\", systemImage: \"message\")"))
+        let aiCopilot = try XCTUnwrap(source.range(of: ".accessibilityLabel(Text(\"AI copilot\"))"))
 
         XCTAssertLessThan(recordingControl.lowerBound, aiCopilot.lowerBound)
         XCTAssertFalse(source.contains("recordingControls(layout: layout)"))
+    }
+
+    func testAICopilotTopBarControlMatchesRecordingIconButtonShape() throws {
+        let source = try meetingLibrarySource()
+        let commandBarStart = try XCTUnwrap(source.range(of: "private func commandBar(layout: CommandCenterLayout) -> some View"))
+        let commandBarEnd = try XCTUnwrap(source.range(of: "private func notionTabBar", range: commandBarStart.upperBound..<source.endIndex))
+        let commandBarSource = String(source[commandBarStart.lowerBound..<commandBarEnd.lowerBound])
+        let copilotStart = try XCTUnwrap(commandBarSource.range(of: "Image(systemName: \"message\")"))
+        let copilotEnd = try XCTUnwrap(commandBarSource.range(of: ".buttonStyle(.plain)", range: copilotStart.upperBound..<commandBarSource.endIndex))
+        let copilotSource = String(commandBarSource[copilotStart.lowerBound..<copilotEnd.lowerBound])
+
+        XCTAssertTrue(copilotSource.contains("Image(systemName: \"message\")"))
+        XCTAssertTrue(copilotSource.contains(".frame(width: round(34 * layout.scale), height: round(34 * layout.scale))"))
+        XCTAssertTrue(copilotSource.contains(".background(Color.clear, in: Capsule())"))
+        XCTAssertTrue(copilotSource.contains("Capsule().stroke(Theme.accent.opacity(0.42), lineWidth: 1)"))
+        XCTAssertTrue(commandBarSource.contains(".accessibilityLabel(Text(\"AI copilot\"))"))
+        XCTAssertFalse(commandBarSource.contains("Label(\"AI copilot\", systemImage: \"message\")"))
+        XCTAssertFalse(copilotSource.contains(".padding(.horizontal, round(12 * layout.scale))"))
+        XCTAssertFalse(copilotSource.contains("Theme.accent,"))
+        XCTAssertFalse(copilotSource.contains("RoundedRectangle(cornerRadius: 6)"))
     }
 
     func testCommandCenterDoesNotRenderRedundantTopLevelCreationButtons() throws {
@@ -945,7 +965,7 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertFalse(meetingSource.contains("Label(\"New note\""))
         XCTAssertFalse(homeSource.contains("Label(\"New Todo\""))
-        XCTAssertTrue(meetingSource.contains("Label(\"AI copilot\""))
+        XCTAssertTrue(meetingSource.contains(".accessibilityLabel(Text(\"AI copilot\"))"))
         XCTAssertTrue(meetingSource.contains("notesSidebarSection(selectionTarget: .notesList, layout: layout)"))
         XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
     }
@@ -972,7 +992,8 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertTrue(commandBarSource.contains("notionTabBar(layout: layout)"))
         XCTAssertTrue(commandBarSource.contains("topBarRecordingControl(layout: layout)"))
-        XCTAssertTrue(commandBarSource.contains("Label(\"AI copilot\", systemImage: \"message\")"))
+        XCTAssertTrue(commandBarSource.contains("Image(systemName: \"message\")"))
+        XCTAssertTrue(commandBarSource.contains(".accessibilityLabel(Text(\"AI copilot\"))"))
         XCTAssertTrue(source.contains("private func notionTabBar(layout: CommandCenterLayout) -> some View"))
         XCTAssertTrue(source.contains("private func notionTabTitle() -> String"))
         XCTAssertTrue(source.contains("private func notionTabIcon() -> String"))

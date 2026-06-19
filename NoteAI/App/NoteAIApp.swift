@@ -12,7 +12,7 @@ struct NoteAIApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(authManager: appDelegate.authManager)
                 .environmentObject(appDelegate.meetingManager)
         }
     }

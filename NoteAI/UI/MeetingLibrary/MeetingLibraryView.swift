@@ -1897,7 +1897,7 @@ struct MeetingLibraryView: View {
 
     private func openSettings(initialTab: SettingsView.SettingsTab = .account) {
         if let existing = settingsWindow, existing.isVisible {
-            existing.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab))
+            existing.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab, authManager: authManager))
             existing.makeKeyAndOrderFront(nil)
             return
         }
@@ -1908,7 +1908,7 @@ struct MeetingLibraryView: View {
             defer: false
         )
         window.title = "NoteAI Settings"
-        window.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab))
+        window.contentView = NSHostingView(rootView: SettingsView(initialTab: initialTab, authManager: authManager))
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)

@@ -361,6 +361,11 @@ enum TranscriptSpeakerLabels {
             break
         }
 
+        if lowercased.hasPrefix("\(remoteSpeakerID)-"),
+           let number = Int(lowercased.dropFirst("\(remoteSpeakerID)-".count)) {
+            return "Remote speaker \(number)"
+        }
+
         if lowercased.hasPrefix("speaker-"),
            let number = Int(lowercased.dropFirst("speaker-".count)) {
             return "Speaker \(number)"

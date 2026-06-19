@@ -136,6 +136,7 @@ final class MeetingManager: ObservableObject {
     private var coachLastAnalyzedSegmentCount = 0
     private var coachLastAnalyzedTime: Date?
     private var deferredSpeakerTagIDs = Set<String>()
+    private var speakerAttribution = TranscriptSpeakerAttribution()
     private var cancellables = Set<AnyCancellable>()
     private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
 
@@ -277,6 +278,7 @@ final class MeetingManager: ObservableObject {
         currentSpeakerSuggestions = meetingDetector.speakerSuggestionsForCurrentMeeting()
         pendingSpeakerTagID = nil
         deferredSpeakerTagIDs = []
+        speakerAttribution = TranscriptSpeakerAttribution()
         currentMeetingStart = Date()
         currentDetectedAppName = detectedAppName
         currentPreferredCaptureSource = preferredCaptureSource
@@ -1094,9 +1096,9 @@ final class MeetingManager: ObservableObject {
                     let segments = try await self.transcriptionEngine.transcribe(audioBuffer: buffer.buffer)
                     await MainActor.run {
                         self.currentTranscript.append(
-                            contentsOf: TranscriptSpeakerLabels.assignPlaceholders(
-                                to: segments,
-                                fallbackSpeakerID: buffer.source.fallbackSpeakerID
+                            contentsOf: self.speakerAttribution.attributedSegments(
+                                segments,
+                                source: buffer.source
                             )
                         )
                         self.refreshPendingSpeakerTag()

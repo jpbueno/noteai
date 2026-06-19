@@ -381,6 +381,21 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(suggestionSource.contains("Calendar attendee:"))
     }
 
+    func testLiveSpeakerPromptIsOutsideAutoScrollingTranscriptStream() throws {
+        let source = try transcriptViewSource()
+
+        XCTAssertTrue(source.contains("private var stableSpeakerPromptOverlay: some View"))
+        XCTAssertTrue(source.contains(".overlay(alignment: .top)"))
+
+        let scrollContentStart = try XCTUnwrap(source.range(of: "ScrollView {", options: [], range: try XCTUnwrap(source.range(of: "private var transcriptArea: some View")).lowerBound..<source.endIndex))
+        let autoScrollStart = try XCTUnwrap(source.range(of: ".onChange(of: meetingManager.currentTranscript.count)", options: [], range: scrollContentStart.lowerBound..<source.endIndex))
+        let transcriptAreaSource = String(source[scrollContentStart.lowerBound..<autoScrollStart.lowerBound])
+
+        XCTAssertFalse(transcriptAreaSource.contains("pendingSpeakerProfile"))
+        XCTAssertFalse(transcriptAreaSource.contains("LiveSpeakerTagPrompt("))
+        XCTAssertTrue(source.contains("proxy.scrollTo(last.id, anchor: .bottom)"))
+    }
+
     func testSpeakerLabelingResolvesStablePlaceholdersAndOverrides() {
         var meeting = Meeting(
             id: UUID(),

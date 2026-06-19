@@ -144,21 +144,6 @@ struct LiveTranscriptView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     let segments = meetingManager.currentTranscript
-                    if let profile = meetingManager.pendingSpeakerProfile {
-                        LiveSpeakerTagPrompt(
-                            profile: profile,
-                            defaultDisplayName: TranscriptSpeakerLabels.displayName(for: profile.speakerID, labels: [:]),
-                            speakerSuggestions: meetingManager.pendingSpeakerSuggestions,
-                            onSave: { updatedProfile in
-                                meetingManager.saveCurrentSpeakerProfile(updatedProfile)
-                            },
-                            onDefer: {
-                                meetingManager.deferCurrentSpeakerPrompt()
-                            }
-                        )
-                        .id(profile.speakerID)
-                        .padding(.bottom, 16)
-                    }
 
                     if segments.isEmpty {
                         VStack(spacing: 10) {
@@ -206,7 +191,33 @@ struct LiveTranscriptView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            stableSpeakerPromptOverlay
+        }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var stableSpeakerPromptOverlay: some View {
+        if let profile = meetingManager.pendingSpeakerProfile {
+            LiveSpeakerTagPrompt(
+                profile: profile,
+                defaultDisplayName: TranscriptSpeakerLabels.displayName(for: profile.speakerID, labels: [:]),
+                speakerSuggestions: meetingManager.pendingSpeakerSuggestions,
+                onSave: { updatedProfile in
+                    meetingManager.saveCurrentSpeakerProfile(updatedProfile)
+                },
+                onDefer: {
+                    meetingManager.deferCurrentSpeakerPrompt()
+                }
+            )
+            .id(profile.speakerID)
+            .frame(maxWidth: Theme.maxContentWidth, alignment: .leading)
+            .padding(.horizontal, Theme.pagePadding)
+            .padding(.top, 14)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .shadow(color: Color.black.opacity(0.30), radius: 12, x: 0, y: 8)
+        }
     }
 
     private var resizeHandle: some View {

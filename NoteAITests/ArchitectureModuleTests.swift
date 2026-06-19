@@ -2308,6 +2308,37 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(profile.photoURL, "https://example.com/avatar.png")
     }
 
+    func testLibraryListPresentationUsesShortNumericDatesForTasks() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let workDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18)))
+        let task = TaskItem(title: "Customer follow-up", status: .open, workDate: workDate)
+
+        XCTAssertEqual(LibraryListPresentation.shortDateString(for: workDate), "05/18/26")
+        XCTAssertEqual(LibraryListPresentation.taskMetadata(task), "Open • Work date 05/18/26")
+    }
+
+    func testLibraryListOrderingSortsMajorCollectionsByDate() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let older = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 1)))
+        let newer = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18)))
+
+        let olderMeeting = Meeting(id: UUID(), title: "Older", date: older, duration: 0, transcript: [], summary: MeetingSummary())
+        let newerMeeting = Meeting(id: UUID(), title: "Newer", date: newer, duration: 0, transcript: [], summary: MeetingSummary())
+        XCTAssertEqual(LibraryListOrdering.meetings([olderMeeting, newerMeeting]).map(\.id), [newerMeeting.id, olderMeeting.id])
+
+        let olderNote = Note(title: "Older", createdDate: older, modifiedDate: newer)
+        let newerNote = Note(title: "Newer", createdDate: newer, modifiedDate: older)
+        XCTAssertEqual(LibraryListOrdering.notes([olderNote, newerNote]).map(\.id), [newerNote.id, olderNote.id])
+
+        let olderReport = T5TReport(id: UUID(), title: "Older", createdDate: older, periodStart: older, periodEnd: older, meetingIDs: [], sections: .empty, status: .draft)
+        let newerReport = T5TReport(id: UUID(), title: "Newer", createdDate: newer, periodStart: newer, periodEnd: newer, meetingIDs: [], sections: .empty, status: .draft)
+        XCTAssertEqual(LibraryListOrdering.t5tReports([olderReport, newerReport]).map(\.id), [newerReport.id, olderReport.id])
+
+        let olderTask = TaskItem(title: "Older", workDate: older, createdDate: older, modifiedDate: older)
+        let newerTask = TaskItem(title: "Newer", workDate: newer, createdDate: newer, modifiedDate: newer)
+        XCTAssertEqual(LibraryListOrdering.tasks([olderTask, newerTask]).map(\.id), [newerTask.id, olderTask.id])
+    }
+
     func testReadAloudTextResolverPrefersSelectedText() {
         XCTAssertEqual(
             ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { " selected sentence " },

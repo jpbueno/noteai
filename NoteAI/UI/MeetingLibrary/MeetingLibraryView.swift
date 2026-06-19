@@ -79,14 +79,8 @@ struct MeetingLibraryView: View {
     private let sidebarDividerHitWidth: CGFloat = 8
     private let sidebarDefaultVisibleCount = 5
 
-    private static let dateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MM/dd/yy"
-        return f
-    }()
-
     private func datePrefix(_ date: Date) -> String {
-        Self.dateFmt.string(from: date)
+        LibraryListPresentation.shortDateString(for: date)
     }
 
     var body: some View {
@@ -487,13 +481,13 @@ struct MeetingLibraryView: View {
 
                     sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", selectionTarget: .t5tList, action: createNewT5T, layout: layout) {
                         sidebarLimitedContent(
-                            meetingManager.t5tReports,
+                            visibleT5TReports,
                             expansionID: sidebarExpansionID(for: .t5t),
                             layout: layout
                         ) { report in
                             t5tSidebarRow(report: report, layout: layout)
                         }
-                        if meetingManager.t5tReports.isEmpty {
+                        if visibleT5TReports.isEmpty {
                             emptyHint("No T5T reports yet", layout: layout)
                         }
                     }
@@ -1113,35 +1107,23 @@ struct MeetingLibraryView: View {
     }
 
     private var visibleTodos: [TodoItem] {
-        let todos = meetingManager.filteredTodos
-        let pending = todos.filter { !$0.completed }
-        let completed = todos.filter { $0.completed }
-        let sortedPending = pending.sorted { a, b in
-            switch (a.dueDate, b.dueDate) {
-            case (let x?, let y?): return x < y
-            case (_?, nil): return true
-            case (nil, _?): return false
-            case (nil, nil): return a.createdDate > b.createdDate
-            }
-        }
-        let sortedCompleted = completed.sorted { $0.modifiedDate > $1.modifiedDate }
-        return sortedPending + sortedCompleted
+        LibraryListOrdering.todos(meetingManager.filteredTodos)
     }
 
     private var visibleTasks: [TaskItem] {
-        let open = meetingManager.filteredTasks.filter { !$0.isCompleted }
-        let completed = meetingManager.filteredTasks.filter { $0.isCompleted }
-        let sortedOpen = open.sorted { $0.activityDate > $1.activityDate }
-        let sortedCompleted = completed.sorted { $0.activityDate > $1.activityDate }
-        return sortedOpen + sortedCompleted
+        LibraryListOrdering.tasks(meetingManager.filteredTasks)
     }
 
     private var visibleNotes: [Note] {
-        meetingManager.filteredNotes
+        LibraryListOrdering.notes(meetingManager.filteredNotes)
     }
 
     private var visibleMeetings: [Meeting] {
-        meetingManager.filteredMeetings
+        LibraryListOrdering.meetings(meetingManager.filteredMeetings)
+    }
+
+    private var visibleT5TReports: [T5TReport] {
+        LibraryListOrdering.t5tReports(meetingManager.t5tReports)
     }
 
     private func todoSidebarRow(todo: TodoItem, layout: CommandCenterLayout) -> some View {
@@ -1375,12 +1357,12 @@ struct MeetingLibraryView: View {
         collectionListPage(
             eyebrow: "T5T reports",
             title: "T5T Reports",
-            subtitle: "\(meetingManager.t5tReports.count) reports",
-            isEmpty: meetingManager.t5tReports.isEmpty,
+            subtitle: "\(visibleT5TReports.count) reports",
+            isEmpty: visibleT5TReports.isEmpty,
             emptyTitle: "No T5T reports yet",
             emptySubtitle: "Create a T5T report from the sidebar when you are ready to prepare an update."
         ) {
-            ForEach(meetingManager.t5tReports) { report in
+            ForEach(visibleT5TReports) { report in
                 collectionListRow(
                     icon: "list.bullet.rectangle",
                     tint: report.status == .draft ? Color.orange : Theme.textTertiary,
@@ -1603,9 +1585,7 @@ struct MeetingLibraryView: View {
     }
 
     private func taskStatusMetadata(_ task: TaskItem) -> String {
-        let status = task.isCompleted ? "Completed" : "Open"
-        guard let workDate = task.workDate else { return "\(status) • No work date" }
-        return "\(status) • Work date \(workDate.formatted(date: .abbreviated, time: .omitted))"
+        LibraryListPresentation.taskMetadata(task)
     }
 
     private var newT5TPlaceholder: some View {

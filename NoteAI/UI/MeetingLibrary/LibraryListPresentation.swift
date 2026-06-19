@@ -1,16 +1,8 @@
 import Foundation
 
 enum LibraryListPresentation {
-    private static let shortDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "MM/dd/yy"
-        return formatter
-    }()
-
     static func shortDateString(for date: Date) -> String {
-        shortDateFormatter.string(from: date)
+        TaskPresentation.shortDateString(for: date)
     }
 
     static func taskMetadata(_ task: TaskItem) -> String {
@@ -19,6 +11,12 @@ enum LibraryListPresentation {
             return "\(status) • No work date"
         }
         return "\(status) • Work date \(shortDateString(for: workDate))"
+    }
+
+    static func taskTitle(_ task: TaskItem) -> String {
+        let title = TaskPresentation.displayTitle(for: task)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Untitled task" : title
     }
 }
 

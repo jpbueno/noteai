@@ -74,6 +74,7 @@
 		AD034773ECC4C8ED2E8AA5DD /* GoogleAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518E764641EDFFB56E3244AA /* GoogleAuthManager.swift */; };
 		AED81C5FF95EC61BD0A0827C /* TodoSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F856A1DCE2CF5397D035A99C /* TodoSelectorView.swift */; };
 		AF254D84733B467FD054D6E2 /* GoogleAccountSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCBE4DD8884F6D9F3630975 /* GoogleAccountSessionState.swift */; };
+		AF9CE950FB802AF7E0224D47 /* TaskPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 366351FB8FDA7C3194CAE13B /* TaskPresentation.swift */; };
 		B4DB2C5C83CF4055DE419AE5 /* SummaryCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FE40A0837F14333E364D84 /* SummaryCardView.swift */; };
 		B4E3A03129D8D5A1D54D614A /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E706668BD58AC6D3CAF974 /* ImageStore.swift */; };
 		B738527B9C1A3487DC732351 /* LibraryListPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4157DE076D220EFF9542CC91 /* LibraryListPresentation.swift */; };
@@ -132,6 +133,7 @@
 		2F0550638EC3FD7315D671CE /* MeetingSpeakerSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingSpeakerSuggestion.swift; sourceTree = "<group>"; };
 		3041DECECD83971C5CC8E2F3 /* AudioBufferRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioBufferRing.swift; sourceTree = "<group>"; };
 		31EE88F8B897F5B1CE3EF8FF /* TTSPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSPlayerView.swift; sourceTree = "<group>"; };
+		366351FB8FDA7C3194CAE13B /* TaskPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPresentation.swift; sourceTree = "<group>"; };
 		378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
 		3B071D338F9B3BC984C0225C /* NotificationDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelivery.swift; sourceTree = "<group>"; };
 		3DDE806C60BACC9C3BD6CCEA /* ScreenCaptureProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureProvider.swift; sourceTree = "<group>"; };
@@ -554,6 +556,7 @@
 				5F306AEB27BF4A3F39466E3B /* Meeting.swift */,
 				1EF718225D5C885FDB361E0D /* Note.swift */,
 				DB3766E5A948FC25F5D54550 /* T5TReport.swift */,
+				366351FB8FDA7C3194CAE13B /* TaskPresentation.swift */,
 				414C68E50DD45252FFC181B5 /* TodoItem.swift */,
 			);
 			path = Models;
@@ -728,6 +731,7 @@
 				D646E51F78654742FF540695 /* T5TReport.swift in Sources */,
 				DA83BE3F4E3F09A4EFA3FCBE /* TTSPlayerView.swift in Sources */,
 				988236332878808633E8FDAE /* TaskDetailView.swift in Sources */,
+				AF9CE950FB802AF7E0224D47 /* TaskPresentation.swift in Sources */,
 				92AB1256344F63A37592D77B /* TeamsCallDetectorV5.swift in Sources */,
 				145FEEAA673D2B808FC2913D /* TeamsCallStateMachine.swift in Sources */,
 				02EEF1855FD1EAE24CFFC331 /* TeamsCallUIEvidenceProvider.swift in Sources */,

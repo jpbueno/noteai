@@ -1187,7 +1187,7 @@ struct MeetingLibraryView: View {
             } label: {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(task.title.isEmpty ? "Untitled task" : task.title)
+                        Text(LibraryListPresentation.taskTitle(task))
                             .font(.system(size: layout.bodyFontSize))
                             .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
                             .strikethrough(task.isCompleted)
@@ -1343,7 +1343,7 @@ struct MeetingLibraryView: View {
                 collectionListRow(
                     icon: task.isCompleted ? "checkmark.circle.fill" : "circle",
                     tint: task.isCompleted ? Theme.success : Theme.textTertiary,
-                    title: task.title.isEmpty ? "Untitled task" : task.title,
+                    title: LibraryListPresentation.taskTitle(task),
                     metadata: taskStatusMetadata(task),
                     detail: task.description.isEmpty ? nil : task.description
                 ) {

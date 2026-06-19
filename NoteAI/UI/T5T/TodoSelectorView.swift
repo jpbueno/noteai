@@ -87,7 +87,7 @@ struct TaskSelectorView: View {
                     .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
                     .padding(.top, 3)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(task.title.isEmpty ? "Untitled task" : task.title)
+                    Text(LibraryListPresentation.taskTitle(task))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .strikethrough(task.isCompleted)
@@ -99,7 +99,7 @@ struct TaskSelectorView: View {
                             .lineLimit(2)
                     }
                     HStack(spacing: 12) {
-                        Label(task.activityDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                        Label(LibraryListPresentation.shortDateString(for: task.activityDate), systemImage: "calendar")
                             .labelStyle(.titleAndIcon)
                         Label(task.isCompleted ? "Completed" : "Open", systemImage: "text.alignleft")
                             .labelStyle(.titleAndIcon)

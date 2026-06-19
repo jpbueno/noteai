@@ -69,6 +69,16 @@ Meeting intelligence platform — captures, transcribes, and summarizes meetings
 
 Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
 
+## Storage Source of Truth
+
+Use `docs/storage-source-of-truth.md` as the canonical storage rule before adding, importing, repairing, or migrating NoteAI data.
+
+- The macOS app currently uses local GRDB-backed SQLite through `NoteAI/Storage/MeetingStore.swift`. This is the correct production storage adapter for the native app until a deliberate profile-backed cloud sync migration replaces it.
+- The web/cloud app uses Turso through `web/src/lib/server-db.ts` and the API/repository layer. Turso is hosted SQLite/libSQL, so "SQLite" can be technically accurate but must not be used ambiguously in task instructions.
+- Codex must not manually write user data directly into `.sqlite` files, Turso, or ad hoc scripts unless the user explicitly requests a data repair or migration and the work includes backup, verification, and Linear documentation.
+- App and assistant features must write through the approved application interfaces: macOS through `MeetingStore`/repository abstractions, web through `/api/data/*`, `/api/settings`, and `web/src/lib/db.ts`.
+- Do not fake profile-backed persistence by writing macOS data into web/Turso tables or web data into the macOS local database. Cross-device/profile storage requires a separate sync design.
+
 ---
 
 ## macOS App (`NoteAI/`)

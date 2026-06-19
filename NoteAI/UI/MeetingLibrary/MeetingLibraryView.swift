@@ -381,15 +381,15 @@ struct MeetingLibraryView: View {
         case .home:
             return "house"
         case .t5tList, .t5tReport, .newT5T:
-            return "list.bullet.rectangle"
+            return LibraryListPresentation.SidebarItemKind.t5tReport.icon
         case .notesList, .note:
-            return "doc.text"
+            return LibraryListPresentation.SidebarItemKind.note.icon
         case .tasksList, .task:
-            return "checklist"
+            return LibraryListPresentation.SidebarItemKind.task.icon
         case .todosList, .todo:
-            return "checkmark.square"
+            return LibraryListPresentation.SidebarItemKind.todo.icon
         case .meetingsList, .meeting:
-            return "waveform"
+            return LibraryListPresentation.SidebarItemKind.meeting.icon
         }
     }
 
@@ -402,17 +402,17 @@ struct MeetingLibraryView: View {
 
         switch tab {
         case .home:
-            return Theme.textTertiary
+            return LibraryListPresentation.SidebarItemKind.home.tint
         case .t5tList, .t5tReport, .newT5T:
-            return Theme.notionIconAccent
+            return LibraryListPresentation.SidebarItemKind.t5tReport.tint
         case .notesList, .note:
-            return Theme.textTertiary
+            return LibraryListPresentation.SidebarItemKind.note.tint
         case .tasksList, .task:
-            return Theme.success
+            return LibraryListPresentation.SidebarItemKind.task.tint
         case .todosList, .todo:
-            return Theme.accent
+            return LibraryListPresentation.SidebarItemKind.todo.tint
         case .meetingsList, .meeting:
-            return Theme.notionIconAccent
+            return LibraryListPresentation.SidebarItemKind.meeting.tint
         }
     }
 
@@ -479,7 +479,14 @@ struct MeetingLibraryView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     homeSidebarRow(layout: layout)
 
-                    sidebarSection(.t5t, title: "T5T Reports", icon: "list.bullet.rectangle", selectionTarget: .t5tList, action: createNewT5T, layout: layout) {
+                    sidebarSection(
+                        .t5t,
+                        title: "T5T Reports",
+                        kind: .t5tReport,
+                        selectionTarget: .t5tList,
+                        action: createNewT5T,
+                        layout: layout
+                    ) {
                         sidebarLimitedContent(
                             visibleT5TReports,
                             expansionID: sidebarExpansionID(for: .t5t),
@@ -516,7 +523,14 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.tasks, title: "Tasks", icon: "checklist", selectionTarget: .tasksList, action: createNewTask, layout: layout) {
+                    sidebarSection(
+                        .tasks,
+                        title: "Tasks",
+                        kind: .task,
+                        selectionTarget: .tasksList,
+                        action: createNewTask,
+                        layout: layout
+                    ) {
                         sidebarLimitedContent(
                             visibleTasks,
                             expansionID: sidebarExpansionID(for: .tasks),
@@ -529,7 +543,14 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.todos, title: "Todos", icon: "checkmark.square", selectionTarget: .todosList, action: createNewTodo, layout: layout) {
+                    sidebarSection(
+                        .todos,
+                        title: "Todos",
+                        kind: .todo,
+                        selectionTarget: .todosList,
+                        action: createNewTodo,
+                        layout: layout
+                    ) {
                         sidebarLimitedContent(
                             visibleTodos,
                             expansionID: sidebarExpansionID(for: .todos),
@@ -542,7 +563,14 @@ struct MeetingLibraryView: View {
                         }
                     }
 
-                    sidebarSection(.meetings, title: "Meetings", icon: "waveform", selectionTarget: .meetingsList, action: nil, layout: layout) {
+                    sidebarSection(
+                        .meetings,
+                        title: "Meetings",
+                        kind: .meeting,
+                        selectionTarget: .meetingsList,
+                        action: nil,
+                        layout: layout
+                    ) {
                         sidebarLimitedContent(
                             visibleMeetings,
                             expansionID: sidebarExpansionID(for: .meetings),
@@ -752,7 +780,7 @@ struct MeetingLibraryView: View {
     private func sidebarSection<Content: View>(
         _ id: SidebarSectionID,
         title: String,
-        icon: String,
+        kind: LibraryListPresentation.SidebarItemKind,
         selectionTarget: SidebarSelection,
         action: (() -> Void)?,
         layout: CommandCenterLayout,
@@ -773,7 +801,7 @@ struct MeetingLibraryView: View {
 
                 sidebarSectionHeaderButton(
                     title: title,
-                    icon: icon,
+                    kind: kind,
                     selectionTarget: selectionTarget,
                     layout: layout
                 )
@@ -822,7 +850,7 @@ struct MeetingLibraryView: View {
 
                 sidebarSectionHeaderButton(
                     title: "Notes",
-                    icon: "note.text",
+                    kind: .note,
                     selectionTarget: selectionTarget,
                     layout: layout
                 )
@@ -864,7 +892,7 @@ struct MeetingLibraryView: View {
 
     private func sidebarSectionHeaderButton(
         title: String,
-        icon: String,
+        kind: LibraryListPresentation.SidebarItemKind,
         selectionTarget: SidebarSelection,
         layout: CommandCenterLayout
     ) -> some View {
@@ -874,13 +902,14 @@ struct MeetingLibraryView: View {
             selection = selectionTarget
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: icon)
+                Image(systemName: kind.icon)
                     .font(.system(size: layout.smallFontSize, weight: .medium))
+                    .foregroundStyle(isSelected ? Theme.accent : kind.tint)
                 Text(title.uppercased())
                     .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
+                    .foregroundStyle(isSelected ? Theme.accent : Theme.sectionHeader)
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? Theme.accent : Theme.sectionHeader)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -960,9 +989,11 @@ struct MeetingLibraryView: View {
             selection = .t5tReport(report.id)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(report.status == .draft ? Color.orange : Theme.textTertiary)
+                sidebarItemIcon(
+                    LibraryListPresentation.SidebarItemKind.t5tReport,
+                    tint: report.status == .draft ? LibraryListPresentation.SidebarItemKind.t5tReport.tint : Theme.textTertiary,
+                    layout: layout
+                )
                 Text("\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)")
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
@@ -994,9 +1025,11 @@ struct MeetingLibraryView: View {
             selection = .meeting(meeting.id)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(Theme.textTertiary)
+                sidebarItemIcon(
+                    LibraryListPresentation.SidebarItemKind.meeting,
+                    tint: meeting.summary.wasSummarized ? LibraryListPresentation.SidebarItemKind.meeting.tint : Theme.warning,
+                    layout: layout
+                )
                 Text("\(datePrefix(meeting.date)) \(meeting.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams"))")
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
@@ -1035,9 +1068,7 @@ struct MeetingLibraryView: View {
             selection = .note(note.id)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "note.text")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(Theme.textTertiary)
+                sidebarItemIcon(LibraryListPresentation.SidebarItemKind.note, layout: layout)
                 Text("\(datePrefix(note.createdDate)) \(note.title)")
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textPrimary)
@@ -1133,7 +1164,7 @@ struct MeetingLibraryView: View {
             HStack(spacing: 8) {
                 Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
+                    .foregroundStyle(todo.completed ? Theme.success : LibraryListPresentation.SidebarItemKind.todo.tint)
                 Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
                     .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
@@ -1176,11 +1207,15 @@ struct MeetingLibraryView: View {
             } label: {
                 Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
+                    .foregroundStyle(task.isCompleted ? Theme.success : LibraryListPresentation.SidebarItemKind.task.tint)
                     .padding(.top, 1)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(task.isCompleted ? "Mark task open" : "Mark task complete")
+            .help(task.isCompleted ? "Mark task open" : "Mark task complete")
+
+            sidebarItemIcon(LibraryListPresentation.SidebarItemKind.task, layout: layout)
+                .padding(.top, 1)
 
             Button {
                 selection = .task(task.id)
@@ -1239,6 +1274,17 @@ struct MeetingLibraryView: View {
         case .upcoming: return Color(hex: "60A5FA")
         case .noDueDate, .completed: return Theme.textTertiary
         }
+    }
+
+    private func sidebarItemIcon(
+        _ kind: LibraryListPresentation.SidebarItemKind,
+        tint: Color? = nil,
+        layout: CommandCenterLayout
+    ) -> some View {
+        Image(systemName: kind.icon)
+            .font(.system(size: layout.bodyFontSize, weight: .medium))
+            .foregroundStyle(tint ?? kind.tint)
+            .frame(width: round(16 * layout.scale), alignment: .center)
     }
 
     private func sidebarAction(icon: String, label: String, layout: CommandCenterLayout, action: @escaping () -> Void) -> some View {
@@ -1341,8 +1387,8 @@ struct MeetingLibraryView: View {
         ) {
             ForEach(visibleTasks) { task in
                 collectionListRow(
-                    icon: task.isCompleted ? "checkmark.circle.fill" : "circle",
-                    tint: task.isCompleted ? Theme.success : Theme.textTertiary,
+                    icon: task.isCompleted ? "checkmark.circle.fill" : LibraryListPresentation.SidebarItemKind.task.icon,
+                    tint: task.isCompleted ? Theme.success : LibraryListPresentation.SidebarItemKind.task.tint,
                     title: LibraryListPresentation.taskTitle(task),
                     metadata: taskStatusMetadata(task),
                     detail: task.description.isEmpty ? nil : task.description
@@ -1364,8 +1410,8 @@ struct MeetingLibraryView: View {
         ) {
             ForEach(visibleT5TReports) { report in
                 collectionListRow(
-                    icon: "list.bullet.rectangle",
-                    tint: report.status == .draft ? Color.orange : Theme.textTertiary,
+                    icon: LibraryListPresentation.SidebarItemKind.t5tReport.icon,
+                    tint: report.status == .draft ? LibraryListPresentation.SidebarItemKind.t5tReport.tint : Theme.textTertiary,
                     title: "\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)",
                     metadata: "\(report.status.rawValue.capitalized) • \(report.meetingIDs.count) meetings",
                     detail: report.title
@@ -1399,8 +1445,8 @@ struct MeetingLibraryView: View {
                 }
                 ForEach(group.notes) { note in
                     collectionListRow(
-                        icon: "note.text",
-                        tint: Theme.textTertiary,
+                        icon: LibraryListPresentation.SidebarItemKind.note.icon,
+                        tint: LibraryListPresentation.SidebarItemKind.note.tint,
                         title: "\(datePrefix(note.createdDate)) \(note.title)",
                         metadata: "Modified \(note.formattedModifiedDate)",
                         detail: notePreview(note)
@@ -1425,8 +1471,8 @@ struct MeetingLibraryView: View {
         ) {
             ForEach(visibleTodos) { todo in
                 collectionListRow(
-                    icon: todo.completed ? "checkmark.circle.fill" : "circle",
-                    tint: todo.completed ? Theme.success : dueLabelColor(for: todo),
+                    icon: todo.completed ? "checkmark.circle.fill" : LibraryListPresentation.SidebarItemKind.todo.icon,
+                    tint: todo.completed ? Theme.success : LibraryListPresentation.SidebarItemKind.todo.tint,
                     title: todo.title.isEmpty ? "Untitled todo" : todo.title,
                     metadata: todo.completed ? "Completed" : (todo.dueDateLabel ?? "No due date"),
                     detail: todo.description.isEmpty ? nil : todo.description
@@ -1450,8 +1496,8 @@ struct MeetingLibraryView: View {
         ) {
             ForEach(visibleMeetings) { meeting in
                 collectionListRow(
-                    icon: "doc.text",
-                    tint: meeting.summary.wasSummarized ? Theme.textTertiary : Theme.warning,
+                    icon: LibraryListPresentation.SidebarItemKind.meeting.icon,
+                    tint: meeting.summary.wasSummarized ? LibraryListPresentation.SidebarItemKind.meeting.tint : Theme.warning,
                     title: "\(datePrefix(meeting.date)) \(meeting.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams"))",
                     metadata: "\(meeting.date.formatted(date: .abbreviated, time: .shortened)) • \(meeting.formattedDuration)",
                     detail: meeting.summary.wasSummarized ? nil : "Summary needs review"

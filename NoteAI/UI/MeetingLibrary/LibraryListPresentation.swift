@@ -1,6 +1,38 @@
 import Foundation
+import SwiftUI
 
 enum LibraryListPresentation {
+    enum SidebarItemKind {
+        case home
+        case t5tReport
+        case note
+        case task
+        case todo
+        case meeting
+
+        var icon: String {
+            switch self {
+            case .home: return "rectangle.grid.2x2"
+            case .t5tReport: return "list.bullet.rectangle"
+            case .note: return "doc.text"
+            case .task: return "checklist"
+            case .todo: return "checkmark.square"
+            case .meeting: return "waveform"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .home: return Theme.textTertiary
+            case .t5tReport: return Color(hex: "F59E0B")
+            case .note: return Theme.textTertiary
+            case .task: return Color(hex: "60A5FA")
+            case .todo: return Color(hex: "A78BFA")
+            case .meeting: return Theme.notionIconAccent
+            }
+        }
+    }
+
     static func shortDateString(for date: Date) -> String {
         TaskPresentation.shortDateString(for: date)
     }

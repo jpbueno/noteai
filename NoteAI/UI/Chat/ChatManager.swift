@@ -588,10 +588,7 @@ enum AssistantOutlookCandidateFormatter {
     }
 
     private static func displayDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MM/dd/yyyy"
-        return formatter.string(from: date)
+        TaskPresentation.shortDateString(for: date)
     }
 }
 
@@ -662,9 +659,10 @@ enum AssistantTaskListFormatter {
     }
 
     private static func formatGroupedTask(_ task: TaskItem, includeSource: Bool) -> String {
-        let title = task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let presentedTitle = TaskPresentation.displayTitle(for: task)
+        let title = presentedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Untitled task"
-            : task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            : presentedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = "  - " + title
 
         var detailLines = task.description
@@ -799,17 +797,11 @@ enum AssistantTaskListFormatter {
     }
 
     private static func displayDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter.string(from: date)
+        TaskPresentation.shortDateString(for: date)
     }
 
     private static func slashDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MM/dd/yyyy"
-        return formatter.string(from: date)
+        TaskPresentation.shortDateString(for: date)
     }
 
     private static func endOfDay(for date: Date) -> Date {

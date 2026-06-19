@@ -888,9 +888,23 @@ final class MeetingManager: ObservableObject {
 
     private func loadTasks() {
         do {
-            tasks = try meetingStore.fetchAllTasks()
+            tasks = normalizeLoadedTasks(try meetingStore.fetchAllTasks())
         } catch {
             print("Failed to load tasks: \(error)")
+        }
+    }
+
+    private func normalizeLoadedTasks(_ loadedTasks: [TaskItem]) -> [TaskItem] {
+        loadedTasks.map { task in
+            var normalized = task
+            if TaskPresentation.normalizeStoredTitleDatePrefix(&normalized) {
+                do {
+                    try meetingStore.saveTask(normalized)
+                } catch {
+                    print("Failed to normalize task title date prefix: \(error)")
+                }
+            }
+            return normalized
         }
     }
 

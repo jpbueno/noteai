@@ -1742,7 +1742,7 @@ final class ArchitectureModuleTests: XCTestCase {
         let filters = AssistantTaskListFormatter.Filters(after: afterDate, status: .all)
         let output = AssistantTaskListFormatter.format(tasks: [included, excluded], filters: filters)
 
-        XCTAssertTrue(output.contains("Tasks after Mar 13, 2026"))
+        XCTAssertTrue(output.contains("Tasks after 03/13/26"))
         XCTAssertTrue(output.contains("- Drive NSScale routing alignment"))
         XCTAssertTrue(output.contains("  Summarize the NATS decision and gateway/session-affinity implications for the architecture doc."))
         XCTAssertFalse(output.contains("Old reminder"))
@@ -1776,10 +1776,10 @@ final class ArchitectureModuleTests: XCTestCase {
         )
 
         XCTAssertTrue(output.contains("""
-        - 03/13/2026
+        - 03/13/26
           - Created Dynamo KBYG Guide
             Prepared the full product guide for GTC 2026 workshop follow-up.
-        - 03/14/2026
+        - 03/14/26
           - Reviewed NSScale routing plan
             Captured gateway and session-affinity alignment for reuse.
         """))
@@ -1874,10 +1874,10 @@ final class ArchitectureModuleTests: XCTestCase {
         )
 
         XCTAssertTrue(output.contains("""
-        - 04/09/2026
+        - 04/09/26
           - Send routing summary
             Alex asked for the latest gateway recommendation.
-            Source: Outlook email from alex@example.com, "Follow up on NSScale routing" (04/08/2026)
+            Source: Outlook email from alex@example.com, "Follow up on NSScale routing" (04/08/26)
             Link: https://outlook.office.com/mail/thread-123
         """))
     }
@@ -2315,6 +2315,29 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertEqual(LibraryListPresentation.shortDateString(for: workDate), "05/18/26")
         XCTAssertEqual(LibraryListPresentation.taskMetadata(task), "Open • Work date 05/18/26")
+    }
+
+    func testTaskPresentationNormalizesExistingLongDateTitlePrefixes() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let workDate = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 16)))
+        let task = TaskItem(
+            title: "June 16, 2026 - Track Nscale-Specific Dynamo Recipe and YAML Support",
+            workDate: workDate,
+            createdDate: workDate,
+            modifiedDate: workDate
+        )
+
+        XCTAssertEqual(
+            TaskPresentation.displayTitle(for: task),
+            "06/16/26 - Track Nscale-Specific Dynamo Recipe and YAML Support"
+        )
+
+        var persisted = task
+        XCTAssertTrue(TaskPresentation.normalizeStoredTitleDatePrefix(&persisted))
+        XCTAssertEqual(
+            persisted.title,
+            "06/16/26 - Track Nscale-Specific Dynamo Recipe and YAML Support"
+        )
     }
 
     func testLibraryListOrderingSortsMajorCollectionsByDate() throws {

@@ -1097,7 +1097,8 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(homeSource.contains("Label(\"New Todo\""))
         XCTAssertTrue(meetingSource.contains(".accessibilityLabel(Text(\"AI copilot\"))"))
         XCTAssertTrue(meetingSource.contains("notesSidebarSection(selectionTarget: .notesList, layout: layout)"))
-        XCTAssertTrue(meetingSource.contains("sidebarSection(.todos"))
+        XCTAssertTrue(meetingSource.contains("title: \"Todos\""))
+        XCTAssertTrue(meetingSource.contains("kind: .todo"))
     }
 
     func testNotionInspiredThemeTokensUseCodexNeutralPalette() throws {
@@ -1292,7 +1293,10 @@ final class ArchitectureModuleTests: XCTestCase {
         let source = try meetingLibrarySource()
 
         XCTAssertTrue(source.contains("case task(UUID)"))
-        XCTAssertTrue(source.contains("sidebarSection(.tasks, title: \"Tasks\", icon: \"checklist\", selectionTarget: .tasksList, action: createNewTask"))
+        XCTAssertTrue(source.contains("title: \"Tasks\""))
+        XCTAssertTrue(source.contains("kind: .task"))
+        XCTAssertTrue(source.contains("selectionTarget: .tasksList"))
+        XCTAssertTrue(source.contains("action: createNewTask"))
         XCTAssertTrue(source.contains("visibleTasks"))
         XCTAssertTrue(source.contains("taskSidebarRow(task: task"))
         XCTAssertTrue(source.contains("emptyHint(\"No tasks yet\""))
@@ -2315,6 +2319,27 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertEqual(LibraryListPresentation.shortDateString(for: workDate), "05/18/26")
         XCTAssertEqual(LibraryListPresentation.taskMetadata(task), "Open • Work date 05/18/26")
+    }
+
+    func testSidebarItemPresentationStandardizesListIcons() throws {
+        XCTAssertEqual(LibraryListPresentation.SidebarItemKind.t5tReport.icon, "list.bullet.rectangle")
+        XCTAssertEqual(LibraryListPresentation.SidebarItemKind.note.icon, "doc.text")
+        XCTAssertEqual(LibraryListPresentation.SidebarItemKind.meeting.icon, "waveform")
+        XCTAssertEqual(LibraryListPresentation.SidebarItemKind.task.icon, "checklist")
+        XCTAssertEqual(LibraryListPresentation.SidebarItemKind.todo.icon, "checkmark.square")
+
+        let source = try meetingLibrarySource()
+        let noteRowStart = try XCTUnwrap(source.range(of: "private func noteSidebarRow(note: Note, layout: CommandCenterLayout) -> some View"))
+        let taskSectionStart = try XCTUnwrap(source.range(of: "// MARK: - Home + Todos sidebar", range: noteRowStart.upperBound..<source.endIndex))
+        let noteRowSource = String(source[noteRowStart.lowerBound..<taskSectionStart.lowerBound])
+        let meetingRowStart = try XCTUnwrap(source.range(of: "private func sidebarRow(meeting: Meeting, layout: CommandCenterLayout) -> some View"))
+        let noteRowFunctionStart = try XCTUnwrap(source.range(of: "private func noteSidebarRow", range: meetingRowStart.upperBound..<source.endIndex))
+        let meetingRowSource = String(source[meetingRowStart.lowerBound..<noteRowFunctionStart.lowerBound])
+
+        XCTAssertTrue(noteRowSource.contains("sidebarItemIcon(LibraryListPresentation.SidebarItemKind.note"))
+        XCTAssertFalse(noteRowSource.contains("Image(systemName: \"note.text\")"))
+        XCTAssertTrue(meetingRowSource.contains("LibraryListPresentation.SidebarItemKind.meeting"))
+        XCTAssertFalse(meetingRowSource.contains("Image(systemName: \"doc.text\")"))
     }
 
     func testTaskPresentationNormalizesExistingLongDateTitlePrefixes() throws {

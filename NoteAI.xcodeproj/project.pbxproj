@@ -76,6 +76,7 @@
 		AF254D84733B467FD054D6E2 /* GoogleAccountSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCBE4DD8884F6D9F3630975 /* GoogleAccountSessionState.swift */; };
 		B4DB2C5C83CF4055DE419AE5 /* SummaryCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FE40A0837F14333E364D84 /* SummaryCardView.swift */; };
 		B4E3A03129D8D5A1D54D614A /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E706668BD58AC6D3CAF974 /* ImageStore.swift */; };
+		B738527B9C1A3487DC732351 /* LibraryListPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4157DE076D220EFF9542CC91 /* LibraryListPresentation.swift */; };
 		B7E552A87D269E28FA58426A /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1D7FC3B890759251199799E /* WhisperKit */; };
 		BD1FAFAC2C9CAE41803E027E /* RecordingDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFB36C6105D57E388C20B6A5 /* RecordingDiagnosticsTests.swift */; };
 		BDD336675FAC6E8862B6876E /* NotePageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C127BA10A1B02F8EBAC90127 /* NotePageView.swift */; };
@@ -136,6 +137,7 @@
 		3DDE806C60BACC9C3BD6CCEA /* ScreenCaptureProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureProvider.swift; sourceTree = "<group>"; };
 		4105A44A031B9FB0F12D52B9 /* RichMarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichMarkdownEditor.swift; sourceTree = "<group>"; };
 		414C68E50DD45252FFC181B5 /* TodoItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoItem.swift; sourceTree = "<group>"; };
+		4157DE076D220EFF9542CC91 /* LibraryListPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryListPresentation.swift; sourceTree = "<group>"; };
 		48535DDFA54A76FA652F983A /* T5TComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T5TComposerView.swift; sourceTree = "<group>"; };
 		4D26B413A6C06CBF3B0B76DD /* OpenRouterClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterClient.swift; sourceTree = "<group>"; };
 		518E764641EDFFB56E3244AA /* GoogleAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAuthManager.swift; sourceTree = "<group>"; };
@@ -383,6 +385,7 @@
 		68C81FA865E5AB743EA4489F /* MeetingLibrary */ = {
 			isa = PBXGroup;
 			children = (
+				4157DE076D220EFF9542CC91 /* LibraryListPresentation.swift */,
 				D008C9E2FD5368FA9F759257 /* MeetingDetailView.swift */,
 				C7C60554C3878865ED798844 /* MeetingLibraryView.swift */,
 				146E8758C5F2E3C7211F4B39 /* MeetingNamePromptView.swift */,
@@ -675,6 +678,7 @@
 				B4E3A03129D8D5A1D54D614A /* ImageStore.swift in Sources */,
 				89E2DE067ACFFFF58BA8FAEE /* KeychainHelper.swift in Sources */,
 				4AD05B601DA2F84A5374AEF7 /* LLMProvider.swift in Sources */,
+				B738527B9C1A3487DC732351 /* LibraryListPresentation.swift in Sources */,
 				269F9915CADFF73E457E547D /* LibraryOperations.swift in Sources */,
 				40F2A662C57D5CCF4288F6B4 /* LocalCaptureHelperPairingStore.swift in Sources */,
 				DDFE1974EF5E36378A3AF82E /* LocalCaptureHelperProtocol.swift in Sources */,

@@ -57,6 +57,7 @@
 		76327EC391A961A4B59879EC /* AITasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2023A4E6AFEC84FCCCDC5CD /* AITasks.swift */; };
 		7939BD467F4A555D2235634F /* OnboardingChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB43B513D3EFF5BBB74EC81 /* OnboardingChecklistTests.swift */; };
 		7C2DAF27F62505667186F308 /* ArchitectureModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DDDBA2624B1F99D3B667A8 /* ArchitectureModuleTests.swift */; };
+		858BA30B7B1A7B09C2C18C1B /* SpeakerAttribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01DA7D0009A3B4FB709BF431 /* SpeakerAttribution.swift */; };
 		863695A9DCB6967263F76B2B /* MarkdownRendererView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B9F127317A56E7B70C7DB7 /* MarkdownRendererView.swift */; };
 		87A4F0BCAB9B8E2EF3349857 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DD6F573EA9F49038593E89 /* AppDelegate.swift */; };
 		8845DCE36986A1B8D1CA017C /* SummarizationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5EF390F77D3249B27E44552 /* SummarizationEngine.swift */; };
@@ -109,6 +110,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		01DA7D0009A3B4FB709BF431 /* SpeakerAttribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerAttribution.swift; sourceTree = "<group>"; };
 		070122A1C9307EDF3919B893 /* MeetingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStoreTests.swift; sourceTree = "<group>"; };
 		08CA9D22EA6B79EBB1EE955B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		13BB9D0A8FBE9F0EE926F318 /* T5TPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = T5TPrompt.swift; sourceTree = "<group>"; };
@@ -448,6 +450,7 @@
 		AEDEFCFAC3E1234C104DEE96 /* Transcription */ = {
 			isa = PBXGroup;
 			children = (
+				01DA7D0009A3B4FB709BF431 /* SpeakerAttribution.swift */,
 				DFED471090686D9A28B620DA /* TranscriptionEngine.swift */,
 			);
 			path = Transcription;
@@ -706,6 +709,7 @@
 				63CF6F0386232CEBFB2F2051 /* RichMarkdownEditor.swift in Sources */,
 				280F57C9FC93A0ED35F43067 /* ScreenCaptureProvider.swift in Sources */,
 				53E5DD537F2DA6057FB3E3D7 /* SettingsView.swift in Sources */,
+				858BA30B7B1A7B09C2C18C1B /* SpeakerAttribution.swift in Sources */,
 				8845DCE36986A1B8D1CA017C /* SummarizationEngine.swift in Sources */,
 				B4DB2C5C83CF4055DE419AE5 /* SummaryCardView.swift in Sources */,
 				0C69E0BD10BFBECFEEA97435 /* T5TComposerView.swift in Sources */,

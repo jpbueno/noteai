@@ -457,12 +457,93 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-remote", labels: [:]), "Remote audio")
     }
 
+    func testSpeakerAttributionAssignsStablePerRecordingRemoteSpeakerIDs() {
+        var attribution = TranscriptSpeakerAttribution()
+
+        let segments = [
+            TranscriptSegment(id: 1, text: "Local voice.", startTime: 0, speaker: nil, confidence: 0.9),
+            TranscriptSegment(id: 2, text: "First remote voice.", startTime: 4, speaker: nil, confidence: 0.9),
+            TranscriptSegment(id: 3, text: "Second remote voice.", startTime: 8, speaker: nil, confidence: 0.9),
+            TranscriptSegment(id: 4, text: "First remote again.", startTime: 12, speaker: nil, confidence: 0.9)
+        ]
+
+        let attributed = [
+            attribution.attributedSegment(
+                segments[0],
+                source: .microphone,
+                hint: SpeakerAttributionHint(rawSpeakerID: "local-user", confidence: 0.95)
+            ),
+            attribution.attributedSegment(
+                segments[1],
+                source: .systemAudio,
+                hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-a", confidence: 0.91)
+            ),
+            attribution.attributedSegment(
+                segments[2],
+                source: .systemAudio,
+                hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-b", confidence: 0.88)
+            ),
+            attribution.attributedSegment(
+                segments[3],
+                source: .systemAudio,
+                hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-a", confidence: 0.9)
+            )
+        ]
+
+        XCTAssertEqual(attributed.map(\.speaker), [
+            "speaker-local",
+            "speaker-remote-1",
+            "speaker-remote-2",
+            "speaker-remote-1"
+        ])
+        XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-remote-1", labels: [:]), "Remote speaker 1")
+        XCTAssertEqual(TranscriptSpeakerLabels.displayName(for: "speaker-remote-2", labels: [:]), "Remote speaker 2")
+    }
+
+    func testSpeakerAttributionFallsBackWhenRemoteHintIsMissingOrLowConfidence() {
+        var attribution = TranscriptSpeakerAttribution()
+
+        let missingHint = attribution.attributedSegment(
+            TranscriptSegment(id: 1, text: "Remote voice.", startTime: 0, speaker: nil, confidence: 0.9),
+            source: .systemAudio,
+            hint: nil
+        )
+        let lowConfidence = attribution.attributedSegment(
+            TranscriptSegment(id: 2, text: "Uncertain remote voice.", startTime: 7, speaker: nil, confidence: 0.9),
+            source: .systemAudio,
+            hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-a", confidence: 0.44)
+        )
+
+        XCTAssertEqual(missingHint.speaker, "speaker-remote")
+        XCTAssertEqual(lowConfidence.speaker, "speaker-remote")
+    }
+
+    func testSpeakerAttributionDoesNotCarryRemoteIdentityAcrossRecordings() {
+        var firstRecording = TranscriptSpeakerAttribution()
+        var nextRecording = TranscriptSpeakerAttribution()
+
+        let first = firstRecording.attributedSegment(
+            TranscriptSegment(id: 1, text: "Remote voice.", startTime: 0, speaker: nil, confidence: 0.9),
+            source: .systemAudio,
+            hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-a", confidence: 0.9)
+        )
+        let next = nextRecording.attributedSegment(
+            TranscriptSegment(id: 1, text: "Remote voice.", startTime: 0, speaker: nil, confidence: 0.9),
+            source: .systemAudio,
+            hint: SpeakerAttributionHint(rawSpeakerID: "teams-user-z", confidence: 0.9)
+        )
+
+        XCTAssertEqual(first.speaker, "speaker-remote-1")
+        XCTAssertEqual(next.speaker, "speaker-remote-1")
+    }
+
     func testTranscriptSpeakerLabelsFindsUntaggedSpeakersInFirstSeenOrder() {
         let segments = [
             TranscriptSegment(id: 1, text: "Local voice.", startTime: 0, speaker: "speaker-local", confidence: 0.9),
-            TranscriptSegment(id: 2, text: "Remote voice.", startTime: 4, speaker: "speaker-remote", confidence: 0.9),
-            TranscriptSegment(id: 3, text: "More remote voice.", startTime: 6, speaker: "speaker-remote", confidence: 0.9),
-            TranscriptSegment(id: 4, text: "Warning.", startTime: 7, speaker: "System", confidence: 1)
+            TranscriptSegment(id: 2, text: "Remote voice.", startTime: 4, speaker: "speaker-remote-1", confidence: 0.9),
+            TranscriptSegment(id: 3, text: "More remote voice.", startTime: 6, speaker: "speaker-remote-2", confidence: 0.9),
+            TranscriptSegment(id: 4, text: "Remote voice repeated.", startTime: 7, speaker: "speaker-remote-1", confidence: 0.9),
+            TranscriptSegment(id: 5, text: "Warning.", startTime: 7, speaker: "System", confidence: 1)
         ]
         let profiles = [
             "speaker-local": SpeakerProfile(speakerID: "speaker-local", name: "JP")
@@ -474,7 +555,7 @@ final class ArchitectureModuleTests: XCTestCase {
             deferredSpeakerIDs: []
         )
 
-        XCTAssertEqual(untagged, ["speaker-remote"])
+        XCTAssertEqual(untagged, ["speaker-remote-1", "speaker-remote-2"])
     }
 
     func testTranscriptionWindowPlannerSplitsLongBuffersIntoBoundedWindows() {

@@ -31,6 +31,8 @@ final class GoogleAuthManager: NSObject, ObservableObject {
     func signIn() {
         isLoading = true
         error = nil
+        localServer?.stop()
+        localServer = nil
 
         // PKCE
         codeVerifier = generateCodeVerifier()
@@ -72,7 +74,17 @@ final class GoogleAuthManager: NSObject, ObservableObject {
         ]
 
         if let url = components.url {
-            NSWorkspace.shared.open(url)
+            if !NSWorkspace.shared.open(url) {
+                localServer?.stop()
+                localServer = nil
+                isLoading = false
+                error = "Could not open Google sign-in in your browser."
+            }
+        } else {
+            localServer?.stop()
+            localServer = nil
+            isLoading = false
+            error = "Could not build Google sign-in URL."
         }
     }
 
@@ -103,8 +115,7 @@ final class GoogleAuthManager: NSObject, ObservableObject {
             ("grant_type", "authorization_code"),
             ("code_verifier", codeVerifier),
         ]
-        let body = params.map { "\($0.0)=\($0.1.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.1)" }
-            .joined(separator: "&")
+        let body = OAuthFormURLEncoder.body(params)
         request.httpBody = body.data(using: .utf8)
 
         do {
@@ -120,12 +131,13 @@ final class GoogleAuthManager: NSObject, ObservableObject {
             let accessToken = json?["access_token"] as? String ?? ""
             let refreshToken = json?["refresh_token"] as? String ?? ""
 
+            let profile = try await fetchUserProfile(accessToken: accessToken)
             KeychainHelper.save(key: "google_access_token", value: accessToken)
             if !refreshToken.isEmpty {
                 KeychainHelper.save(key: "google_refresh_token", value: refreshToken)
             }
-
-            await fetchUserProfile(accessToken: accessToken)
+            persistUserProfile(profile)
+            UserDefaults.standard.removeObject(forKey: "skippedAuth")
             isAuthenticated = true
             isLoading = false
         } catch {
@@ -136,36 +148,40 @@ final class GoogleAuthManager: NSObject, ObservableObject {
 
     // MARK: - User Profile
 
-    private func fetchUserProfile(accessToken: String) async {
+    private func fetchUserProfile(accessToken: String) async throws -> GoogleUserProfile {
         var request = URLRequest(url: URL(string: "https://www.googleapis.com/oauth2/v2/userinfo")!)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
 
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-
-            let name = json?["name"] as? String ?? ""
-            let email = json?["email"] as? String ?? ""
-            let picture = json?["picture"] as? String ?? ""
-
-            userProfile = GoogleUserProfile(name: name, email: email, photoURL: picture)
-            UserDefaults.standard.set(name, forKey: "google_user_name")
-            UserDefaults.standard.set(email, forKey: "google_user_email")
-            UserDefaults.standard.set(picture, forKey: "google_user_photo")
-        } catch {
-            print("[GoogleAuth] Profile fetch failed: \(error)")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
         }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw URLError(.cannotParseResponse)
+        }
+        return try GoogleUserProfilePayload.profile(from: json)
+    }
+
+    private func persistUserProfile(_ profile: GoogleUserProfile) {
+        userProfile = profile
+        UserDefaults.standard.set(profile.name, forKey: "google_user_name")
+        UserDefaults.standard.set(profile.email, forKey: "google_user_email")
+        UserDefaults.standard.set(profile.photoURL, forKey: "google_user_photo")
     }
 
     // MARK: - Session Restore
 
     private func restoreSession() {
-        guard KeychainHelper.load(key: "google_access_token") != nil else { return }
-        let name = UserDefaults.standard.string(forKey: "google_user_name") ?? ""
-        let email = UserDefaults.standard.string(forKey: "google_user_email") ?? ""
-        let photo = UserDefaults.standard.string(forKey: "google_user_photo") ?? ""
-        if !email.isEmpty {
-            userProfile = GoogleUserProfile(name: name, email: email, photoURL: photo)
+        let state = GoogleAccountSessionState.resolve(
+            accessToken: KeychainHelper.load(key: "google_access_token"),
+            name: UserDefaults.standard.string(forKey: "google_user_name") ?? "",
+            email: UserDefaults.standard.string(forKey: "google_user_email") ?? "",
+            photoURL: UserDefaults.standard.string(forKey: "google_user_photo") ?? "",
+            skippedAuth: UserDefaults.standard.bool(forKey: "skippedAuth")
+        )
+        if case .signedIn(let profile) = state {
+            userProfile = profile
             isAuthenticated = true
         }
     }
@@ -310,7 +326,7 @@ enum OAuthCallbackParser {
 
 // MARK: - User Profile
 
-struct GoogleUserProfile {
+struct GoogleUserProfile: Equatable {
     let name: String
     let email: String
     let photoURL: String

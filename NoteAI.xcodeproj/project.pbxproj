@@ -73,6 +73,7 @@
 		A737F0D7C4BA1927816E9BEB /* MeetingCaptureWorkflow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7390C70A7DC7CBDD9D3FB0BC /* MeetingCaptureWorkflow.swift */; };
 		AD034773ECC4C8ED2E8AA5DD /* GoogleAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518E764641EDFFB56E3244AA /* GoogleAuthManager.swift */; };
 		AED81C5FF95EC61BD0A0827C /* TodoSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F856A1DCE2CF5397D035A99C /* TodoSelectorView.swift */; };
+		AF254D84733B467FD054D6E2 /* GoogleAccountSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCBE4DD8884F6D9F3630975 /* GoogleAccountSessionState.swift */; };
 		B4DB2C5C83CF4055DE419AE5 /* SummaryCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FE40A0837F14333E364D84 /* SummaryCardView.swift */; };
 		B4E3A03129D8D5A1D54D614A /* ImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E706668BD58AC6D3CAF974 /* ImageStore.swift */; };
 		B7E552A87D269E28FA58426A /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1D7FC3B890759251199799E /* WhisperKit */; };
@@ -160,6 +161,7 @@
 		98F2C76A01A8B0DCDAE040ED /* MeetingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStore.swift; sourceTree = "<group>"; };
 		9CA34051C7A95AD3E09424EF /* ChatSourceContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSourceContextTests.swift; sourceTree = "<group>"; };
 		9DB43B513D3EFF5BBB74EC81 /* OnboardingChecklistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingChecklistTests.swift; sourceTree = "<group>"; };
+		9DCBE4DD8884F6D9F3630975 /* GoogleAccountSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountSessionState.swift; sourceTree = "<group>"; };
 		A2B302FC97494EFE1DFA9E12 /* TodoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoDetailView.swift; sourceTree = "<group>"; };
 		A2B9F127317A56E7B70C7DB7 /* MarkdownRendererView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRendererView.swift; sourceTree = "<group>"; };
 		A3654E87D10A4BF1FBF11E1A /* OpenRouterModelFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelFetcher.swift; sourceTree = "<group>"; };
@@ -422,6 +424,7 @@
 		8C81709483BA02F6961D3BFA /* Auth */ = {
 			isa = PBXGroup;
 			children = (
+				9DCBE4DD8884F6D9F3630975 /* GoogleAccountSessionState.swift */,
 				518E764641EDFFB56E3244AA /* GoogleAuthManager.swift */,
 				AA84AA301B2E637B64EA7917 /* KeychainHelper.swift */,
 				76FB78343ABD52A1EFE8666C /* LoginView.swift */,
@@ -665,6 +668,7 @@
 				9CEFF2981B130BDA48B5E206 /* CoachPanelView.swift in Sources */,
 				75B5B12FA2F978774C7AC07E /* ExportManager.swift in Sources */,
 				2485336C5A954760004A2D56 /* FloatingToolbarPanel.swift in Sources */,
+				AF254D84733B467FD054D6E2 /* GoogleAccountSessionState.swift in Sources */,
 				AD034773ECC4C8ED2E8AA5DD /* GoogleAuthManager.swift in Sources */,
 				40F474B09217068CE711DBCE /* HomeDashboardView.swift in Sources */,
 				67858074E245DF6DA56F88AA /* ImageOverlayPanel.swift in Sources */,

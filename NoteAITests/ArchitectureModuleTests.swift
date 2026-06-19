@@ -2258,6 +2258,56 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertNil(OAuthCallbackParser.authorizationCode(from: wrongState, expectedState: "state-1"))
     }
 
+    func testOAuthFormBodyPercentEncodesReservedCharacters() {
+        let body = OAuthFormURLEncoder.body([
+            ("code", "abc+123/with&reserved=value"),
+            ("redirect_uri", "http://127.0.0.1:54321/callback"),
+        ])
+
+        XCTAssertTrue(body.contains("code=abc%2B123%2Fwith%26reserved%3Dvalue"))
+        XCTAssertTrue(body.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2Fcallback"))
+    }
+
+    func testGoogleAccountSessionRequiresTokenAndEmail() {
+        XCTAssertEqual(
+            GoogleAccountSessionState.resolve(
+                accessToken: nil,
+                name: "",
+                email: "",
+                photoURL: "",
+                skippedAuth: true
+            ),
+            .notSignedIn
+        )
+
+        XCTAssertEqual(
+            GoogleAccountSessionState.resolve(
+                accessToken: "token",
+                name: "JP Santana",
+                email: "jp@example.com",
+                photoURL: "https://example.com/avatar.png",
+                skippedAuth: true
+            ),
+            .signedIn(GoogleUserProfile(name: "JP Santana", email: "jp@example.com", photoURL: "https://example.com/avatar.png"))
+        )
+    }
+
+    func testGoogleUserProfilePayloadRequiresEmail() throws {
+        XCTAssertThrowsError(try GoogleUserProfilePayload.profile(from: ["name": "JP Santana"])) { error in
+            XCTAssertEqual(error as? GoogleUserProfilePayload.ParseError, .missingEmail)
+        }
+
+        let profile = try GoogleUserProfilePayload.profile(from: [
+            "name": "JP Santana",
+            "email": " jp@example.com ",
+            "picture": "https://example.com/avatar.png",
+        ])
+
+        XCTAssertEqual(profile.name, "JP Santana")
+        XCTAssertEqual(profile.email, "jp@example.com")
+        XCTAssertEqual(profile.photoURL, "https://example.com/avatar.png")
+    }
+
     func testReadAloudTextResolverPrefersSelectedText() {
         XCTAssertEqual(
             ReadAloudTextResolver.textToRead(fallback: "Read the whole note") { " selected sentence " },

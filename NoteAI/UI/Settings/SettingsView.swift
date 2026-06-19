@@ -4,6 +4,7 @@ import UserNotifications
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab
     @State private var hasChanges = false
+    @ObservedObject private var authManager: GoogleAuthManager
     @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
 
     enum SettingsTab: String, CaseIterable, Identifiable {
@@ -32,8 +33,15 @@ struct SettingsView: View {
         }
     }
 
+    @MainActor
     init(initialTab: SettingsTab = .ai) {
         _selectedTab = State(initialValue: initialTab)
+        _authManager = ObservedObject(wrappedValue: GoogleAuthManager())
+    }
+
+    init(initialTab: SettingsTab = .ai, authManager: GoogleAuthManager) {
+        _selectedTab = State(initialValue: initialTab)
+        _authManager = ObservedObject(wrappedValue: authManager)
     }
 
     var body: some View {
@@ -86,7 +94,7 @@ struct SettingsView: View {
                 // Content
                 Group {
                     switch selectedTab {
-                    case .account: AccountSettingsView()
+                    case .account: AccountSettingsView(authManager: authManager)
                     case .general: GeneralSettingsView()
                     case .appearance: AppearanceSettingsView()
                     case .ai: AISettingsView()
@@ -107,30 +115,28 @@ struct SettingsView: View {
 // MARK: - Account Settings
 
 struct AccountSettingsView: View {
+    @ObservedObject var authManager: GoogleAuthManager
     @StateObject private var outlookAuth = OutlookGraphAuthManager()
     @AppStorage(OutlookGraphSettings.clientIDKey) private var outlookClientID = ""
     @AppStorage(OutlookGraphSettings.tenantIDKey) private var outlookTenantID = "common"
-    private var userName: String { UserDefaults.standard.string(forKey: "google_user_name") ?? "" }
-    private var userEmail: String { UserDefaults.standard.string(forKey: "google_user_email") ?? "" }
-    private var isSignedIn: Bool { KeychainHelper.load(key: "google_access_token") != nil }
 
     var body: some View {
         Form {
             Section("Google Account") {
-                if isSignedIn && !userEmail.isEmpty {
+                if let profile = authManager.userProfile, !profile.email.isEmpty {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
                                 .fill(Color(hex: "333333"))
                                 .frame(width: 40, height: 40)
-                            Text(initials)
+                            Text(profile.initials)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(userName)
+                            Text(profile.name.isEmpty ? profile.email : profile.name)
                                 .font(.system(size: 14, weight: .medium))
-                            Text(userEmail)
+                            Text(profile.email)
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
@@ -138,19 +144,32 @@ struct AccountSettingsView: View {
                     .padding(.vertical, 4)
 
                     Button("Sign Out", role: .destructive) {
-                        KeychainHelper.delete(key: "google_access_token")
-                        KeychainHelper.delete(key: "google_refresh_token")
-                        UserDefaults.standard.removeObject(forKey: "google_user_name")
-                        UserDefaults.standard.removeObject(forKey: "google_user_email")
-                        UserDefaults.standard.removeObject(forKey: "google_user_photo")
-                        UserDefaults.standard.removeObject(forKey: "skippedAuth")
+                        authManager.signOut()
                     }
                 } else {
                     Text("Not signed in")
                         .foregroundStyle(.secondary)
-                    Text("Sign in from the main app window to connect your Google account.")
+                    Text("Sign in to connect settings and future profile-aware features to your Google account.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Button {
+                        authManager.signIn()
+                    } label: {
+                        if authManager.isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Sign In with Google")
+                        }
+                    }
+                    .disabled(authManager.isLoading)
+                }
+
+                if let error = authManager.error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
 
@@ -203,12 +222,6 @@ struct AccountSettingsView: View {
         .padding()
     }
 
-    private var initials: String {
-        let parts = userName.split(separator: " ")
-        let first = parts.first?.prefix(1) ?? ""
-        let last = parts.count > 1 ? parts.last!.prefix(1) : ""
-        return "\(first)\(last)".uppercased()
-    }
 }
 
 // MARK: - General Settings

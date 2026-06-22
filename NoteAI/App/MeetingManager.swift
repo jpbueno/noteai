@@ -391,6 +391,28 @@ final class MeetingManager: ObservableObject {
         }
     }
 
+    func discardPendingRecording() {
+        showMeetingNamePrompt = false
+        pendingMeetingName = ""
+        currentTranscript = []
+        currentSpeakerProfiles = [:]
+        currentSpeakerSuggestions = []
+        pendingSpeakerTagID = nil
+        deferredSpeakerTagIDs = []
+        speakerAttribution = TranscriptSpeakerAttribution()
+        currentMeetingStart = nil
+        currentDetectedAppName = nil
+        currentPreferredCaptureSource = nil
+        recordingDuration = 0
+        summarizationStatus = .idle
+        coachInsights = []
+        state = .idle
+
+        Task {
+            await transcriptionEngine.reset()
+        }
+    }
+
     func toggleActionItem(meetingId: UUID, actionItemId: String) {
         guard let index = meetings.firstIndex(where: { $0.id == meetingId }) else { return }
         guard let itemIndex = meetings[index].summary.actionItems.firstIndex(where: { $0.id == actionItemId }) else { return }

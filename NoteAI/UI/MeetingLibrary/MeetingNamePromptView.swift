@@ -5,6 +5,7 @@ struct MeetingNamePromptView: View {
     @Binding var suggestedName: String
     var onSave: (String) -> Void
     var onCancel: () -> Void
+    var onDiscard: () -> Void
 
     @State private var name: String = ""
 
@@ -29,6 +30,16 @@ struct MeetingNamePromptView: View {
                 .onSubmit { save() }
 
             HStack(spacing: 12) {
+                Button(role: .destructive) {
+                    onDiscard()
+                } label: {
+                    Text("Discard")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.danger)
+
+                Spacer(minLength: 8)
+
                 Button("Use Default") {
                     onCancel()
                 }

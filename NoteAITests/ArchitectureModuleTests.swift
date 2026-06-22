@@ -108,6 +108,51 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("let format = inputNode.outputFormat(forBus: 0)"))
     }
 
+    func testMeetingNamePromptIncludesDestructiveDiscardAction() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingNamePromptView.swift"))
+
+        XCTAssertTrue(source.contains("var onDiscard: () -> Void"))
+        XCTAssertTrue(source.contains("Button(role: .destructive)"))
+        XCTAssertTrue(source.contains("Text(\"Discard\")"))
+        XCTAssertTrue(source.contains("onDiscard()"))
+        XCTAssertTrue(source.contains("Button(\"Use Default\")"))
+        XCTAssertTrue(source.contains("Button(\"Save & Process\")"))
+    }
+
+    func testMeetingLibraryPromptWiresDiscardWithoutProcessing() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+
+        XCTAssertTrue(source.contains("onDiscard: {"))
+        XCTAssertTrue(source.contains("meetingManager.discardPendingRecording()"))
+    }
+
+    func testMeetingManagerDiscardPendingRecordingClearsTransientRecordingState() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
+        let methodStart = try XCTUnwrap(source.range(of: "func discardPendingRecording()"))
+        let nextMethod = try XCTUnwrap(source.range(of: "func toggleActionItem", range: methodStart.upperBound..<source.endIndex))
+        let methodSource = String(source[methodStart.lowerBound..<nextMethod.lowerBound])
+
+        XCTAssertTrue(methodSource.contains("showMeetingNamePrompt = false"))
+        XCTAssertTrue(methodSource.contains("pendingMeetingName = \"\""))
+        XCTAssertTrue(methodSource.contains("currentTranscript = []"))
+        XCTAssertTrue(methodSource.contains("currentSpeakerProfiles = [:]"))
+        XCTAssertTrue(methodSource.contains("currentSpeakerSuggestions = []"))
+        XCTAssertTrue(methodSource.contains("pendingSpeakerTagID = nil"))
+        XCTAssertTrue(methodSource.contains("deferredSpeakerTagIDs = []"))
+        XCTAssertTrue(methodSource.contains("speakerAttribution = TranscriptSpeakerAttribution()"))
+        XCTAssertTrue(methodSource.contains("currentMeetingStart = nil"))
+        XCTAssertTrue(methodSource.contains("currentDetectedAppName = nil"))
+        XCTAssertTrue(methodSource.contains("currentPreferredCaptureSource = nil"))
+        XCTAssertTrue(methodSource.contains("recordingDuration = 0"))
+        XCTAssertTrue(methodSource.contains("summarizationStatus = .idle"))
+        XCTAssertTrue(methodSource.contains("state = .idle"))
+        XCTAssertFalse(methodSource.contains("summarizationEngine.summarize"))
+        XCTAssertFalse(methodSource.contains("meetingStore.save"))
+    }
+
     func testLegacyNoteDecodesWithoutSpace() throws {
         let data = """
         {"id":"11111111-1111-1111-1111-111111111111","title":"Legacy","content":"Existing note","tags":["account"],"createdDate":0,"modifiedDate":0,"sourceMeetingID":null}

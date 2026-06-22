@@ -160,6 +160,9 @@ struct MeetingLibraryView: View {
                 },
                 onCancel: {
                     meetingManager.finishRecording(name: meetingManager.pendingMeetingName)
+                },
+                onDiscard: {
+                    meetingManager.discardPendingRecording()
                 }
             )
         }

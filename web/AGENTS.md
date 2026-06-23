@@ -28,8 +28,8 @@ Default main/deployment workflow:
 - Before marking a Linear issue `Done`, verify the relevant web changes are committed, pushed to `main`, and visible on the remote.
 - Run `npm run lint`, `npx tsc --noEmit --pretty false`, `node --test *.test.mjs`, and `npm run build` for web changes unless a narrower command is explicitly justified in Linear.
 - Push completed work to `main` unless the user explicitly asks for a PR-only flow. If branch protection blocks direct push, open the PR, merge it, and then verify `main`.
-- After `main` updates, confirm GitHub Actions ran for the push and that `Web Deploy to Cloudflare` completed successfully for web-affecting changes.
-- If tests, push, CI, or Cloudflare deployment fails, keep the Linear issue active, document the failure clearly in Linear and chat, and create or link follow-up issues instead of silently leaving the work on a branch.
+- After `main` updates, confirm GitHub Actions ran for the push. The public Cloudflare web deployment has been decommissioned; do not recreate it without an explicit security review and new Linear issue.
+- If tests, push, or CI fails, keep the Linear issue active, document the failure clearly in Linear and chat, and create or link follow-up issues instead of silently leaving the work on a branch.
 - Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
 
 After work:
@@ -52,7 +52,7 @@ All NoteAI web improvements and new features managed in Linear must explicitly f
 
 ## NoteAI Web Architecture
 
-- This app deploys to Cloudflare Workers via OpenNext, not Vercel.
+- The web app is local/CI-only. Do not add Cloudflare Workers, Pages, Vercel, or other public deployment automation without explicit approval and security review.
 - Keep React components focused on view state and event wiring.
 - Put reusable behavior in `src/lib/`:
   - `library.ts` for entity drafts, search, source selection, and selection clearing

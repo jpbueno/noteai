@@ -1,13 +1,13 @@
 # Linear, CI, and Deployment Workflow
 
-This runbook describes the NoteAI workflow for Linear-managed development, zero-cost CI, and Cloudflare deployment.
+This runbook describes the NoteAI workflow for Linear-managed development, zero-cost CI, and delivery.
 
 ## Operating Model
 
 - Linear is the planning and completion source of truth.
 - GitHub is the source-control and CI orchestration layer for the current remote.
 - GitHub Actions runs CI on pull requests and `main`.
-- Cloudflare Workers hosts the web app through the existing OpenNext/Wrangler setup.
+- The web app is local/CI-only unless a future security review explicitly approves a public runtime.
 - `main` is the source of truth for completed NoteAI work. Completed and tested work should not remain only on Codex, feature, or temporary branches.
 - The current NoteAI remote is GitHub. If the repository moves to GitLab later, update this runbook and the automation references before relying on the same workflow names.
 
@@ -21,8 +21,7 @@ For any task with repository changes, `Done` requires all of this evidence:
 - The commit is pushed to the remote `main` branch, unless branch protection requires a PR-only flow.
 - If branch protection requires a PR, the PR references the Linear issue ID, required checks pass, and the PR is merged into `main`.
 - Post-push or post-merge GitHub Actions ran for `main`, or the task is in a path that intentionally does not trigger checks.
-- For web or deployment-impacting changes, the Cloudflare deploy workflow succeeds after `main` updates.
-- For web deployments, a live smoke check passes, starting with `GET /api/health` when that endpoint is expected to be public.
+- For deployment-impacting changes, the relevant runtime verification succeeds after `main` updates.
 - Linear has a completion comment with the remote commit, verification commands/results, deployment status, affected files/modules, branch cleanup, and any follow-ups.
 
 If the task did not require repository changes, the Linear completion comment must explicitly say `No repository changes required` and explain why.
@@ -40,7 +39,7 @@ Use these conventions:
 - Team: `Jpbueno`
 - Project: `NoteAI Product Roadmap`
 - Branches include the Linear issue ID, such as `codex-jpb-34-zero-cost-cicd`.
-- Commit messages include the Linear issue ID, such as `JPB-34 Add Cloudflare deploy workflow`.
+- Commit messages include the Linear issue ID, such as `JPB-191 Remove public web deployment`.
 - Pull request titles include the Linear issue ID.
 
 With the GitHub integration enabled, Linear links branches, commits, and pull requests to issues automatically and can move issues through workflow states as PRs open, review, merge, or close.
@@ -78,37 +77,15 @@ Recommended branch protection for `main`:
 
 This keeps automatic deploys predictable: production changes only after `main` contains the completed, verified work.
 
-## Cloudflare Deployment
+## Web Runtime
 
-The workflow `.github/workflows/web-deploy-cloudflare.yml` deploys the web app to Cloudflare Workers after a push to `main` that changes `web/**` or the deploy workflow itself. Because `web/wrangler.jsonc` also declares `env.preview`, production deploys pass `--env=""` to target the top-level production Worker explicitly.
+The public Cloudflare Worker deployment was decommissioned in JPB-191 because NoteAI is currently distributed and used through the macOS app. There is no automatic public web deployment from `main`, and agents must not recreate a Cloudflare Worker, Pages project, Vercel deployment, or other public web runtime without an explicit security review and new Linear issue.
 
 The workflow `.github/workflows/web-migrate-turso.yml` runs production Turso schema/data migrations manually from `main` before a deploy that needs database shape changes. It uses the GitHub `production` environment and the `TURSO_MIGRATION_AUTH_TOKEN` environment secret so normal request-time reads do not need schema or data-migration privileges.
 
-Target GitHub production environment secret:
+Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic API access uses `NOTEAI_API_KEY_HASHES` if the web API is run in a controlled local or private environment.
 
-- `CLOUDFLARE_API_TOKEN`
-
-The token should have the minimum permissions needed to deploy the `noteai-web` Worker. Runtime app secrets stay in Cloudflare and are preserved by `wrangler deploy --keep-vars`.
-
-The GitHub `production` environment must restrict deployments to `main`. Environment-scoped `CLOUDFLARE_API_TOKEN` is the target posture because environment secrets are only released to jobs that reference the environment after its protection rules pass. If only a repository-scoped `CLOUDFLARE_API_TOKEN` exists, it is accepted only as the bounded current-token exception documented in `docs/security/cloudflare-production-deploy-token-hardening.md`; move it during the next Cloudflare token rotation.
-
-Production is the only automatically deployed cloud environment. Preview is defined but manual-only until a separate preview Turso database and preview Worker secrets exist. Pull requests must stay local/CI-only and must not point at production Turso data before merge. See `docs/security/cloudflare-turso-environment-separation.md`.
-
-Required Cloudflare Worker secrets:
-
-- `TURSO_DATABASE_URL`
-- `TURSO_AUTH_TOKEN`
-- `NOTEAI_AUTH_SECRET`
-- `GOOGLE_CLIENT_ID`
-
-Optional Cloudflare Worker secrets:
-
-- `GOOGLE_ALLOWED_EMAILS`
-- `NOTEAI_API_KEY_HASHES`
-
-Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic API access uses `NOTEAI_API_KEY_HASHES`.
-
-Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` through Cloudflare Worker secrets without committing or printing values.
+Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the approved runtime secret store without committing or printing values.
 
 Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.md`. Schema creation, historical column migrations, and encrypted settings migration now run through `npm run migrate:turso` or the manual `Web Turso Migration` workflow, not normal request-time reads. Configure these GitHub `production` environment secrets before running the workflow:
 
@@ -118,7 +95,7 @@ Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.m
 
 The runtime `TURSO_AUTH_TOKEN` can be split into read/write tokens in a later slice because schema work now sits behind a separate migration Adapter.
 
-Cloudflare Access/WAF/rate-limit policy lives in `docs/security/cloudflare-access-waf-rate-limit-policy.md`. The current `workers.dev` production app remains public with application auth; WAF and rate-limit rules should be added when NoteAI moves to a custom Cloudflare zone hostname or traffic evidence justifies account-level controls.
+Historical Cloudflare policy and hardening documents remain in `docs/security/` as audit records, but they are not an approval to redeploy the public web app.
 
 ## macOS Deployment
 
@@ -136,11 +113,11 @@ When Codex completes a NoteAI task:
 4. Push completed and tested work to `main` so `main` remains the source of truth. If branch protection blocks direct push, push a branch, open a PR with the Linear issue ID in the title, merge it, and then verify `main`.
 5. Confirm the commit is visible on the remote `main` branch.
 6. Confirm GitHub Actions ran for the `main` push.
-7. For web-affecting changes, confirm `Web Deploy to Cloudflare` completed successfully and smoke-check the deployed Worker when the workflow exposes a URL or health endpoint.
+7. For web-affecting changes, confirm web CI completed successfully. Do not perform a public web deploy unless a new security review explicitly approves it.
 8. Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
 9. Update Linear with changed files, verification results, remote commit, deployment status, branch cleanup, and follow-ups.
 
-Do not mark a Linear item `Done` while its completed implementation exists only on a local worktree or side branch. If any local check, push, CI job, or Cloudflare deployment fails, keep the issue active, record the failure, and create or link follow-up work rather than treating the task as complete.
+Do not mark a Linear item `Done` while its completed implementation exists only on a local worktree or side branch. If any local check, push, CI job, or approved deployment fails, keep the issue active, record the failure, and create or link follow-up work rather than treating the task as complete.
 
 ## Cost Guardrails
 
@@ -148,7 +125,7 @@ Do not mark a Linear item `Done` while its completed implementation exists only 
 - If the repository is private, stay within GitHub Free's included Actions minutes and artifact storage.
 - Avoid running macOS CI on web-only changes.
 - Avoid storing large build artifacts.
-- Prefer Cloudflare Worker secrets and GitHub repository secrets over paid secret-management services.
+- Prefer GitHub environment/repository secrets and approved platform secret stores over paid secret-management services unless the threat model requires otherwise.
 - Use manual `workflow_dispatch` reruns when debugging expensive CI failures.
 
 ## Secret and History Scanning

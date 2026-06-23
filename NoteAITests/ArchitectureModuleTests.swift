@@ -2430,6 +2430,13 @@ final class ArchitectureModuleTests: XCTestCase {
         let olderTask = TaskItem(title: "Older", workDate: older, createdDate: older, modifiedDate: older)
         let newerTask = TaskItem(title: "Newer", workDate: newer, createdDate: newer, modifiedDate: newer)
         XCTAssertEqual(LibraryListOrdering.tasks([olderTask, newerTask]).map(\.id), [newerTask.id, olderTask.id])
+
+        let olderOpenTask = TaskItem(title: "Older open", status: .open, workDate: older, createdDate: older, modifiedDate: older)
+        let newerCompletedTask = TaskItem(title: "Newer completed", status: .completed, workDate: newer, completedDate: newer, createdDate: older, modifiedDate: newer)
+        XCTAssertEqual(
+            LibraryListOrdering.tasks([olderOpenTask, newerCompletedTask]).map(\.id),
+            [newerCompletedTask.id, olderOpenTask.id]
+        )
     }
 
     func testReadAloudTextResolverPrefersSelectedText() {

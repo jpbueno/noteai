@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CoreAudio
+import Darwin
 
 @MainActor
 final class TeamsCallDetectorV5: ObservableObject {
@@ -119,7 +120,7 @@ final class TeamsCallDetectorV5: ObservableObject {
             TeamsCallUIEvidenceProvider.evidence(for: $0.pid)
         } ?? .none
         let teamsAudio = process.map {
-            isProcessOutputRunning(pid: $0.pid)
+            isTeamsOutputRunning(for: $0)
         } ?? false
 
         return TeamsCallEvidenceSnapshot(
@@ -191,6 +192,11 @@ final class TeamsCallDetectorV5: ObservableObject {
         ) ?? false
     }
 
+    private func isTeamsOutputRunning(for process: TeamsProcessEvidence) -> Bool {
+        let processIDs = TeamsProcessTreeSnapshot.current().relatedProcessIDs(rootPID: process.pid)
+        return processIDs.contains { isProcessOutputRunning(pid: $0) }
+    }
+
     private func audioProcessObjectID(for pid: pid_t) -> AudioObjectID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
@@ -252,5 +258,76 @@ final class TeamsCallDetectorV5: ObservableObject {
         }
         parts.append(String(format: "confidence %.2f", snapshot.confidenceScore))
         return parts.joined(separator: " · ")
+    }
+}
+
+struct TeamsProcessTreeEntry: Equatable {
+    var pid: pid_t
+    var parentPID: pid_t
+    var executablePath: String
+}
+
+struct TeamsProcessTreeSnapshot: Equatable {
+    var entries: [TeamsProcessTreeEntry]
+
+    static func current() -> TeamsProcessTreeSnapshot {
+        let byteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard byteCount > 0 else { return TeamsProcessTreeSnapshot(entries: []) }
+
+        var pids = [pid_t](repeating: 0, count: Int(byteCount) / MemoryLayout<pid_t>.size)
+        let actualByteCount = pids.withUnsafeMutableBytes {
+            proc_listpids(UInt32(PROC_ALL_PIDS), 0, $0.baseAddress, Int32($0.count))
+        }
+        guard actualByteCount > 0 else { return TeamsProcessTreeSnapshot(entries: []) }
+
+        let actualCount = min(pids.count, Int(actualByteCount) / MemoryLayout<pid_t>.size)
+        let entries = pids.prefix(actualCount).compactMap { pid -> TeamsProcessTreeEntry? in
+            guard pid > 0, let parentPID = parentProcessID(for: pid) else { return nil }
+            return TeamsProcessTreeEntry(
+                pid: pid,
+                parentPID: parentPID,
+                executablePath: executablePath(for: pid) ?? ""
+            )
+        }
+
+        return TeamsProcessTreeSnapshot(entries: entries)
+    }
+
+    func relatedProcessIDs(rootPID: pid_t) -> [pid_t] {
+        var childrenByParent: [pid_t: [pid_t]] = [:]
+        for entry in entries {
+            childrenByParent[entry.parentPID, default: []].append(entry.pid)
+        }
+
+        var result: [pid_t] = []
+        var visited = Set<pid_t>()
+        var queue: [pid_t] = [rootPID]
+
+        while let pid = queue.first {
+            queue.removeFirst()
+            guard visited.insert(pid).inserted else { continue }
+            result.append(pid)
+
+            let children = (childrenByParent[pid] ?? []).sorted()
+            queue.append(contentsOf: children)
+        }
+
+        return result
+    }
+
+    private static func parentProcessID(for pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        guard size == MemoryLayout<proc_bsdinfo>.size else { return nil }
+        return pid_t(info.pbi_ppid)
+    }
+
+    private static func executablePath(for pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(cString: buffer)
     }
 }

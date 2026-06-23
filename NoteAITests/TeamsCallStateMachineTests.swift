@@ -2,6 +2,33 @@ import XCTest
 @testable import NoteAI
 
 final class TeamsCallStateMachineTests: XCTestCase {
+    func testTeamsProcessTreeIncludesAudioHelperDescendants() {
+        let snapshot = TeamsProcessTreeSnapshot(entries: [
+            TeamsProcessTreeEntry(
+                pid: 100,
+                parentPID: 1,
+                executablePath: "/Applications/Microsoft Teams.app/Contents/MacOS/MSTeams"
+            ),
+            TeamsProcessTreeEntry(
+                pid: 101,
+                parentPID: 100,
+                executablePath: "/Applications/Microsoft Teams.app/Contents/Helpers/Microsoft Teams ModuleHost.app/Contents/MacOS/Microsoft Teams ModuleHost"
+            ),
+            TeamsProcessTreeEntry(
+                pid: 102,
+                parentPID: 101,
+                executablePath: "/Applications/Microsoft Teams.app/Contents/Helpers/Microsoft Teams WebView Helper.app/Contents/MacOS/Microsoft Teams WebView Helper"
+            ),
+            TeamsProcessTreeEntry(
+                pid: 200,
+                parentPID: 1,
+                executablePath: "/Applications/Slack.app/Contents/MacOS/Slack"
+            )
+        ])
+
+        XCTAssertEqual(snapshot.relatedProcessIDs(rootPID: 100), [100, 101, 102])
+    }
+
     func testIdleDoesNotDetectTeamsRunningAlone() {
         var machine = TeamsCallStateMachine(configuration: .test)
         let events = machine.process(.teamsRunningOnly(at: Date(timeIntervalSince1970: 10)))

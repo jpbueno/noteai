@@ -1,8 +1,8 @@
 # NoteAI Web
 
-Next.js 16 SPA for NoteAI, deployed to Cloudflare Workers with OpenNext.
+Next.js 16 SPA for NoteAI local development and regression coverage.
 
-Production: https://noteai-web.noteai-jp.workers.dev
+The public Cloudflare Worker deployment was decommissioned in JPB-191 because NoteAI is currently distributed and used through the macOS app. Do not recreate a public web deployment without an explicit security review and new Linear issue.
 
 ## Architecture
 
@@ -62,16 +62,5 @@ npm run lint
 npx tsc --noEmit --pretty false
 npm run build
 ```
-
-## Cloudflare Deployment
-
-```bash
-npm run build:cf
-npx wrangler deploy --env="" --keep-vars
-```
-
-The worker name is configured in `wrangler.jsonc` as `noteai-web`.
-
-Production deploys target the top-level Wrangler environment with `--env=""`. Preview deploys must use `--env preview` and preview-only Turso values; see `../docs/security/cloudflare-turso-environment-separation.md`.
 
 For programmatic REST access, send `Authorization: Bearer <raw-key>` and store only the raw key's base64 SHA-256 digest in `NOTEAI_API_KEY_HASHES`.

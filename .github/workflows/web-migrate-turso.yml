@@ -18,7 +18,6 @@ jobs:
     timeout-minutes: 10
     environment:
       name: production
-      url: https://noteai-web.noteai-jp.workers.dev
     defaults:
       run:
         working-directory: web

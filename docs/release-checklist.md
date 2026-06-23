@@ -8,17 +8,13 @@ Use this checklist before shipping macOS or web changes.
 - From `web/`, run `npm run lint`.
 - From `web/`, run `npx tsc --noEmit --pretty false`.
 - From `web/`, run `npm run build`.
-- For Cloudflare releases, run `npm run build:cf`.
-- Smoke check the deployed web app with `GET /api/health` and confirm `ok: true`.
-- Confirm the environment policy in `docs/security/cloudflare-turso-environment-separation.md` still applies.
-- Confirm the GitHub `production` environment allows deployments only from `main`.
-- Confirm `CLOUDFLARE_API_TOKEN` is configured as a GitHub `production` environment secret, or record the temporary repository-secret exception in Linear.
+- Confirm no public web deployment is being created unless a new security review and Linear issue explicitly approve it.
 - Confirm the Turso production token rotation date has not passed.
-- If a web release changes Turso schema or stored encrypted settings format, run `Web Turso Migration` from `main` before the production deploy.
+- If a web change affects Turso schema or stored encrypted settings format, run `Web Turso Migration` from `main` before using the updated code against production data.
 
 ## Web Runtime Configuration
 
-Required Cloudflare Worker secrets:
+Required server-side runtime values when the web app is run in a controlled local or private environment:
 
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN`
@@ -34,11 +30,11 @@ Provider API keys are stored through the app settings API and must remain write-
 
 Do not configure the legacy `NOTEAI_API_KEY` Worker secret. Programmatic REST access uses `NOTEAI_API_KEY_HASHES`.
 
-Preview deploys must use preview-only values for the required Worker secrets and must not target production Turso.
+Public web deployments are intentionally disabled. Do not create preview or production web deployments that target production Turso.
 
 Turso schema/data migrations are explicit. Use `npm run migrate:turso` locally or the `Web Turso Migration` workflow in production with `TURSO_MIGRATION_AUTH_TOKEN`; normal request-time reads should not create tables, alter columns, or encrypt legacy plaintext settings.
 
-Cloudflare Access is not currently required in front of the whole production app. Keep this accepted-risk decision aligned with `docs/security/cloudflare-access-waf-rate-limit-policy.md`, and revisit it before moving production to a custom Cloudflare zone hostname.
+Historical Cloudflare Access/WAF/rate-limit notes remain in `docs/security/`, but they are audit records, not approval to expose the web app again.
 
 ## Security Headers
 

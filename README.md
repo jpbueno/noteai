@@ -56,7 +56,7 @@ The app keeps UI orchestration thin by pushing reusable behavior into deeper dom
 - Tailwind CSS 4
 - Tiptap (rich text editor)
 - Turso (hosted SQLite)
-- Deployed on Cloudflare Workers via OpenNext
+- Local/CI only. The public Cloudflare Worker deployment was decommissioned in JPB-191 because NoteAI is currently used through the macOS app.
 
 ---
 
@@ -108,28 +108,9 @@ GOOGLE_ALLOWED_EMAILS=you@example.com
 NOTEAI_API_KEY_HASHES=base64-sha256-of-programmatic-api-key
 ```
 
-### Deploy to Cloudflare Workers
+### Public Web Deployment
 
-Production is deployed at: https://noteai-web.noteai-jp.workers.dev
-
-```bash
-cd web
-npm run build:cf
-npx wrangler deploy --env="" --keep-vars
-```
-
-Set production secrets on Cloudflare using interactive input:
-
-```bash
-npx wrangler secret put TURSO_DATABASE_URL --env=""
-npx wrangler secret put TURSO_AUTH_TOKEN --env=""
-npx wrangler secret put NOTEAI_AUTH_SECRET --env=""
-npx wrangler secret put GOOGLE_CLIENT_ID --env=""
-npx wrangler secret put GOOGLE_ALLOWED_EMAILS --env=""
-npx wrangler secret put NOTEAI_API_KEY_HASHES --env=""
-```
-
-Preview deploys must use `--env preview` and preview-only Turso values. See `docs/security/cloudflare-turso-environment-separation.md`.
+The public web app is intentionally not deployed. Do not recreate a Cloudflare Worker, Pages project, or other public web runtime unless a new security review and Linear issue explicitly approve it.
 
 ### API Access
 
@@ -158,7 +139,7 @@ All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id
 ## Security Notes
 
 - **macOS**: LLM API keys stored in macOS Keychain, never UserDefaults
-- **Web**: API keys stored server-side as Cloudflare Worker secrets, never exposed to the browser
+- **Web**: API keys stay server-side in environment/configuration stores, never exposed to the browser
 - **Web**: Google OAuth with HMAC-signed session cookies
 - **Web**: Bearer token auth for programmatic API access using server-side SHA-256 hashes
 - Do not commit `.env*` files or build artifacts
@@ -173,4 +154,4 @@ npx tsc --noEmit --pretty false
 npm run build
 ```
 
-See [docs/release-checklist.md](docs/release-checklist.md) for the full pre-release checklist, Cloudflare secret inventory, `/api/health` smoke check, and release notes template.
+See [docs/release-checklist.md](docs/release-checklist.md) for the full pre-release checklist and release notes template.

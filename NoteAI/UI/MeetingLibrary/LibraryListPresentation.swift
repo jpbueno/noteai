@@ -76,9 +76,7 @@ enum LibraryListOrdering {
     }
 
     static func tasks(_ tasks: [TaskItem]) -> [TaskItem] {
-        let open = tasks.filter { !$0.isCompleted }
-        let completed = tasks.filter(\.isCompleted)
-        return sortTasksByActivityDate(open) + sortTasksByActivityDate(completed)
+        sortTasksByActivityDate(tasks)
     }
 
     static func todos(_ todos: [TodoItem]) -> [TodoItem] {

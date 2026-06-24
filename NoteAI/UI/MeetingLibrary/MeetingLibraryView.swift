@@ -420,7 +420,6 @@ struct MeetingLibraryView: View {
     }
 
     private func topBarRecordingControl(layout: CommandCenterLayout) -> some View {
-        let readiness = meetingManager.recordingReadiness
         return Group {
             if meetingManager.state == .recording {
                 HStack(spacing: round(8 * layout.scale)) {
@@ -428,6 +427,9 @@ struct MeetingLibraryView: View {
                         .fill(Theme.danger)
                         .frame(width: round(8 * layout.scale), height: round(8 * layout.scale))
                         .opacity(pulseAnimation ? 0.4 : 1.0)
+                    Image(systemName: LibraryListPresentation.SidebarItemKind.meeting.icon)
+                        .font(.system(size: layout.smallFontSize, weight: .semibold))
+                        .foregroundStyle(LibraryListPresentation.SidebarItemKind.meeting.tint)
                     Text(formattedDuration)
                         .font(.system(size: layout.tinyFontSize + 1, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Theme.danger)
@@ -446,8 +448,13 @@ struct MeetingLibraryView: View {
                 .frame(height: layout.controlHeight)
                 .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.danger.opacity(0.30), lineWidth: 1))
-                .accessibilityLabel(Text("Recording \(formattedDuration)"))
-                .help("Recording \(formattedDuration)")
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onTapGesture {
+                    selection = nil
+                }
+                .accessibilityLabel(Text("Show live transcription"))
+                .accessibilityAddTraits(.isButton)
+                .help("Show live transcription")
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
                 .onDisappear { pulseAnimation = false }
             } else {
@@ -455,12 +462,12 @@ struct MeetingLibraryView: View {
                     meetingManager.startRecording()
                     selection = nil
                 } label: {
-                    Image(systemName: readiness.systemImage)
+                    Image(systemName: LibraryListPresentation.SidebarItemKind.meeting.icon)
                         .font(.system(size: layout.smallFontSize, weight: .bold))
-                        .foregroundStyle(Theme.danger.opacity(0.95))
+                        .foregroundStyle(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.95))
                         .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
-                        .background(Theme.danger.opacity(0.08), in: Capsule())
-                        .overlay(Capsule().stroke(Theme.danger.opacity(0.42), lineWidth: 1))
+                        .background(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().stroke(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.42), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .disabled(meetingManager.state == .processing)

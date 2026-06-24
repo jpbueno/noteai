@@ -128,6 +128,34 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("meetingManager.discardPendingRecording()"))
     }
 
+    func testTopBarRecordingControlOpensLiveTranscriptWhileRecording() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+        let methodSource = try sourceFragment(
+            named: "private func topBarRecordingControl(layout: CommandCenterLayout) -> some View",
+            before: "    // MARK: - Sidebar",
+            in: source
+        )
+
+        XCTAssertTrue(methodSource.contains("selection = nil"))
+        XCTAssertTrue(methodSource.contains(".accessibilityAddTraits(.isButton)"))
+        XCTAssertTrue(methodSource.contains(".help(\"Show live transcription\")"))
+    }
+
+    func testTopBarRecordingControlUsesMeetingWaveformIcon() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+        let methodSource = try sourceFragment(
+            named: "private func topBarRecordingControl(layout: CommandCenterLayout) -> some View",
+            before: "    // MARK: - Sidebar",
+            in: source
+        )
+
+        XCTAssertTrue(methodSource.contains("LibraryListPresentation.SidebarItemKind.meeting.icon"))
+        XCTAssertTrue(methodSource.contains("LibraryListPresentation.SidebarItemKind.meeting.tint"))
+        XCTAssertFalse(methodSource.contains("Image(systemName: readiness.systemImage)"))
+    }
+
     func testMeetingManagerDiscardPendingRecordingClearsTransientRecordingState() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
@@ -1090,14 +1118,15 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(source.contains("meetingManager.startRecording()"))
     }
 
-    func testSidebarRecordingControlUsesIconOnlyIdleButton() throws {
+    func testTopBarRecordingControlUsesMeetingIconOnlyIdleButton() throws {
         let source = try meetingLibrarySource()
 
-        XCTAssertTrue(source.contains("Image(systemName: readiness.systemImage)"))
+        XCTAssertTrue(source.contains("Image(systemName: LibraryListPresentation.SidebarItemKind.meeting.icon)"))
+        XCTAssertTrue(source.contains("LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.95)"))
         XCTAssertTrue(source.contains(".accessibilityLabel(Text(recordButtonLabel))"))
         XCTAssertTrue(source.contains(".frame(width: round(34 * layout.scale), height: round(34 * layout.scale))"))
-        XCTAssertTrue(source.contains("Theme.danger.opacity(0.08)"))
-        XCTAssertTrue(source.contains("Theme.danger.opacity(0.42)"))
+        XCTAssertTrue(source.contains("LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.08)"))
+        XCTAssertTrue(source.contains("LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.42)"))
         XCTAssertFalse(source.contains("Label(compactRecordButtonLabel"))
         XCTAssertFalse(source.contains("compactRecordButtonLabel"))
         XCTAssertFalse(source.contains("LinearGradient(colors: [Theme.danger, Color(hex: \"FF8A5C\")]"))
@@ -2461,5 +2490,11 @@ final class ArchitectureModuleTests: XCTestCase {
         }
         url.deleteLastPathComponent()
         return url
+    }
+
+    private func sourceFragment(named startMarker: String, before endMarker: String, in source: String) throws -> String {
+        let start = try XCTUnwrap(source.range(of: startMarker))
+        let end = try XCTUnwrap(source.range(of: endMarker, range: start.upperBound..<source.endIndex))
+        return String(source[start.lowerBound..<end.lowerBound])
     }
 }

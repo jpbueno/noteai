@@ -28,11 +28,20 @@ xcuserdata/
 .worktrees/
 versions/
 
+# Local generated reports, experiments, and throwaway exports
+output/
+scratch/
+
 # Runtime, profiling, logs
 default.profraw
 *.profraw
 *.log
 test_output.md
+
+# Local environment files
+.env
+.env.*
+!.env.example
 
 # Generated local previews/assets
 icon_previews/

@@ -4,9 +4,13 @@ on:
   pull_request:
     paths:
       - ".github/workflows/**"
+      - ".gitignore"
+      - "CONTRIBUTING.md"
+      - "README.md"
       - "docs/linear-cicd.md"
       - "docs/ci-security-followups.md"
       - "scripts/ci-coverage-parity.test.mjs"
+      - "scripts/repository-hygiene.test.mjs"
       - "web/*.test.mjs"
       - "NoteAITests/**"
   push:
@@ -14,9 +18,13 @@ on:
       - main
     paths:
       - ".github/workflows/**"
+      - ".gitignore"
+      - "CONTRIBUTING.md"
+      - "README.md"
       - "docs/linear-cicd.md"
       - "docs/ci-security-followups.md"
       - "scripts/ci-coverage-parity.test.mjs"
+      - "scripts/repository-hygiene.test.mjs"
       - "web/*.test.mjs"
       - "NoteAITests/**"
   workflow_dispatch:
@@ -39,4 +47,4 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Validate CI coverage matrix
-        run: node --test scripts/ci-coverage-parity.test.mjs
+        run: node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs

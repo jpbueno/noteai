@@ -30,12 +30,21 @@ test("CI coverage staleness check runs on workflow, docs, and test changes", () 
 
   [
     ".github/workflows/**",
+    ".gitignore",
+    "CONTRIBUTING.md",
+    "README.md",
     "docs/linear-cicd.md",
     "docs/ci-security-followups.md",
     "scripts/ci-coverage-parity.test.mjs",
+    "scripts/repository-hygiene.test.mjs",
     "web/*.test.mjs",
     "NoteAITests/**",
   ].forEach((path) => assertWorkflowCoversPath(ciCoverageWorkflow, path));
+
+  assert.match(
+    ciCoverageWorkflow,
+    /node --test scripts\/ci-coverage-parity\.test\.mjs scripts\/repository-hygiene\.test\.mjs/,
+  );
 });
 
 test("web CI invokes every checked-in web regression test", () => {

@@ -62,7 +62,7 @@ JPB-32 tracks parity between the web and Swift/macOS verification gates. The fir
 | Web app | `Web CI / Lint, build, and security regression` | Ubuntu with Node.js 22 | `npm ci`, ESLint, `tsc --noEmit`, every checked-in `web/*.test.mjs`, production dependency audit, and Next.js build | `CI Coverage Staleness / Coverage parity cleanup check` fails if a checked-in web regression test is not invoked by web CI. |
 | Swift/macOS | `macOS CI / Xcode build and test` | GitHub-hosted `macos-15` | Xcode package resolution, app build, and test suite with code signing disabled | `CI Coverage Staleness / Coverage parity cleanup check` records the current Swift gate and keeps native CI docs visible. |
 | Secrets | `Secret Scan / Gitleaks git history scan` | Ubuntu | Full-history Gitleaks scan with the reviewed baseline and uploaded SARIF report | `scripts/secret-scanning-workflow.test.mjs` keeps the secret-scan workflow and docs aligned. |
-| CI parity docs | `CI Coverage Staleness / Coverage parity cleanup check` | Ubuntu | `node --test scripts/ci-coverage-parity.test.mjs` | Runs on workflow, CI documentation, web regression test, and macOS test changes. |
+| CI parity docs and repository hygiene | `CI Coverage Staleness / Coverage parity cleanup check` | Ubuntu | `node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs` | Runs on workflow, CI documentation, contributor documentation, ignore-rule, web regression test, and macOS test changes. |
 
 Recommended branch protection for `main`:
 

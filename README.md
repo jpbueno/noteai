@@ -34,6 +34,8 @@ web/                      Web app source (Next.js + Turso)
   public/                 Static assets
 NoteAI.xcodeproj/         Xcode project
 Package.swift             Swift Package manifest
+docs/                     Architecture, CI, release, storage, and security runbooks
+scripts/                  Repository and migration helper scripts
 ```
 
 ### Architecture Notes
@@ -144,10 +146,25 @@ All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id
 - **Web**: Bearer token auth for programmatic API access using server-side SHA-256 hashes
 - Do not commit `.env*` files or build artifacts
 
+## Repository Hygiene
+
+This repository should contain source, tests, docs, and reviewed configuration only. Keep local exports and experiments outside Git:
+
+- `output/` is for generated reports, decks, QR cards, and other throwaway exports.
+- `scratch/` is for local investigation artifacts, screenshots, previews, and temporary analysis output.
+- `.xcode-build/`, `.build/`, `DerivedData/`, `web/.next/`, `web/node_modules/`, logs, local databases, and `.env*` files are ignored.
+
+Run the lightweight hygiene check before sharing a cleanup PR:
+
+```bash
+node --test scripts/repository-hygiene.test.mjs
+```
+
 ## Validation
 
 ```bash
 swift test
+node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs
 cd web
 npm run lint
 npx tsc --noEmit --pretty false

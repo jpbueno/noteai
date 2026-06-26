@@ -7,6 +7,7 @@ struct Meeting: Identifiable, Codable {
     let duration: TimeInterval
     var transcript: [TranscriptSegment]
     var summary: MeetingSummary
+    var sourceEvidence: EvidenceSource? = nil
 
     var formattedDuration: String {
         let minutes = Int(duration) / 60

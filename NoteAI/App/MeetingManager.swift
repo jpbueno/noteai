@@ -272,42 +272,101 @@ final class MeetingManager: ObservableObject {
 
         Task {
             await transcriptionEngine.reset()
-
-            let transcript = currentTranscript
-            let transcriptText = MeetingCaptureWorkflow.transcriptText(from: transcript)
-
-            let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
-            summarizationStatus = .summarizing(model: modelName)
-
-            let summary: MeetingSummary
-            do {
-                summary = try await summarizationEngine.summarize(transcript: transcriptText)
-                summarizationStatus = .idle
-            } catch {
-                print("[MeetingManager] Summarization failed: \(error)")
-                lastError = "Summarization failed: \(error.localizedDescription)"
-                summarizationStatus = .failed(error: error.localizedDescription)
-                summary = MeetingCaptureWorkflow.failedSummary(errorDescription: error.localizedDescription)
-            }
-
-            let meeting = MeetingCaptureWorkflow.makeMeeting(
+            let meeting = await summarizeAndSaveMeeting(
                 title: title,
                 startedAt: currentMeetingStart,
-                transcript: transcript,
-                summary: summary
+                transcript: currentTranscript
             )
-
-            do {
-                try meetingStore.save(meeting: meeting)
-                meetings.insert(meeting, at: 0)
-            } catch {
-                print("Failed to save meeting: \(error)")
+            if meeting != nil {
+                currentTranscript = []
             }
-
-            ExportManager.autoExportIfEnabled(meeting)
-            await notificationManager.sendSummaryReady(meetingTitle: meeting.title)
             state = .idle
         }
+    }
+
+    func importTranscriptMeeting(title: String, rawTranscript: String) async -> Meeting? {
+        guard state != .recording else {
+            lastError = "Stop the active recording before importing a transcript."
+            return nil
+        }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else {
+            lastError = "Paste a Teams transcript before importing."
+            return nil
+        }
+
+        let transcript = TranscriptImportParser.parse(trimmedTranscript)
+        let importTitle = trimmedTitle.isEmpty
+            ? "Teams Transcript — \(Date().formatted(date: .abbreviated, time: .shortened))"
+            : trimmedTitle
+        let sourceEvidence = EvidenceSource(
+            kind: .teamsTranscriptPaste,
+            title: importTitle,
+            externalID: nil,
+            capturedAt: Date()
+        )
+
+        state = .processing
+        currentTranscript = transcript
+
+        let meeting = await summarizeAndSaveMeeting(
+            title: importTitle,
+            startedAt: Date(),
+            transcript: transcript,
+            sourceEvidence: sourceEvidence
+        )
+
+        currentTranscript = []
+        state = .idle
+        return meeting
+    }
+
+    private func summarizeAndSaveMeeting(
+        title: String,
+        startedAt: Date?,
+        finishedAt: Date = Date(),
+        transcript: [TranscriptSegment],
+        sourceEvidence: EvidenceSource? = nil
+    ) async -> Meeting? {
+        let transcriptText = MeetingCaptureWorkflow.transcriptText(from: transcript)
+
+        let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
+        summarizationStatus = .summarizing(model: modelName)
+
+        let summary: MeetingSummary
+        do {
+            summary = try await summarizationEngine.summarize(transcript: transcriptText)
+            summarizationStatus = .idle
+        } catch {
+            print("[MeetingManager] Summarization failed: \(error)")
+            lastError = "Summarization failed: \(error.localizedDescription)"
+            summarizationStatus = .failed(error: error.localizedDescription)
+            summary = MeetingCaptureWorkflow.failedSummary(errorDescription: error.localizedDescription)
+        }
+
+        let meeting = MeetingCaptureWorkflow.makeMeeting(
+            title: title,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            transcript: transcript,
+            summary: summary,
+            sourceEvidence: sourceEvidence
+        )
+
+        do {
+            try meetingStore.save(meeting: meeting)
+            meetings.insert(meeting, at: 0)
+        } catch {
+            print("Failed to save meeting: \(error)")
+            lastError = "Failed to save meeting: \(error.localizedDescription)"
+            return nil
+        }
+
+        ExportManager.autoExportIfEnabled(meeting)
+        await notificationManager.sendSummaryReady(meetingTitle: meeting.title)
+        return meeting
     }
 
     func toggleActionItem(meetingId: UUID, actionItemId: String) {
@@ -359,7 +418,7 @@ final class MeetingManager: ObservableObject {
 
     private func debugLog(_ message: String) {
         let logFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("NoteAI/debug.log")
+            .appendingPathComponent("\(AppEnvironment.storageNamespace)/debug.log")
         let line = "[\(Date())] \(message)\n"
         if let data = line.data(using: .utf8) {
             if FileManager.default.fileExists(atPath: logFile.path) {

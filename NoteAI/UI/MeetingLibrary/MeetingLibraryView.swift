@@ -55,6 +55,7 @@ struct MeetingLibraryView: View {
     @State private var sidebarCollapsed = false
     @State private var collapsedSections: Set<SidebarSectionID> = []
     @State private var quickFilter: CommandCenterQuickFilter?
+    @State private var showTranscriptImport = false
     @FocusState private var searchFocused: Bool
 
     private static let dateFmt: DateFormatter = {
@@ -154,6 +155,18 @@ struct MeetingLibraryView: View {
                 }
             )
         }
+        .sheet(isPresented: $showTranscriptImport) {
+            TranscriptImportView { title, rawTranscript in
+                Task { @MainActor in
+                    if let meeting = await meetingManager.importTranscriptMeeting(
+                        title: title,
+                        rawTranscript: rawTranscript
+                    ) {
+                        selection = .meeting(meeting.id)
+                    }
+                }
+            }
+        }
     }
 
     private func resolvedSidebarWidth(for layout: CommandCenterLayout) -> CGFloat {
@@ -200,6 +213,23 @@ struct MeetingLibraryView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
 
             Spacer()
+
+            if AppEnvironment.usesTranscriptImportPrimaryFlow {
+                Button {
+                    showTranscriptImport = true
+                } label: {
+                    Label("Import transcript", systemImage: "text.badge.plus")
+                        .font(.system(size: layout.bodyFontSize, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(height: layout.controlHeight)
+                        .padding(.horizontal, round(12 * layout.scale))
+                        .background(Theme.sidebarBG.opacity(0.70), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(meetingManager.state == .processing)
+                .opacity(meetingManager.state == .processing ? 0.55 : 1)
+            }
 
             Button {
                 createNewNote()
@@ -329,7 +359,7 @@ struct MeetingLibraryView: View {
                     Text("NoteAI")
                         .font(.system(size: round(18 * layout.scale), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("v4.0")
+                    Text(AppEnvironment.versionLabel)
                         .font(.system(size: layout.tinyFontSize, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -347,7 +377,21 @@ struct MeetingLibraryView: View {
 
     private func recordingControls(layout: CommandCenterLayout) -> some View {
         VStack(spacing: round(8 * layout.scale)) {
-            if meetingManager.state == .recording {
+            if AppEnvironment.usesTranscriptImportPrimaryFlow {
+                Button {
+                    showTranscriptImport = true
+                } label: {
+                    Label("Import transcript", systemImage: "text.badge.plus")
+                        .font(.system(size: layout.bodyFontSize, weight: .bold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: layout.sidebarRecordButtonHeight)
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .disabled(meetingManager.state == .processing)
+                .opacity(meetingManager.state == .processing ? 0.55 : 1)
+            } else if meetingManager.state == .recording {
                 Button {
                     selection = nil
                 } label: {

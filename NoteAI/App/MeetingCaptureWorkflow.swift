@@ -22,7 +22,8 @@ enum MeetingCaptureWorkflow {
         startedAt: Date?,
         finishedAt: Date = Date(),
         transcript: [TranscriptSegment],
-        summary: MeetingSummary
+        summary: MeetingSummary,
+        sourceEvidence: EvidenceSource? = nil
     ) -> Meeting {
         let start = startedAt ?? finishedAt
         return Meeting(
@@ -31,8 +32,8 @@ enum MeetingCaptureWorkflow {
             date: start,
             duration: finishedAt.timeIntervalSince(start),
             transcript: transcript,
-            summary: summary
+            summary: summary,
+            sourceEvidence: sourceEvidence
         )
     }
 }
-

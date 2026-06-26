@@ -5,9 +5,9 @@ import GRDB
 final class MeetingStore {
     private let dbQueue: DatabaseQueue
 
-    init() {
+    init(namespace: String = AppEnvironment.storageNamespace) {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dbDir = appSupport.appendingPathComponent("NoteAI", isDirectory: true)
+        let dbDir = appSupport.appendingPathComponent(namespace, isDirectory: true)
 
         try? FileManager.default.createDirectory(at: dbDir, withIntermediateDirectories: true)
 

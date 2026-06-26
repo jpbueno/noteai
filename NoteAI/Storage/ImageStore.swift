@@ -8,7 +8,9 @@ enum ImageStore {
 
     private static var imagesDirectory: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("NoteAI/images", isDirectory: true)
+        return appSupport
+            .appendingPathComponent(AppEnvironment.storageNamespace, isDirectory: true)
+            .appendingPathComponent("images", isDirectory: true)
     }
 
     /// Saves an NSImage to disk and returns the markdown reference string to insert.

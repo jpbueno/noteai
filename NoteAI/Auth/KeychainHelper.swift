@@ -3,7 +3,7 @@ import Security
 
 /// Simple Keychain wrapper for storing auth tokens securely.
 enum KeychainHelper {
-    private static let service = "com.noteai.app"
+    private static var service: String { AppEnvironment.keychainService }
 
     static func save(key: String, value: String) {
         guard let data = value.data(using: .utf8) else { return }

@@ -3,25 +3,25 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>NoteAI</string>
+    <string>$(PRODUCT_NAME)</string>
     <key>CFBundleDisplayName</key>
-    <string>NoteAI</string>
+    <string>$(PRODUCT_NAME)</string>
     <key>CFBundleIdentifier</key>
-    <string>com.noteai.app</string>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$(MARKETING_VERSION)</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.noteai.app.capture-helper</string>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER).capture-helper</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>noteai</string>
+                <string>$(NOTEAI_URL_SCHEME)</string>
             </array>
         </dict>
     </array>

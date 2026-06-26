@@ -366,6 +366,92 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(input.contains("[00:03] Sarah Chen: We should prioritize the beta."))
     }
 
+    func testTranscriptImportParserReadsTeamsStyleSpeakerBlocks() {
+        let raw = """
+        Sarah Chen
+        0:01
+        We should review the deployment plan before Friday.
+
+        JP Santana 0:08
+        I will summarize the risks and send the next steps.
+        """
+
+        let segments = TranscriptImportParser.parse(raw)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].speaker, "Sarah Chen")
+        XCTAssertEqual(segments[0].startTime, 1, accuracy: 0.01)
+        XCTAssertEqual(segments[0].text, "We should review the deployment plan before Friday.")
+        XCTAssertEqual(segments[1].speaker, "JP Santana")
+        XCTAssertEqual(segments[1].startTime, 8, accuracy: 0.01)
+        XCTAssertEqual(segments[1].text, "I will summarize the risks and send the next steps.")
+    }
+
+    func testTranscriptImportParserPreservesTextWithoutSpeakerOrTimestamp() {
+        let raw = """
+        This is pasted text without Teams speaker metadata.
+        It should still become a useful transcript segment.
+        """
+
+        let segments = TranscriptImportParser.parse(raw)
+
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertNil(segments[0].speaker)
+        XCTAssertEqual(segments[0].startTime, 0, accuracy: 0.01)
+        XCTAssertEqual(
+            segments[0].text,
+            "This is pasted text without Teams speaker metadata. It should still become a useful transcript segment."
+        )
+    }
+
+    func testSourceGroundedMemoryCandidateTracksEvidenceWithoutConnectorAccess() {
+        let evidence = EvidenceSource(
+            kind: .teamsTranscriptPaste,
+            title: "Customer Sync",
+            externalID: nil,
+            capturedAt: Date(timeIntervalSince1970: 1_780_000_000)
+        )
+
+        let candidate = MemoryCandidate(
+            kind: .project,
+            summary: "DigitalOcean is validating KAI Scheduler bin-packing.",
+            evidence: [evidence],
+            confidence: 0.82
+        )
+
+        XCTAssertEqual(candidate.status, .proposed)
+        XCTAssertEqual(candidate.evidence.first?.kind, .teamsTranscriptPaste)
+        XCTAssertEqual(candidate.confidence, 0.82, accuracy: 0.001)
+        XCTAssertNil(candidate.evidence.first?.externalID)
+    }
+
+    func testV6UsesSeparateLocalNamespace() {
+        XCTAssertTrue(AppEnvironment.isV6(bundleIdentifier: "com.noteai.app.v6", displayName: "NoteAI v6"))
+        XCTAssertEqual(
+            AppEnvironment.storageNamespace(bundleIdentifier: "com.noteai.app.v6", displayName: "NoteAI v6"),
+            "NoteAI-v6"
+        )
+        XCTAssertEqual(
+            AppEnvironment.storageNamespace(bundleIdentifier: "com.noteai.app", displayName: "NoteAI"),
+            "NoteAI"
+        )
+    }
+
+    func testMeetingCaptureWorkflowPreservesImportedTranscriptEvidence() {
+        let evidence = EvidenceSource(kind: .teamsTranscriptPaste, title: "Teams Transcript", externalID: nil)
+        let meeting = MeetingCaptureWorkflow.makeMeeting(
+            title: "Imported Call",
+            startedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            transcript: [TranscriptSegment(text: "Discussed the customer plan.")],
+            summary: MeetingSummary(topics: ["Customer plan"], wasSummarized: true),
+            sourceEvidence: evidence
+        )
+
+        XCTAssertEqual(meeting.sourceEvidence?.kind, .teamsTranscriptPaste)
+        XCTAssertEqual(meeting.sourceEvidence?.title, "Teams Transcript")
+        XCTAssertEqual(meeting.transcript.first?.text, "Discussed the customer plan.")
+    }
+
     func testRecordingReadinessFallsBackToManualWhenCalendarAndDetectionAreMissing() {
         let readiness = MeetingRecordingReadiness.resolve(
             recordingState: .idle,

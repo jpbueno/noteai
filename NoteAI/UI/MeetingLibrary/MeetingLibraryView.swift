@@ -72,6 +72,7 @@ struct MeetingLibraryView: View {
     @State private var sidebarSearchExpanded = false
     @State private var targetedNoteSpace: String?
     @State private var draggingNoteID: UUID?
+    @State private var showTranscriptImport = false
     @FocusState private var searchFocused: Bool
     @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
     @AppStorage("noteai.sidebarExpandedLists.v1") private var sidebarExpandedListsRaw = ""
@@ -165,6 +166,18 @@ struct MeetingLibraryView: View {
                     meetingManager.discardPendingRecording()
                 }
             )
+        }
+        .sheet(isPresented: $showTranscriptImport) {
+            TranscriptImportView { title, rawTranscript in
+                Task {
+                    if let meeting = await meetingManager.importTranscriptMeeting(
+                        title: title,
+                        rawTranscript: rawTranscript
+                    ) {
+                        selection = .meeting(meeting.id)
+                    }
+                }
+            }
         }
     }
 
@@ -421,7 +434,23 @@ struct MeetingLibraryView: View {
 
     private func topBarRecordingControl(layout: CommandCenterLayout) -> some View {
         return Group {
-            if meetingManager.state == .recording {
+            if AppEnvironment.usesTranscriptImportPrimaryFlow {
+                Button {
+                    showTranscriptImport = true
+                } label: {
+                    Image(systemName: "text.badge.plus")
+                        .font(.system(size: layout.smallFontSize, weight: .bold))
+                        .foregroundStyle(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.95))
+                        .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
+                        .background(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().stroke(LibraryListPresentation.SidebarItemKind.meeting.tint.opacity(0.42), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(meetingManager.state == .processing)
+                .opacity(meetingManager.state == .processing ? 0.55 : 1)
+                .accessibilityLabel(Text("Import Teams transcript"))
+                .help("Import Teams transcript")
+            } else if meetingManager.state == .recording {
                 HStack(spacing: round(8 * layout.scale)) {
                     Circle()
                         .fill(Theme.danger)

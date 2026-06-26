@@ -69,7 +69,8 @@ enum MeetingCaptureWorkflow {
         transcript: [TranscriptSegment],
         summary: MeetingSummary,
         speakerLabels: [String: String] = [:],
-        speakerProfiles: [String: SpeakerProfile] = [:]
+        speakerProfiles: [String: SpeakerProfile] = [:],
+        sourceEvidence: EvidenceSource? = nil
     ) -> Meeting {
         let start = startedAt ?? finishedAt
         return Meeting(
@@ -80,7 +81,8 @@ enum MeetingCaptureWorkflow {
             transcript: TranscriptSpeakerLabels.assignPlaceholders(to: transcript),
             summary: summary,
             speakerLabels: speakerLabels,
-            speakerProfiles: speakerProfiles
+            speakerProfiles: speakerProfiles,
+            sourceEvidence: sourceEvidence
         )
     }
 }

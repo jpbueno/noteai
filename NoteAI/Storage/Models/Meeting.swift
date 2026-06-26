@@ -9,6 +9,7 @@ struct Meeting: Identifiable, Codable {
     var summary: MeetingSummary
     var speakerLabels: [String: String]
     var speakerProfiles: [String: SpeakerProfile]
+    var sourceEvidence: EvidenceSource?
 
     init(
         id: UUID,
@@ -18,7 +19,8 @@ struct Meeting: Identifiable, Codable {
         transcript: [TranscriptSegment],
         summary: MeetingSummary,
         speakerLabels: [String: String] = [:],
-        speakerProfiles: [String: SpeakerProfile] = [:]
+        speakerProfiles: [String: SpeakerProfile] = [:],
+        sourceEvidence: EvidenceSource? = nil
     ) {
         self.id = id
         self.title = title
@@ -28,6 +30,7 @@ struct Meeting: Identifiable, Codable {
         self.summary = summary
         self.speakerLabels = TranscriptSpeakerLabels.normalizedLabels(speakerLabels)
         self.speakerProfiles = TranscriptSpeakerLabels.normalizedProfiles(speakerProfiles)
+        self.sourceEvidence = sourceEvidence
     }
 
     enum CodingKeys: String, CodingKey {
@@ -39,6 +42,7 @@ struct Meeting: Identifiable, Codable {
         case summary
         case speakerLabels
         case speakerProfiles
+        case sourceEvidence
     }
 
     init(from decoder: Decoder) throws {
@@ -55,6 +59,7 @@ struct Meeting: Identifiable, Codable {
         speakerProfiles = TranscriptSpeakerLabels.normalizedProfiles(
             try container.decodeIfPresent([String: SpeakerProfile].self, forKey: .speakerProfiles) ?? [:]
         )
+        sourceEvidence = try container.decodeIfPresent(EvidenceSource.self, forKey: .sourceEvidence)
     }
 
     var formattedDuration: String {

@@ -25,7 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         NSApplication.shared.setActivationPolicy(.regular)
         showMainWindow()
-        startLocalCaptureHelper()
+        if AppEnvironment.localCaptureHelperEnabled {
+            startLocalCaptureHelper()
+        }
 
     }
 
@@ -71,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "NoteAI"
+        window.title = AppEnvironment.displayName
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.backgroundColor = NSColor(red: 0.098, green: 0.098, blue: 0.098, alpha: 1)

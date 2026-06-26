@@ -28,7 +28,36 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: BNLE7G9V59
         PRODUCT_BUNDLE_IDENTIFIER: com.noteai.app
+        NOTEAI_URL_SCHEME: noteai
         MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        MACOSX_DEPLOYMENT_TARGET: "14.2"
+        SWIFT_VERSION: "5.9"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    dependencies:
+      - package: WhisperKit
+      - package: GRDB
+        product: GRDB
+    entitlements:
+      path: NoteAI/NoteAI.entitlements
+
+  NoteAIv6:
+    type: application
+    platform: macOS
+    sources:
+      - path: NoteAI
+        excludes:
+          - "**/*.entitlements"
+    settings:
+      base:
+        INFOPLIST_FILE: NoteAI/Info.plist
+        CODE_SIGN_IDENTITY: Apple Development
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: BNLE7G9V59
+        PRODUCT_NAME: "NoteAI v6"
+        PRODUCT_BUNDLE_IDENTIFIER: com.noteai.app.v6
+        NOTEAI_URL_SCHEME: noteai-v6
+        MARKETING_VERSION: "6.0"
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.2"
         SWIFT_VERSION: "5.9"
@@ -63,3 +92,8 @@ schemes:
     test:
       targets:
         - NoteAITests
+
+  NoteAIv6:
+    build:
+      targets:
+        NoteAIv6: all

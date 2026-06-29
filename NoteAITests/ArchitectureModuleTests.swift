@@ -437,6 +437,31 @@ final class ArchitectureModuleTests: XCTestCase {
         )
     }
 
+    func testAppEnvironmentBuildsAboutVersionInfoFromBundleMetadata() {
+        let info = AppEnvironment.versionInfo(
+            displayName: "NoteAI v6",
+            marketingVersion: "6.0",
+            buildNumber: "42",
+            bundleIdentifier: "com.noteai.app.v6"
+        )
+
+        XCTAssertEqual(info.displayName, "NoteAI v6")
+        XCTAssertEqual(info.version, "6.0")
+        XCTAssertEqual(info.build, "42")
+        XCTAssertEqual(info.bundleIdentifier, "com.noteai.app.v6")
+        XCTAssertEqual(info.versionSummary, "Version 6.0 (42)")
+    }
+
+    func testSettingsExposeAboutPanelWithRuntimeVersionMetadata() throws {
+        let source = try settingsSource()
+
+        XCTAssertTrue(source.contains("case about = \"About\""))
+        XCTAssertTrue(source.contains("AboutSettingsView"))
+        XCTAssertTrue(source.contains("AppEnvironment.versionInfo()"))
+        XCTAssertTrue(source.contains("Bundle Identifier"))
+        XCTAssertTrue(source.contains("Build"))
+    }
+
     func testMeetingCaptureWorkflowPreservesImportedTranscriptEvidence() {
         let evidence = EvidenceSource(kind: .teamsTranscriptPaste, title: "Teams Transcript", externalID: nil)
         let meeting = MeetingCaptureWorkflow.makeMeeting(

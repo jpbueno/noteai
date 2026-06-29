@@ -452,6 +452,16 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(info.versionSummary, "Version 6.0 (42)")
     }
 
+    func testPrimaryAndV6TargetsPublishV6MarketingVersion() throws {
+        let projectSource = try String(contentsOf: repositoryRoot().appendingPathComponent("project.yml"))
+
+        XCTAssertTrue(projectSource.contains("  NoteAI:\n    type: application"))
+        XCTAssertTrue(projectSource.contains("PRODUCT_BUNDLE_IDENTIFIER: com.noteai.app"))
+        XCTAssertTrue(projectSource.contains("PRODUCT_BUNDLE_IDENTIFIER: com.noteai.app.v6"))
+        XCTAssertFalse(projectSource.contains("MARKETING_VERSION: \"0.1.0\""))
+        XCTAssertEqual(projectSource.components(separatedBy: "MARKETING_VERSION: \"6.0\"").count - 1, 2)
+    }
+
     func testSettingsExposeAboutPanelWithRuntimeVersionMetadata() throws {
         let source = try settingsSource()
 

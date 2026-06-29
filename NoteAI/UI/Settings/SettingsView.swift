@@ -16,6 +16,7 @@ struct SettingsView: View {
         case importData = "Import"
         case privacy = "Privacy"
         case t5t = "T5T"
+        case about = "About"
 
         var id: String { rawValue }
 
@@ -29,6 +30,7 @@ struct SettingsView: View {
             case .importData: return "square.and.arrow.down"
             case .privacy: return "lock.shield"
             case .t5t: return "list.bullet.rectangle"
+            case .about: return "info.circle"
             }
         }
     }
@@ -102,6 +104,7 @@ struct SettingsView: View {
                     case .importData: ImportSettingsView()
                     case .privacy: PrivacySettingsView()
                     case .t5t: T5TSettingsView()
+                    case .about: AboutSettingsView()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,6 +112,46 @@ struct SettingsView: View {
         }
         .frame(width: 680, height: 520)
         .preferredColorScheme(NoteAIAppearanceMode(rawValue: appearanceModeRaw)?.preferredColorScheme)
+    }
+}
+
+// MARK: - About Settings
+
+struct AboutSettingsView: View {
+    private let versionInfo = AppEnvironment.versionInfo()
+
+    var body: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(versionInfo.displayName)
+                        .font(.system(size: 24, weight: .semibold))
+
+                    Text(versionInfo.versionSummary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section("App Version") {
+                aboutRow("Version", value: versionInfo.version)
+                aboutRow("Build", value: versionInfo.build)
+                aboutRow("Bundle Identifier", value: versionInfo.bundleIdentifier)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(24)
+    }
+
+    private func aboutRow(_ title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
     }
 }
 

@@ -122,7 +122,7 @@ struct ChatPanelView: View {
                         .foregroundStyle(inputText.isEmpty ? Theme.textTertiary : Color.accentColor)
                 }
                 .buttonStyle(.plain)
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || chatManager.isTyping || chatManager.setupMessage != nil)
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || chatManager.isTyping)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -131,7 +131,7 @@ struct ChatPanelView: View {
         .background(Theme.contentBG)
         .onAppear {
             chatManager.refreshConfigurationPreflight()
-            inputFocused = chatManager.setupMessage == nil
+            inputFocused = true
         }
     }
 

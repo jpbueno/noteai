@@ -20,6 +20,7 @@
 		0752F4AFD49CA661E6A31401 /* Repositories.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F52C1801F8EDDC027BA910 /* Repositories.swift */; };
 		0983B1F4659E7C4646577F38 /* OutlookGraphIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2640448E3C9C3B2B8C13AEA /* OutlookGraphIntegration.swift */; };
 		0B56D65983FCA8D39BBBFE80 /* TodoItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414C68E50DD45252FFC181B5 /* TodoItem.swift */; };
+		0C1A21C38CCDD8C5593292FC /* WorkActivityAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B01C6C0BE1495B29E08CAA3 /* WorkActivityAssistant.swift */; };
 		0C69E0BD10BFBECFEEA97435 /* T5TComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48535DDFA54A76FA652F983A /* T5TComposerView.swift */; };
 		0DD3B65B576BD83F817B2917 /* TodoItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 414C68E50DD45252FFC181B5 /* TodoItem.swift */; };
 		0FD92587C412AD94CE8FD8F0 /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */; };
@@ -139,6 +140,7 @@
 		99FBCC6B19FEB6725D04D808 /* FloatingToolbarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 273EEA1DA3B86CC1ADC5E14F /* FloatingToolbarPanel.swift */; };
 		9CC0354A93E3A82738E661E6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20A2936958A2188902476039 /* Assets.xcassets */; };
 		9CEFF2981B130BDA48B5E206 /* CoachPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2518E6F5F675E601EC1854CD /* CoachPanelView.swift */; };
+		9D8901D7EFF5C74C0349D8EF /* WorkActivityAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B01C6C0BE1495B29E08CAA3 /* WorkActivityAssistant.swift */; };
 		9E67D9E21C555B4D43D80953 /* ProcessMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E1357ABA860879459F12A4 /* ProcessMonitor.swift */; };
 		A06E9DC3774C300D93388EF1 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD7D45C117535C77ED4005A /* AppEnvironment.swift */; };
 		A079F1ED793A7F4802CFCD74 /* TodoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B302FC97494EFE1DFA9E12 /* TodoDetailView.swift */; };
@@ -230,6 +232,7 @@
 		31EE88F8B897F5B1CE3EF8FF /* TTSPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSPlayerView.swift; sourceTree = "<group>"; };
 		366351FB8FDA7C3194CAE13B /* TaskPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPresentation.swift; sourceTree = "<group>"; };
 		378622E4B15EBD9DC9C51F49 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
+		3B01C6C0BE1495B29E08CAA3 /* WorkActivityAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkActivityAssistant.swift; sourceTree = "<group>"; };
 		3B071D338F9B3BC984C0225C /* NotificationDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDelivery.swift; sourceTree = "<group>"; };
 		3DDE806C60BACC9C3BD6CCEA /* ScreenCaptureProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureProvider.swift; sourceTree = "<group>"; };
 		4105A44A031B9FB0F12D52B9 /* RichMarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichMarkdownEditor.swift; sourceTree = "<group>"; };
@@ -405,6 +408,7 @@
 				D208AFF153103E243BD54E50 /* Summarization */,
 				AEDEFCFAC3E1234C104DEE96 /* Transcription */,
 				DF375074D2FBD9C75164AA95 /* UI */,
+				37CA7FAD60CBFAB3501BBAF9 /* WorkActivity */,
 			);
 			path = NoteAI;
 			sourceTree = "<group>";
@@ -440,6 +444,14 @@
 				7058E123FFCC2D5DD1A1BAF7 /* Outlook */,
 			);
 			path = Integrations;
+			sourceTree = "<group>";
+		};
+		37CA7FAD60CBFAB3501BBAF9 /* WorkActivity */ = {
+			isa = PBXGroup;
+			children = (
+				3B01C6C0BE1495B29E08CAA3 /* WorkActivityAssistant.swift */,
+			);
+			path = WorkActivity;
 			sourceTree = "<group>";
 		};
 		3B720DA86429780447B3E26F /* Tasks */ = {
@@ -901,6 +913,7 @@
 				69E22420FE304E978BA56828 /* TranscriptImportView.swift in Sources */,
 				0FD92587C412AD94CE8FD8F0 /* TranscriptView.swift in Sources */,
 				549929F446427006763358F2 /* TranscriptionEngine.swift in Sources */,
+				0C1A21C38CCDD8C5593292FC /* WorkActivityAssistant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -995,6 +1008,7 @@
 				39E69D9CCD8089228DE72928 /* TranscriptImportView.swift in Sources */,
 				F1D5C7E7EB34A71FE17C673A /* TranscriptView.swift in Sources */,
 				716ED9D47DD27F47D4290148 /* TranscriptionEngine.swift in Sources */,
+				9D8901D7EFF5C74C0349D8EF /* WorkActivityAssistant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

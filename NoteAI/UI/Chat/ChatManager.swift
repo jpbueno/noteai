@@ -56,6 +56,7 @@ final class ChatManager: ObservableObject {
     - After the user approves Outlook candidates, use approve_outlook_tasks; do not store full email bodies by default
     - When asked to list tasks, use list_tasks and read from durable Tasks
     - When asked to list todos, use list_todos and read from lightweight Todos
+    - When asked what the user worked on, important projects, or T5T-ready updates, answer from local NoteAI records only unless an explicit external source action exists
     - Be concise and helpful
     """
 
@@ -69,15 +70,19 @@ final class ChatManager: ObservableObject {
         guard !trimmed.isEmpty else { return }
         refreshConfigurationPreflight()
 
-        if let setupMessage {
-            lastError = setupMessage
-            messages.append(ChatMessage(role: .assistant, content: setupMessage))
+        messages.append(ChatMessage(role: .user, content: trimmed))
+
+        if handleLocalWorkActivityRequest(trimmed) {
             return
         }
 
-        messages.append(ChatMessage(role: .user, content: trimmed))
-
         if handleLocalTaskOrTodoListRequest(trimmed) {
+            return
+        }
+
+        if let setupMessage {
+            lastError = setupMessage
+            messages.append(ChatMessage(role: .assistant, content: setupMessage))
             return
         }
 
@@ -346,6 +351,24 @@ final class ChatManager: ObservableObject {
     private func todoTitle(from value: Any?) -> String {
         let title = (value as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? "Untitled todo" : title
+    }
+
+    private func handleLocalWorkActivityRequest(_ text: String) -> Bool {
+        guard let manager = meetingManager,
+              let output = WorkActivityAssistant.response(
+                for: text,
+                tasks: manager.tasks,
+                todos: manager.todos,
+                meetings: manager.meetings,
+                notes: manager.notes,
+                t5tReports: manager.t5tReports
+              )
+        else {
+            return false
+        }
+
+        messages.append(ChatMessage(role: .assistant, content: output))
+        return true
     }
 
     private func handleLocalTaskOrTodoListRequest(_ text: String) -> Bool {

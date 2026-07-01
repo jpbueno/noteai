@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from .date_ranges import day_range
+from .summaries import format_daily_task_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,8 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "daily-summary":
         summary_date = _resolve_date(args.date, args.timezone)
-        print(f"# Daily Task Summary — {summary_date}\n")
-        print("No open tasks were identified for the day.")
+        print(format_daily_task_summary(summary_date, []))
         return 0
     parser.error(f"{args.command} is assigned to a later task in this implementation plan")
     return 2

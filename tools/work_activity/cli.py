@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+from .connectors.noteai import DEFAULT_NOTEAI_DB, NoteAILocalConnector
 from .date_ranges import day_range
+from .deduplication import deduplicate_tasks
+from .extraction import extract_task_candidates
 from .slack_delivery import SlackDelivery
 from .summaries import format_daily_task_summary
 
@@ -17,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--dry-run", action="store_true")
     daily.add_argument("--send-slack", action="store_true")
     daily.add_argument("--slack-user-id")
+    daily.add_argument("--noteai-db", default=str(DEFAULT_NOTEAI_DB))
 
     subparsers.add_parser("open-tasks", help="List open task candidates")
     subparsers.add_parser("weekly-projects", help="Summarize projects worked on this week")
@@ -34,7 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "daily-summary":
         summary_date = _resolve_date(args.date, args.timezone)
-        summary = format_daily_task_summary(summary_date, [])
+        date_range = day_range(summary_date, args.timezone)
+        noteai_result = NoteAILocalConnector(Path(args.noteai_db)).query(date_range)
+        tasks = deduplicate_tasks(extract_task_candidates(noteai_result.items))
+        unavailable = []
+        if noteai_result.health.status != "available":
+            unavailable.append(noteai_result.health.message)
+        summary = format_daily_task_summary(summary_date, tasks, unavailable)
         print(summary)
         if args.dry_run:
             return 0

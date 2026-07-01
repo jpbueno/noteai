@@ -1,9 +1,13 @@
 import contextlib
 import io
+import json
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
@@ -37,20 +41,127 @@ class WorkActivityCLITests(unittest.TestCase):
             result = work_activity_cli.main(list(args))
         return result, stdout.getvalue()
 
+    def missing_noteai_db(self) -> str:
+        path = Path(tempfile.gettempdir()) / "noteai-work-activity-missing.sqlite"
+        path.unlink(missing_ok=True)
+        return str(path)
+
     def test_help_lists_daily_summary_command(self):
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("daily-summary", result.stdout)
 
     def test_daily_summary_dry_run_outputs_markdown(self):
-        result = self.run_cli("daily-summary", "--date", "2026-07-01", "--dry-run")
+        result = self.run_cli(
+            "daily-summary",
+            "--date",
+            "2026-07-01",
+            "--dry-run",
+            "--noteai-db",
+            self.missing_noteai_db(),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("# Daily Task Summary — 2026-07-01", result.stdout)
         self.assertIn("No open tasks were identified for the day.", result.stdout)
 
+    def test_daily_summary_reads_noteai_db_and_formats_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "noteai.sqlite"
+            with sqlite3.connect(db_path) as db:
+                db.executescript(
+                    """
+                    CREATE TABLE meetings (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        date REAL,
+                        duration REAL,
+                        json_data TEXT
+                    );
+                    CREATE TABLE todos (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        created_date REAL,
+                        modified_date REAL,
+                        completed INTEGER,
+                        due_date REAL,
+                        json_data TEXT
+                    );
+                    CREATE TABLE tasks (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        created_date REAL,
+                        modified_date REAL,
+                        status TEXT,
+                        work_date REAL,
+                        completed_date REAL,
+                        source_meeting_id TEXT,
+                        source_action_item_id TEXT,
+                        source_note_id TEXT,
+                        json_data TEXT
+                    );
+                    """
+                )
+                timestamp = datetime(2026, 7, 1, 10, tzinfo=ZoneInfo("America/New_York")).timestamp()
+                db.execute(
+                    """
+                    INSERT INTO tasks (
+                        id, title, created_date, modified_date, status, work_date,
+                        completed_date, source_meeting_id, source_action_item_id,
+                        source_note_id, json_data
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "task-1",
+                        "Follow up on NoteAI connector",
+                        timestamp,
+                        timestamp,
+                        "open",
+                        timestamp,
+                        None,
+                        None,
+                        None,
+                        None,
+                        json.dumps({"description": "Confirm the daily-summary path reads NoteAI tasks."}),
+                    ),
+                )
+
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--noteai-db",
+                str(db_path),
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("Follow up on NoteAI connector", output)
+        self.assertIn("Source: NoteAI", output)
+
+    def test_daily_summary_missing_noteai_db_reports_unavailable_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "missing.sqlite"
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--noteai-db",
+                str(db_path),
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("## Unavailable sources", output)
+        self.assertIn("Database not found:", output)
+
     def test_daily_summary_default_does_not_send_slack(self):
         with patch.object(work_activity_cli, "SlackDelivery", side_effect=AssertionError("unexpected send")):
-            result, output = self.run_main("daily-summary", "--date", "2026-07-01")
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--noteai-db",
+                self.missing_noteai_db(),
+            )
 
         self.assertEqual(result, 0)
         self.assertIn("# Daily Task Summary — 2026-07-01", output)
@@ -63,6 +174,8 @@ class WorkActivityCLITests(unittest.TestCase):
                 "2026-07-01",
                 "--dry-run",
                 "--send-slack",
+                "--noteai-db",
+                self.missing_noteai_db(),
             )
 
         self.assertEqual(result, 0)
@@ -75,6 +188,8 @@ class WorkActivityCLITests(unittest.TestCase):
                 "--date",
                 "2026-07-01",
                 "--send-slack",
+                "--noteai-db",
+                self.missing_noteai_db(),
             )
 
         self.assertNotEqual(result, 0)
@@ -92,6 +207,8 @@ class WorkActivityCLITests(unittest.TestCase):
                 "--send-slack",
                 "--slack-user-id",
                 "U123",
+                "--noteai-db",
+                self.missing_noteai_db(),
             )
 
         self.assertEqual(result, 1)

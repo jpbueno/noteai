@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
+
+from .date_ranges import day_range
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,17 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_date(value: str) -> str:
-    if value == "today":
-        return date.today().isoformat()
-    return value
+def _resolve_date(value: str, timezone: str = "America/New_York") -> str:
+    return day_range(value, timezone).label
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "daily-summary":
-        summary_date = _resolve_date(args.date)
+        summary_date = _resolve_date(args.date, args.timezone)
         print(f"# Daily Task Summary — {summary_date}\n")
         print("No open tasks were identified for the day.")
         return 0

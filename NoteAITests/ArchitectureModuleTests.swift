@@ -58,6 +58,8 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertTrue(source.contains("TextField(\"Ask anything...\", text: $inputText, axis: .vertical)"))
         XCTAssertTrue(source.contains(".lineLimit(1...5)"))
+        XCTAssertFalse(source.contains("|| chatManager.setupMessage != nil"))
+        XCTAssertTrue(source.contains("inputFocused = true"))
         XCTAssertFalse(source.contains("TextField(\"Ask anything...\", text: $inputText)\n"))
     }
 
@@ -1985,6 +1987,103 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("(completed"))
         XCTAssertFalse(output.contains("Title:"))
         XCTAssertFalse(output.contains("Description:"))
+    }
+
+    func testWorkActivityAssistantAnswersWeeklyWorkFromLocalNoteAIRecords() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 1, hour: 12)))
+        let inWeek = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 30)))
+        let old = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 20)))
+
+        let response = WorkActivityAssistant.response(
+            for: "Tell me the most important projects I've worked on this week",
+            tasks: [
+                TaskItem(
+                    title: "Advance Nscale Dynamo PoC",
+                    description: "Aligned runtime ownership and next validation path.",
+                    status: .completed,
+                    workDate: inWeek,
+                    completedDate: inWeek,
+                    createdDate: inWeek,
+                    modifiedDate: inWeek
+                ),
+                TaskItem(title: "Old task", description: "Outside range.", workDate: old, createdDate: old, modifiedDate: old),
+            ],
+            todos: [
+                TodoItem(title: "Ping Crusoe", dueDate: inWeek, createdDate: inWeek, modifiedDate: inWeek)
+            ],
+            meetings: [
+                Meeting(id: UUID(), title: "Nscale runtime sync", date: inWeek, duration: 1_800, transcript: [], summary: MeetingSummary())
+            ],
+            notes: [
+                Note(title: "Nscale notes", content: "Captured runtime ownership decision.", createdDate: inWeek, modifiedDate: inWeek)
+            ],
+            t5tReports: [],
+            now: now,
+            calendar: calendar
+        )
+
+        let output = try XCTUnwrap(response)
+        XCTAssertTrue(output.contains("Work activity this week"))
+        XCTAssertTrue(output.contains("Advance Nscale Dynamo PoC"))
+        XCTAssertTrue(output.contains("Aligned runtime ownership and next validation path."))
+        XCTAssertTrue(output.contains("Ping Crusoe"))
+        XCTAssertTrue(output.contains("Nscale runtime sync"))
+        XCTAssertTrue(output.contains("Nscale notes"))
+        XCTAssertTrue(output.contains("NoteAI local records"))
+        XCTAssertTrue(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
+        XCTAssertFalse(output.contains("Old task"))
+    }
+
+    func testWorkActivityAssistantReturnsT5TReadyTasksOnly() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 1, hour: 12)))
+        let inWeek = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 30)))
+
+        let response = WorkActivityAssistant.response(
+            for: "Give me T5T-ready updates from this week",
+            tasks: [
+                TaskItem(
+                    title: "Delivered DigitalOcean KAI validation",
+                    description: "Moved KAI Scheduler from planning into customer validation.",
+                    status: .completed,
+                    workDate: inWeek,
+                    completedDate: inWeek,
+                    createdDate: inWeek,
+                    modifiedDate: inWeek
+                )
+            ],
+            todos: [
+                TodoItem(title: "Buy coffee", dueDate: inWeek, createdDate: inWeek, modifiedDate: inWeek)
+            ],
+            meetings: [
+                Meeting(id: UUID(), title: "Raw meeting", date: inWeek, duration: 900, transcript: [], summary: MeetingSummary())
+            ],
+            notes: [],
+            t5tReports: [],
+            now: now,
+            calendar: calendar
+        )
+
+        let output = try XCTUnwrap(response)
+        XCTAssertTrue(output.contains("T5T-ready task updates"))
+        XCTAssertTrue(output.contains("Delivered DigitalOcean KAI validation"))
+        XCTAssertTrue(output.contains("Moved KAI Scheduler from planning into customer validation."))
+        XCTAssertFalse(output.contains("Buy coffee"))
+        XCTAssertFalse(output.contains("Raw meeting"))
+    }
+
+    func testChatManagerRoutesWorkActivityBeforeGenericTaskListing() throws {
+        let source = try chatManagerSource()
+
+        XCTAssertTrue(source.contains("handleLocalWorkActivityRequest"))
+        XCTAssertTrue(source.contains("WorkActivityAssistant.response("))
+
+        let workActivityRange = try XCTUnwrap(source.range(of: "if handleLocalWorkActivityRequest(trimmed)"))
+        let taskListRange = try XCTUnwrap(source.range(of: "if handleLocalTaskOrTodoListRequest(trimmed)"))
+        let setupRange = try XCTUnwrap(source.range(of: "if let setupMessage"))
+        XCTAssertLessThan(workActivityRange.lowerBound, taskListRange.lowerBound)
+        XCTAssertLessThan(taskListRange.lowerBound, setupRange.lowerBound)
     }
 
     func testTaskItemPreservesOutlookSourceMetadataThroughCodable() throws {

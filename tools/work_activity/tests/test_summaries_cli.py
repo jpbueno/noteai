@@ -1,17 +1,23 @@
+import contextlib
+import io
 import subprocess
 import sys
 import unittest
 from datetime import datetime
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from tools.work_activity import cli as work_activity_cli
 from tools.work_activity.assistant_queries import (
     get_daily_task_summary,
     get_open_tasks,
     get_projects_worked_on,
     get_t5t_ready_tasks,
 )
+from tools.work_activity.cli_runner import CLIResult, CLIRunner
 from tools.work_activity.date_ranges import day_range
 from tools.work_activity.models import ActivityItem, SourceKind, SourceRef, TaskCandidate
+from tools.work_activity.slack_delivery import DeliveryResult, SlackDelivery
 from tools.work_activity.summaries import format_daily_task_summary, format_open_tasks
 
 
@@ -25,6 +31,12 @@ class WorkActivityCLITests(unittest.TestCase):
             check=False,
         )
 
+    def run_main(self, *args: str) -> tuple[int, str]:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = work_activity_cli.main(list(args))
+        return result, stdout.getvalue()
+
     def test_help_lists_daily_summary_command(self):
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -35,6 +47,56 @@ class WorkActivityCLITests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("# Daily Task Summary — 2026-07-01", result.stdout)
         self.assertIn("No open tasks were identified for the day.", result.stdout)
+
+    def test_daily_summary_default_does_not_send_slack(self):
+        with patch.object(work_activity_cli, "SlackDelivery", side_effect=AssertionError("unexpected send")):
+            result, output = self.run_main("daily-summary", "--date", "2026-07-01")
+
+        self.assertEqual(result, 0)
+        self.assertIn("# Daily Task Summary — 2026-07-01", output)
+
+    def test_daily_summary_dry_run_with_send_slack_does_not_send(self):
+        with patch.object(work_activity_cli, "SlackDelivery", side_effect=AssertionError("unexpected send")):
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--dry-run",
+                "--send-slack",
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("# Daily Task Summary — 2026-07-01", output)
+
+    def test_daily_summary_send_slack_requires_user_id(self):
+        with patch.object(work_activity_cli, "SlackDelivery", side_effect=AssertionError("unexpected send")):
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--send-slack",
+            )
+
+        self.assertNotEqual(result, 0)
+        self.assertIn("--slack-user-id is required", output)
+
+    def test_daily_summary_send_slack_failure_returns_nonzero(self):
+        delivery = Mock()
+        delivery.send_direct_message.return_value = DeliveryResult(ok=False, message="boom")
+
+        with patch.object(work_activity_cli, "SlackDelivery", return_value=delivery):
+            result, output = self.run_main(
+                "daily-summary",
+                "--date",
+                "2026-07-01",
+                "--send-slack",
+                "--slack-user-id",
+                "U123",
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("Slack delivery failed: boom", output)
+        delivery.send_direct_message.assert_called_once()
 
     def test_format_daily_task_summary_includes_task_details(self):
         task = TaskCandidate(
@@ -78,15 +140,39 @@ class WorkActivityCLITests(unittest.TestCase):
         self.assertEqual(format_open_tasks([]), "No open tasks were identified.")
 
 
-from tools.work_activity.cli_runner import CLIRunner
-
-
 class CLIRunnerTests(unittest.TestCase):
     def test_missing_command_returns_unavailable_health(self):
         runner = CLIRunner()
         result = runner.run(["definitely-not-installed-noteai-cli", "--version"])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not found", result.stderr.lower())
+
+
+class SlackDeliveryTests(unittest.TestCase):
+    def test_send_direct_message_reports_missing_slack_cli(self):
+        class FakeRunner:
+            def __init__(self) -> None:
+                self.args: list[list[str]] = []
+
+            def run(self, args: list[str]) -> CLIResult:
+                self.args.append(args)
+                return CLIResult(
+                    args=args,
+                    returncode=127,
+                    stdout="",
+                    stderr="Command not found: slack-cli",
+                )
+
+        fake = FakeRunner()
+
+        result = SlackDelivery(runner=fake).send_direct_message("U09BXNGD81L", "hello")
+
+        self.assertFalse(result.ok)
+        self.assertIn("slack-cli", result.message)
+        self.assertEqual(
+            fake.args,
+            [["slack-cli", "message", "send", "--user-id", "U09BXNGD81L", "--body", "hello"]],
+        )
 
 
 class AssistantQueryTests(unittest.TestCase):

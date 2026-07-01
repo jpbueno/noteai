@@ -29,6 +29,7 @@ class NoteAILocalConnector:
                 items.extend(self._read_tasks(db, date_range))
                 items.extend(self._read_todos(db, date_range))
                 items.extend(self._read_meetings(db, date_range))
+                items.sort(key=lambda item: (item.timestamp or date_range.start, item.title.lower()))
             return SourceQueryResult(
                 source=SourceKind.NOTEAI,
                 items=items,
@@ -109,7 +110,10 @@ class NoteAILocalConnector:
         return " ".join(parts)
 
     def _read_tasks(self, db: sqlite3.Connection, date_range: DateRange) -> list[ActivityItem]:
-        rows = db.execute("SELECT * FROM tasks").fetchall()
+        rows = db.execute(
+            "SELECT * FROM tasks "
+            "ORDER BY COALESCE(work_date, completed_date, created_date), title, id"
+        ).fetchall()
         items = []
         for row in rows:
             data = self._decode_json_data(row)
@@ -135,7 +139,9 @@ class NoteAILocalConnector:
         return items
 
     def _read_todos(self, db: sqlite3.Connection, date_range: DateRange) -> list[ActivityItem]:
-        rows = db.execute("SELECT * FROM todos").fetchall()
+        rows = db.execute(
+            "SELECT * FROM todos ORDER BY COALESCE(due_date, created_date), title, id"
+        ).fetchall()
         items = []
         for row in rows:
             data = self._decode_json_data(row)
@@ -159,7 +165,9 @@ class NoteAILocalConnector:
         return items
 
     def _read_meetings(self, db: sqlite3.Connection, date_range: DateRange) -> list[ActivityItem]:
-        rows = db.execute("SELECT * FROM meetings").fetchall()
+        rows = db.execute(
+            "SELECT * FROM meetings ORDER BY date, title, id"
+        ).fetchall()
         items = []
         for row in rows:
             data = self._decode_json_data(row)

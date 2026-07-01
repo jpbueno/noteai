@@ -86,6 +86,22 @@ def create_fixture_db(path: Path) -> None:
             ),
         )
         db.execute(
+            "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "task-2",
+                "Earlier task",
+                work_date - 3600,
+                work_date - 3600,
+                "open",
+                work_date - 3600,
+                None,
+                None,
+                None,
+                None,
+                json.dumps({"description": "Earlier deterministic ordering task."}),
+            ),
+        )
+        db.execute(
             "INSERT INTO todos VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 "todo-1",
@@ -116,6 +132,10 @@ class NoteAIConnectorTests(unittest.TestCase):
             self.assertEqual(result.health.status, "available")
             self.assertEqual(result.source, SourceKind.NOTEAI)
             items = {item.title: item for item in result.items}
+            self.assertEqual(
+                [item.title for item in result.items],
+                ["Earlier task", "Follow up with Nscale", "Nscale Sync", "Ping Crusoe"],
+            )
             self.assertIn("Follow up with Nscale", items)
             self.assertIn("Ping Crusoe", items)
             self.assertIn("Nscale Sync", items)

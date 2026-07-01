@@ -12,7 +12,20 @@ def _has_remaining_followup(text: str) -> bool:
     lowered = text.lower()
     if "no remaining follow-up" in lowered or "no remaining follow up" in lowered:
         return False
-    return any(token in lowered for token in ("follow up", "follow-up", "next step", "needs", "blocker", "todo"))
+    return any(
+        token in lowered
+        for token in (
+            "follow up",
+            "follow-up",
+            "next step",
+            "needs follow-up",
+            "needs follow up",
+            "blocker",
+            "todo",
+            "to-do",
+            "action item",
+        )
+    )
 
 
 def _jp_owned(item: ActivityItem) -> bool:

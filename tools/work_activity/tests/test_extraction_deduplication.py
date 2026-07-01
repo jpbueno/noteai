@@ -62,6 +62,18 @@ class ExtractionAndDeduplicationTests(unittest.TestCase):
         )
         self.assertEqual(extract_task_candidates([item]), [])
 
+    def test_ignores_generic_needs_language_in_noteai_meeting(self):
+        item = ActivityItem(
+            source=SourceKind.NOTEAI,
+            timestamp=datetime(2026, 7, 1, tzinfo=ZoneInfo("America/New_York")),
+            title="Customer pricing discussion",
+            body="The customer needs better pricing before committing to the rollout.",
+            status=None,
+            source_refs=[SourceRef(SourceKind.NOTEAI, "NoteAI meeting", source_id="meeting-2")],
+            raw_metadata={"table": "meetings"},
+        )
+        self.assertEqual(extract_task_candidates([item]), [])
+
     def test_ignores_completed_items_without_remaining_followup(self):
         item = ActivityItem(
             source=SourceKind.NOTEAI,

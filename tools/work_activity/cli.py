@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
+from .connectors.ai_pim import AIPIMHarness
 from .connectors.noteai import DEFAULT_NOTEAI_DB, NoteAILocalConnector
-from .date_ranges import day_range
+from .date_ranges import day_range, parse_custom_range
 from .deduplication import deduplicate_tasks
 from .extraction import extract_task_candidates
 from .slack_delivery import SlackDelivery
@@ -27,6 +29,28 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("weekly-projects", help="Summarize projects worked on this week")
     subparsers.add_parser("meeting-summary", help="Summarize a meeting")
     subparsers.add_parser("t5t-ready", help="Generate T5T-ready task entries")
+
+    source_status = subparsers.add_parser(
+        "source-status", help="Report Slack or Teams installation and authentication status as JSON"
+    )
+    source_status.add_argument("--source", required=True, choices=("slack", "teams"))
+
+    source_auth = subparsers.add_parser(
+        "source-auth", help="Check or launch Slack or Teams authentication"
+    )
+    source_auth.add_argument("--source", required=True, choices=("slack", "teams"))
+    source_auth.add_argument("--action", required=True, choices=("status", "login"))
+
+    source_search = subparsers.add_parser(
+        "source-search", help="Search bounded Slack or Teams work activity as JSON"
+    )
+    source_search.add_argument("--source", required=True, choices=("slack", "teams"))
+    source_search.add_argument("--from", dest="start_date", required=True)
+    source_search.add_argument("--to", dest="end_date", required=True)
+    source_search.add_argument("--timezone", default="America/New_York")
+    source_search.add_argument("--query", default="")
+    source_search.add_argument("--limit", type=int, default=50)
+    source_search.add_argument("--messages-per-chat", type=int, default=50)
     return parser
 
 
@@ -58,5 +82,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Slack delivery failed: {result.message}")
                 return 1
         return 0
+    if args.command == "source-status":
+        return _print_json_result(AIPIMHarness().status(args.source))
+    if args.command == "source-auth":
+        harness = AIPIMHarness()
+        result = harness.status(args.source) if args.action == "status" else harness.login(args.source)
+        return _print_json_result(result)
+    if args.command == "source-search":
+        date_range = parse_custom_range(args.start_date, args.end_date, args.timezone)
+        result = AIPIMHarness().search(
+            args.source,
+            date_range,
+            query=args.query,
+            limit=args.limit,
+            messages_per_chat=args.messages_per_chat,
+        )
+        return _print_json_result(result)
     parser.error(f"{args.command} is assigned to a later task in this implementation plan")
     return 2
+
+
+def _print_json_result(result: dict[str, object]) -> int:
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True))
+    return 0 if result.get("success") is True else 1

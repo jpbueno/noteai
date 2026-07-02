@@ -10,9 +10,27 @@ This package provides a small CLI and Python facade for collecting NoteAI work a
 python3 -m tools.work_activity daily-summary --date today --timezone America/New_York
 python3 -m tools.work_activity daily-summary --date 2026-07-01 --noteai-db "/Users/jbuenosantan/Library/Application Support/NoteAI/meetings.sqlite"
 python3 -m tools.work_activity daily-summary --date today --send-slack --slack-user-id U1234567890
+python3 -m tools.work_activity source-status --source slack
+python3 -m tools.work_activity source-auth --source teams --action login
+python3 -m tools.work_activity source-search --source slack --from 2026-07-01 --to 2026-07-07 --query NoteAI --limit 50
+python3 -m tools.work_activity source-search --source teams --from 2026-07-01 --to 2026-07-07 --query NoteAI --limit 50 --messages-per-chat 50
 ```
 
 `daily-summary` reads the local NoteAI database through `NoteAILocalConnector`, extracts task candidates, deduplicates them, and prints Markdown. Slack delivery is opt-in and requires an explicit `--slack-user-id`.
+
+## Slack And Teams JSON Interface
+
+`source-status`, `source-auth`, and `source-search` are the stable subprocess interface for the native app. Each valid invocation prints one JSON object with `schemaVersion: 1`, `success`, `source`, `action`, `status`, `message`, `data`, and `metadata`.
+
+Search results are normalized under `data.items`. Each item contains only `id`, `source`, `timestamp`, `title`, `body`, `url`, `author`, and `context`. The harness does not return upstream query echoes, raw metadata, stderr, auth callbacks, or credential fields.
+
+Slack search always calls page 1 with an explicit limit of at most 100 and adds these server-side filters:
+
+```text
+from:me after:<inclusive-start-date> before:<exclusive-end-date>
+```
+
+Teams has no server-side search in the inspected ai-pim-utils interface. The harness lists at most 50 chats, reads at most 200 messages per chat, stops after 60 seconds, and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report chat, message, result, time, or read limits that can omit coverage.
 
 ## Library Facade
 
@@ -26,6 +44,9 @@ Use `tools.work_activity.assistant_queries` for assistant-facing workflows:
 ## Security
 
 - Source credentials stay behind existing source CLIs and are not stored by this package.
+- Auth actions invoke only `slack-cli auth status/login` and `teams-cli auth status/login`; the package never reads ai-pim-utils credential files.
+- External JSON is accepted only when the process succeeds and the response contains `success: true`.
+- Subprocesses use argument arrays without a shell, with bounded runtime and combined output size.
 - NoteAI SQLite is opened read-only with SQLite URI `mode=ro`.
 - External source bodies are not cached by default.
 - Slack write behavior is limited to an explicit `--send-slack` request with an explicit recipient.
@@ -39,4 +60,4 @@ python3 -m unittest discover -s tools/work_activity/tests -v
 
 ## Current Scope
 
-This slice wires NoteAI local activity into the daily summary path and defines seams for external source health checks and Slack delivery. Live Outlook, Slack, Teams, and Google Drive ingestion remain future integration slices.
+This package supports NoteAI local activity plus live Slack message search and bounded Teams chat enumeration through ai-pim-utils. Live Outlook, calendar, meeting-artifact, and Google Drive ingestion remain future integration slices.

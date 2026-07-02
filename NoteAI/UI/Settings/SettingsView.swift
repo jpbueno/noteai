@@ -159,10 +159,7 @@ struct AboutSettingsView: View {
 
 struct AccountSettingsView: View {
     @ObservedObject var authManager: GoogleAuthManager
-    @StateObject private var outlookAuth = OutlookGraphAuthManager()
     @StateObject private var aipimSources = AIPIMAccountSourceModel()
-    @AppStorage(OutlookGraphSettings.clientIDKey) private var outlookClientID = ""
-    @AppStorage(OutlookGraphSettings.tenantIDKey) private var outlookTenantID = "common"
 
     var body: some View {
         Form {
@@ -217,58 +214,13 @@ struct AccountSettingsView: View {
                 }
             }
 
-            Section("Microsoft Outlook") {
-                TextField("Microsoft Entra client ID", text: $outlookClientID)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Tenant ID or common", text: $outlookTenantID)
-                    .textFieldStyle(.roundedBorder)
-
-                Text("Create a public desktop app registration with Microsoft Graph Mail.Read and a localhost redirect URI. NoteAI searches mail only when you ask and stores tokens in Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if outlookAuth.isAuthenticated {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(OutlookGraphTokenStore.userName.isEmpty ? "Microsoft account connected" : OutlookGraphTokenStore.userName)
-                            .font(.system(size: 14, weight: .medium))
-                        if !OutlookGraphTokenStore.userEmail.isEmpty {
-                            Text(OutlookGraphTokenStore.userEmail)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Button("Sign Out of Outlook", role: .destructive) {
-                        outlookAuth.signOut()
-                    }
-                } else {
-                    Button {
-                        outlookAuth.signIn()
-                    } label: {
-                        if outlookAuth.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text("Sign In with Microsoft")
-                        }
-                    }
-                    .disabled(outlookAuth.isLoading || outlookClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                if let error = outlookAuth.error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-
             Section("Work Activity Sources") {
                 ForEach(AIPIMSource.allCases, id: \.self) { source in
                     aipimSourceRow(source)
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("ai-pim-utils 0.105.0 or later is required for Slack and Teams work activity.")
+                    Text("ai-pim-utils \(AIPIMInstallHelp.minimumOutlookCLIVersion) or later is required for Outlook, Slack, and Teams work activity.")
                     ForEach(AIPIMInstallHelp.commands, id: \.self) { command in
                         Text(command)
                             .font(.system(.caption, design: .monospaced))

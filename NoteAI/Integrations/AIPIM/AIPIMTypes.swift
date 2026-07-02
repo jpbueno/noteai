@@ -1,11 +1,13 @@
 import Foundation
 
 enum AIPIMSource: String, CaseIterable, Sendable {
+    case outlook
     case slack
     case teams
 
     var displayName: String {
         switch self {
+        case .outlook: return "Outlook"
         case .slack: return "Slack"
         case .teams: return "Teams"
         }
@@ -13,6 +15,7 @@ enum AIPIMSource: String, CaseIterable, Sendable {
 
     var binaryName: String {
         switch self {
+        case .outlook: return "outlook-cli"
         case .slack: return "slack-cli"
         case .teams: return "teams-cli"
         }
@@ -98,6 +101,7 @@ extension AIPIMError: LocalizedError {
 }
 
 enum AIPIMInstallHelp {
+    static let minimumOutlookCLIVersion = "0.105.0"
     static let commands = [
         "brew tap ai-cli/ai-pim-utils",
         "brew install --cask ai-pim-utils"

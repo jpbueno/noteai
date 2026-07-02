@@ -123,36 +123,32 @@ struct NoteAIWorkActivitySourceAdapter: WorkActivitySourceAdapter {
 
 struct OutlookWorkActivitySourceAdapter: WorkActivitySourceAdapter {
     let source: WorkActivitySource = .outlook
-    var status: AssistantExternalSourceState
-    var searchCandidates: (OutlookMailSearchRequest) async throws -> [OutlookTaskCandidate]
+    var search: (DateInterval, Int) async throws -> AIPIMSearchResult
+
+    init(search: @escaping (DateInterval, Int) async throws -> AIPIMSearchResult) {
+        self.search = search
+    }
 
     func searchWorkActivity(_ query: WorkActivityQuery) async -> WorkActivitySourceResult {
-        guard status == .connected else {
-            return WorkActivitySourceResult(source: source, status: .skipped(status.description(for: source.statusName)))
-        }
-
         do {
-            let candidates = try await searchCandidates(OutlookMailSearchRequest(
-                query: "",
-                after: query.range.interval.start,
-                before: query.range.interval.end,
-                limit: min(query.limit, 12)
-            ))
-            let records = candidates.map { candidate in
+            let result = try await search(query.range.interval, min(query.limit, 25))
+            let records = result.items.map { item in
                 WorkActivityRecord(
-                    date: candidate.workDate ?? query.range.interval.end,
+                    date: item.timestamp,
                     source: source,
                     kind: "Outlook email",
-                    title: WorkActivityText.cleanTitle(candidate.title, fallback: "Outlook conversation"),
-                    detail: WorkActivityText.cleanOptional(candidate.description)
+                    title: WorkActivityText.cleanTitle(item.title, fallback: "Outlook conversation"),
+                    detail: WorkActivityText.cleanOptional(item.body)
                 )
             }
-            return WorkActivitySourceResult(source: source, status: .searched, records: records)
-        } catch {
             return WorkActivitySourceResult(
                 source: source,
-                status: .failed("\(source.statusName) failed: \(WorkActivityText.clipped(error.localizedDescription, limit: 180))")
+                status: .searched,
+                records: records,
+                coverageNote: result.isPartial ? "Outlook returned bounded message previews; results may be partial." : nil
             )
+        } catch {
+            return AIPIMWorkActivityFailure.result(source: source, error: error)
         }
     }
 }
@@ -664,18 +660,10 @@ enum AssistantExternalSourceState: Equatable {
 enum AssistantSourceStatusProvider {
     static func currentStatus() -> AssistantSourceStatus {
         AssistantSourceStatus(
-            outlook: outlookStatus(),
+            outlook: aipimStatus(.outlook),
             slack: aipimStatus(.slack),
             teams: aipimStatus(.teams)
         )
-    }
-
-    private static func outlookStatus() -> AssistantExternalSourceState {
-        guard OutlookGraphSettings.hasClientConfiguration else {
-            return .needsConfiguration
-        }
-
-        return OutlookGraphTokenStore.isSignedIn ? .connected : .needsSignIn
     }
 
     private static func aipimStatus(_ source: AIPIMSource) -> AssistantExternalSourceState {

@@ -24,8 +24,10 @@ final class AIPIMAccountSourceModel: ObservableObject {
     }
 
     func refreshAll() async {
+        async let outlookStatus = connector.status(for: .outlook)
         async let slackStatus = connector.status(for: .slack)
         async let teamsStatus = connector.status(for: .teams)
+        statuses[.outlook] = await outlookStatus
         statuses[.slack] = await slackStatus
         statuses[.teams] = await teamsStatus
     }

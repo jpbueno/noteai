@@ -1,11 +1,37 @@
 import Foundation
 import Darwin
 
+struct AIPIMCommandEnvironment: Equatable, Sendable {
+    enum AuthenticationInteractivity: String, Sendable {
+        case never
+    }
+
+    let authenticationInteractivity: AuthenticationInteractivity?
+
+    static let inherited = AIPIMCommandEnvironment(authenticationInteractivity: nil)
+    static let noninteractive = AIPIMCommandEnvironment(authenticationInteractivity: .never)
+}
+
 struct AIPIMCommand: Equatable, Sendable {
     let executableURL: URL
     let arguments: [String]
     let timeout: TimeInterval
     let maxOutputBytes: Int
+    let environment: AIPIMCommandEnvironment
+
+    init(
+        executableURL: URL,
+        arguments: [String],
+        timeout: TimeInterval,
+        maxOutputBytes: Int,
+        environment: AIPIMCommandEnvironment = .inherited
+    ) {
+        self.executableURL = executableURL
+        self.arguments = arguments
+        self.timeout = timeout
+        self.maxOutputBytes = maxOutputBytes
+        self.environment = environment
+    }
 }
 
 struct AIPIMCommandResult: Equatable, Sendable {
@@ -179,6 +205,9 @@ private func spawn(
 
     var environment = ProcessInfo.processInfo.environment
     environment["AI_PIM_UTILS_TELEMETRY_DISABLED"] = "1"
+    if let authenticationInteractivity = command.environment.authenticationInteractivity {
+        environment["AI_PIM_UTILS_AUTH_INTERACTIVITY"] = authenticationInteractivity.rawValue
+    }
     let environmentValues = environment.map { "\($0.key)=\($0.value)" }
     let executablePath = command.executableURL.path
     let argumentValues = [executablePath] + command.arguments

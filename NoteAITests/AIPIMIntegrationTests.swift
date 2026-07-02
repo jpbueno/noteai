@@ -31,6 +31,27 @@ final class AIPIMIntegrationTests: XCTestCase {
         XCTAssertEqual(String(decoding: result.stdout, as: UTF8.self), "$HOME; echo unsafe")
     }
 
+    func testProcessRunnerMergesNarrowNoninteractiveOverrideIntoInheritedEnvironment() async throws {
+        let runner = AIPIMProcessRunner()
+        let overrideResult = try await runner.execute(AIPIMCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/printenv"),
+            arguments: ["AI_PIM_UTILS_AUTH_INTERACTIVITY"],
+            timeout: 2,
+            maxOutputBytes: 1_024,
+            environment: .noninteractive
+        ))
+        let inheritedResult = try await runner.execute(AIPIMCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/printenv"),
+            arguments: ["PATH"],
+            timeout: 2,
+            maxOutputBytes: 8_192,
+            environment: .noninteractive
+        ))
+
+        XCTAssertEqual(String(decoding: overrideResult.stdout, as: UTF8.self), "never\n")
+        XCTAssertFalse(inheritedResult.stdout.isEmpty)
+    }
+
     func testProcessRunnerTerminatesCommandsThatExceedTimeout() async {
         let command = AIPIMCommand(
             executableURL: URL(fileURLWithPath: "/bin/sleep"),
@@ -263,6 +284,415 @@ final class AIPIMIntegrationTests: XCTestCase {
 
         XCTAssertEqual(status.state, .failed)
         XCTAssertFalse(status.authenticated)
+    }
+
+    func testOutlookStatusAcceptsDirectAuthenticatedShapeWithoutExposingIdentity() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["authenticated": true, "username": "private@example.com"]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .available)
+        XCTAssertTrue(status.installed)
+        XCTAssertTrue(status.authenticated)
+        let commands = await executor.commands
+        XCTAssertEqual(commands.map(\.arguments), [["auth", "status", "--json"]])
+        XCTAssertEqual(commands.first?.environment, .noninteractive)
+        XCTAssertFalse(status.message.contains("private@example.com"))
+    }
+
+    func testOutlookStatusAcceptsSuccessfulEnvelopeShape() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": ["authenticated": true, "username": "private@example.com"],
+                "metadata": ["version": "0.105.0"]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .available)
+        XCTAssertTrue(status.authenticated)
+    }
+
+    func testOutlookStatusAcceptsAuthenticatedEnvelopeWithoutUsername() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["success": true, "data": ["authenticated": true]]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .available)
+        XCTAssertTrue(status.authenticated)
+    }
+
+    func testOutlookStatusFailsClosedWhenAuthenticatedFieldIsMissing() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["success": true, "data": ["username": "private@example.com"]]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .failed)
+        XCTAssertFalse(status.authenticated)
+    }
+
+    func testOutlookStatusMapsExitTwoToAuthenticationRequired() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(AIPIMCommandResult(exitCode: 2, stdout: Data("private auth output".utf8)))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .authenticationRequired)
+        XCTAssertFalse(status.authenticated)
+        XCTAssertFalse(status.message.contains("private auth output"))
+    }
+
+    func testOutlookStatusTreatsExitZeroAuthenticatedFalseAsAuthenticationRequired() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["authenticated": false]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.status(for: .outlook)
+
+        XCTAssertEqual(status.state, .authenticationRequired)
+        XCTAssertFalse(status.authenticated)
+    }
+
+    func testOutlookLoginUsesBrowserLoginThenVerifiesEnvelopeStatus() async {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(AIPIMCommandResult(exitCode: 0, stdout: Data("private callback".utf8))),
+            .success(jsonResult([
+                "success": true,
+                "data": ["authenticated": true, "username": "private@example.com"]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let status = await client.login(to: .outlook)
+
+        XCTAssertEqual(status.state, .available)
+        let commands = await executor.commands
+        XCTAssertEqual(commands.map(\.arguments), [
+            ["auth", "login", "--browser"],
+            ["auth", "status", "--json"]
+        ])
+        XCTAssertEqual(commands.first?.environment, .inherited)
+        XCTAssertEqual(commands.last?.environment, .noninteractive)
+        XCTAssertFalse(status.message.contains("private"))
+    }
+
+    func testOutlookSearchUsesBoundedProjectedCommandAndFiltersInterval() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [
+                    [
+                        "id": "message-in-range",
+                        "conversationId": "thread-1",
+                        "subject": "Nscale routing",
+                        "from": ["emailAddress": ["name": "Alex", "address": "alex@example.com"]],
+                        "receivedDateTime": "2026-07-01T15:00:00Z",
+                        "bodyPreview": "Shipped the routing plan.",
+                        "webLink": "https://outlook.office.com/mail/message-in-range"
+                    ],
+                    [
+                        "id": "message-before-range",
+                        "receivedDateTime": "2026-06-30T23:59:59Z",
+                        "bodyPreview": "Too early"
+                    ],
+                    [
+                        "id": "message-after-range",
+                        "receivedDateTime": "2026-07-03T00:00:00Z",
+                        "bodyPreview": "Too late"
+                    ]
+                ],
+                "metadata": ["count": 3]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 12)
+
+        XCTAssertEqual(result.source, .outlook)
+        XCTAssertEqual(result.items.map(\.id), ["message-in-range"])
+        XCTAssertEqual(result.items.map(\.body), ["Shipped the routing plan."])
+        let commands = await executor.commands
+        let command = try XCTUnwrap(commands.first)
+        XCTAssertEqual(command.arguments, [
+            "message", "find",
+            "--folder", "sent",
+            "--after", "2026-07-01T00:00:00Z",
+            "--before", "2026-07-03T00:00:00Z",
+            "--limit", "12",
+            "--fields", "id,conversationId,subject,from,receivedDateTime,bodyPreview,webLink",
+            "--json"
+        ])
+        XCTAssertEqual(command.environment, .noninteractive)
+        XCTAssertLessThanOrEqual(command.timeout, 30)
+        XCTAssertLessThanOrEqual(command.maxOutputBytes, 1_048_576)
+    }
+
+    func testOutlookSearchLocallyCapsOverreturnedMessages() async throws {
+        let messages = (0..<3).map { index in
+            [
+                "id": "message-\(index)",
+                "receivedDateTime": "2026-07-01T1\(index):00:00Z",
+                "bodyPreview": "Message \(index)"
+            ]
+        }
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["success": true, "data": messages]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 2)
+
+        XCTAssertEqual(result.items.map(\.id), ["message-2", "message-1"])
+        XCTAssertTrue(result.isPartial)
+        XCTAssertEqual(result.partialReasons, ["result_limit_reached"])
+    }
+
+    func testOutlookSearchConservativelyMarksRequestedLimitAsPartial() async throws {
+        let messages = (0..<2).map { index in
+            [
+                "id": "message-\(index)",
+                "receivedDateTime": "2026-07-01T1\(index):00:00Z",
+                "bodyPreview": "Message \(index)"
+            ]
+        }
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["success": true, "data": messages]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 2)
+
+        XCTAssertTrue(result.isPartial)
+        XCTAssertEqual(result.partialReasons, ["result_limit_reached"])
+    }
+
+    func testOutlookSearchDecodesSnakeCasePaginationHasMore() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [[
+                    "id": "message-1",
+                    "receivedDateTime": "2026-07-01T15:00:00Z",
+                    "bodyPreview": "First page"
+                ]],
+                "metadata": ["pagination": ["has_more": true]]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 10)
+
+        XCTAssertTrue(result.isPartial)
+    }
+
+    func testOutlookSearchDecodesCamelCasePaginationHasMore() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [[
+                    "id": "message-1",
+                    "receivedDateTime": "2026-07-01T15:00:00Z",
+                    "bodyPreview": "First page"
+                ]],
+                "metadata": ["pagination": ["hasMore": true]]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 10)
+
+        XCTAssertTrue(result.isPartial)
+    }
+
+    func testOutlookSearchAcceptsWrappedMessageEnvelope() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": ["messages": [[
+                    "id": "message-1",
+                    "receivedDateTime": "2026-07-01T15:00:00.123Z",
+                    "bodyPreview": "Version-compatible envelope"
+                ]]]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 10)
+
+        XCTAssertEqual(result.items.map(\.id), ["message-1"])
+    }
+
+    func testOutlookSearchTreatsNullDataAsEmptyResults() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["success": true, "data": NSNull()]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchOutlook(in: makeInterval(), limit: 10)
+
+        XCTAssertEqual(result.items, [])
+        XCTAssertFalse(result.isPartial)
+    }
+
+    func testOutlookSearchFailsClosedOnMalformedMessageData() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [["id": "message-1", "bodyPreview": "Missing received date"]]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+
+        do {
+            _ = try await client.searchOutlook(in: makeInterval(), limit: 10)
+            XCTFail("Expected malformed Outlook response to fail")
+        } catch {
+            XCTAssertEqual(error as? AIPIMError, .invalidResponse(.outlook))
+        }
+    }
+
+    func testOutlookSearchMapsExitTwoToAuthenticationRequired() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(AIPIMCommandResult(exitCode: 2, stdout: Data("private auth output".utf8)))
+        ])
+        let client = makeClient(executor: executor)
+
+        do {
+            _ = try await client.searchOutlook(in: makeInterval(), limit: 10)
+            XCTFail("Expected Outlook authentication requirement")
+        } catch {
+            XCTAssertEqual(error as? AIPIMError, .authenticationRequired(.outlook))
+        }
+    }
+
+    func testOutlookTaskSearchFiltersQueryAndSenderAndPreservesMinimalMetadata() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [
+                    [
+                        "id": "message-3",
+                        "conversationId": "thread-3",
+                        "subject": "Gateway routing notes",
+                        "from": ["emailAddress": ["name": "Alex", "address": "alex@example.com"]],
+                        "receivedDateTime": "2026-07-01T14:00:00Z",
+                        "bodyPreview": "Earlier gateway routing request.",
+                        "webLink": "https://outlook.office.com/mail/message-3"
+                    ],
+                    [
+                        "id": "message-1",
+                        "conversationId": "thread-1",
+                        "subject": "RE: Nscale routing follow-up",
+                        "from": ["emailAddress": ["name": "Alex", "address": "alex@example.com"]],
+                        "receivedDateTime": "2026-07-01T15:00:00Z",
+                        "bodyPreview": " Please send the gateway routing summary.   Thanks. ",
+                        "webLink": "https://outlook.office.com/mail/message-1"
+                    ],
+                    [
+                        "id": "message-2",
+                        "subject": "Nscale routing follow-up",
+                        "from": ["emailAddress": ["name": "Taylor", "address": "taylor@example.com"]],
+                        "receivedDateTime": "2026-07-01T16:00:00Z",
+                        "bodyPreview": "Wrong sender"
+                    ]
+                ]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+        let interval = try makeInterval()
+        let request = OutlookMailSearchRequest(
+            query: "gateway routing",
+            after: interval.start,
+            before: interval.end,
+            sender: "alex@example.com",
+            limit: 10
+        )
+
+        let candidates = try await client.searchOutlookTaskCandidates(request)
+
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertEqual(candidates.map(\.id), ["message-1", "message-3"])
+        XCTAssertEqual(candidate.title, "Nscale routing follow-up")
+        XCTAssertEqual(candidate.description, "Please send the gateway routing summary. Thanks.")
+        XCTAssertEqual(candidate.sourceMetadata.kind, .email)
+        XCTAssertEqual(candidate.sourceMetadata.provider, "outlook")
+        XCTAssertEqual(candidate.sourceMetadata.threadID, "thread-1")
+        XCTAssertEqual(candidate.sourceMetadata.messageID, "message-1")
+        XCTAssertEqual(candidate.sourceMetadata.subject, "RE: Nscale routing follow-up")
+        XCTAssertEqual(candidate.sourceMetadata.sender, "Alex <alex@example.com>")
+        XCTAssertEqual(candidate.sourceMetadata.url, "https://outlook.office.com/mail/message-1")
+        let commands = await executor.commands
+        XCTAssertEqual(commands.first?.arguments, [
+            "message", "find",
+            "--folder", "inbox",
+            "--after", "2026-07-01T00:00:00Z",
+            "--before", "2026-07-03T00:00:00Z",
+            "--limit", "25",
+            "--fields", "id,conversationId,subject,from,receivedDateTime,bodyPreview,webLink",
+            "--json"
+        ])
+        XCTAssertEqual(commands.first?.environment, .noninteractive)
+    }
+
+    func testOutlookTaskSearchFetchesBoundedMaximumBeforeFilteringAndCapsOutput() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult([
+                "success": true,
+                "data": [
+                    [
+                        "id": "unrelated-newer",
+                        "subject": "Unrelated",
+                        "from": ["emailAddress": ["address": "other@example.com"]],
+                        "receivedDateTime": "2026-07-01T16:00:00Z",
+                        "bodyPreview": "Not a match"
+                    ],
+                    [
+                        "id": "matching-older",
+                        "subject": "Gateway routing follow-up",
+                        "from": ["emailAddress": ["address": "alex@example.com"]],
+                        "receivedDateTime": "2026-07-01T15:00:00Z",
+                        "bodyPreview": "Please send the routing summary"
+                    ],
+                    [
+                        "id": "matching-oldest",
+                        "subject": "Gateway routing notes",
+                        "from": ["emailAddress": ["address": "alex@example.com"]],
+                        "receivedDateTime": "2026-07-01T14:00:00Z",
+                        "bodyPreview": "Another routing request"
+                    ]
+                ]
+            ]))
+        ])
+        let client = makeClient(executor: executor)
+        let interval = try makeInterval()
+
+        let candidates = try await client.searchOutlookTaskCandidates(OutlookMailSearchRequest(
+            query: "gateway routing",
+            after: interval.start,
+            before: interval.end,
+            sender: "alex@example.com",
+            limit: 1
+        ))
+
+        XCTAssertEqual(candidates.map(\.id), ["matching-older"])
+        let commands = await executor.commands
+        let command = try XCTUnwrap(commands.first)
+        XCTAssertEqual(Array(command.arguments[8...9]), ["--limit", "25"])
     }
 
     func testSlackSearchUsesBoundedFilterAndRejectsUntrustedMatches() async throws {
@@ -525,8 +955,37 @@ final class AIPIMIntegrationTests: XCTestCase {
         XCTAssertNil(result.coverageNote)
     }
 
+    func testOutlookAdapterMapsValidSearchItemsToSearchedRecords() async throws {
+        let interval = try makeInterval()
+        let item = AIPIMWorkActivityItem(
+            id: "message-1",
+            source: .outlook,
+            timestamp: interval.start.addingTimeInterval(60),
+            title: "Nscale routing",
+            body: "Completed Outlook follow-up",
+            url: nil,
+            contextName: "Alex <alex@example.com>"
+        )
+        let adapter = OutlookWorkActivitySourceAdapter { _, _ in
+            AIPIMSearchResult(source: .outlook, items: [item], isPartial: false, partialReasons: [])
+        }
+        let query = WorkActivityQuery(
+            prompt: "what did i work on this week?",
+            range: WorkActivityDateRange(start: interval.start, end: interval.end, label: "this week"),
+            limit: 18
+        )
+
+        let result = await adapter.searchWorkActivity(query)
+
+        XCTAssertEqual(result.status, .searched)
+        XCTAssertEqual(result.records.map(\.source), [.outlook])
+        XCTAssertEqual(result.records.compactMap(\.detail), ["Completed Outlook follow-up"])
+        XCTAssertNil(result.coverageNote)
+    }
+
     @MainActor
-    func testNormalWeeklyChatRequestInvokesSlackAndTeamsAndClaimsBothSearched() async throws {
+    func testNormalWeeklyChatRequestInvokesOutlookSlackAndTeamsAndClaimsAllSearched() async throws {
+        let outlookInvoked = expectation(description: "Outlook adapter invoked")
         let slackInvoked = expectation(description: "Slack adapter invoked")
         let teamsInvoked = expectation(description: "Teams adapter invoked")
         let now = Date()
@@ -535,6 +994,23 @@ final class AIPIMIntegrationTests: XCTestCase {
             sourceStatus: { .localOnly },
             externalAdapters: { _ in
                 [
+                    OutlookWorkActivitySourceAdapter { _, _ in
+                        outlookInvoked.fulfill()
+                        return AIPIMSearchResult(
+                            source: .outlook,
+                            items: [AIPIMWorkActivityItem(
+                                id: "outlook-1",
+                                source: .outlook,
+                                timestamp: now,
+                                title: "Outlook update",
+                                body: "Completed Outlook work",
+                                url: nil,
+                                contextName: nil
+                            )],
+                            isPartial: false,
+                            partialReasons: []
+                        )
+                    },
                     SlackWorkActivitySourceAdapter { _, _ in
                         slackInvoked.fulfill()
                         return AIPIMSearchResult(
@@ -576,10 +1052,11 @@ final class AIPIMIntegrationTests: XCTestCase {
 
         chatManager.send("what did I work on this week?")
 
-        await fulfillment(of: [slackInvoked, teamsInvoked], timeout: 2)
+        await fulfillment(of: [outlookInvoked, slackInvoked, teamsInvoked], timeout: 2)
         try await waitForChatCompletion(chatManager)
         let output = try XCTUnwrap(chatManager.messages.last?.content)
-        XCTAssertTrue(output.contains("Sources searched: NoteAI local records, Slack, Teams."))
+        XCTAssertTrue(output.contains("Sources searched: NoteAI local records, Outlook email, Slack, Teams."))
+        XCTAssertTrue(output.contains("Outlook email: Outlook update"))
         XCTAssertTrue(output.contains("Slack message: Slack update"))
         XCTAssertTrue(output.contains("Teams chat: Teams update"))
     }
@@ -655,25 +1132,46 @@ final class AIPIMIntegrationTests: XCTestCase {
     func testAccountSourceModelTransitionsConnectReconnectAndRefresh() async {
         let connector = FakeAIPIMSourceConnector(
             statusResults: [
-                sourceStatus(.slack, state: .authenticationRequired),
-                sourceStatus(.slack, state: .authenticationRequired)
+                sourceStatus(.outlook, state: .authenticationRequired),
+                sourceStatus(.outlook, state: .authenticationRequired)
             ],
-            loginResults: [sourceStatus(.slack, state: .available)]
+            loginResults: [sourceStatus(.outlook, state: .available)]
         )
         let model = AIPIMAccountSourceModel(connector: connector)
 
-        XCTAssertEqual(model.actionTitle(for: .slack), "Connect")
+        XCTAssertEqual(model.actionTitle(for: .outlook), "Connect")
 
-        await model.refresh(.slack)
-        XCTAssertEqual(model.actionTitle(for: .slack), "Connect")
+        await model.refresh(.outlook)
+        XCTAssertEqual(model.actionTitle(for: .outlook), "Connect")
 
-        await model.connect(.slack)
-        XCTAssertEqual(model.actionTitle(for: .slack), "Reconnect")
+        await model.connect(.outlook)
+        XCTAssertEqual(model.actionTitle(for: .outlook), "Reconnect")
 
-        await model.refresh(.slack)
-        XCTAssertEqual(model.actionTitle(for: .slack), "Connect")
+        await model.refresh(.outlook)
+        XCTAssertEqual(model.actionTitle(for: .outlook), "Connect")
         let actions = await connector.actions
-        XCTAssertEqual(actions, [.status(.slack), .login(.slack), .status(.slack)])
+        XCTAssertEqual(actions, [.status(.outlook), .login(.outlook), .status(.outlook)])
+    }
+
+    @MainActor
+    func testAccountSourceModelRefreshAllChecksOutlookSlackAndTeams() async {
+        let connector = FakeAIPIMSourceConnector(
+            statusResults: AIPIMSource.allCases.map { sourceStatus($0, state: .available) },
+            loginResults: []
+        )
+        let model = AIPIMAccountSourceModel(connector: connector)
+
+        await model.refreshAll()
+
+        let actions = await connector.actions
+        let refreshedSources = actions.compactMap { action -> AIPIMSource? in
+            guard case .status(let source) = action else { return nil }
+            return source
+        }
+        XCTAssertEqual(
+            Set(refreshedSources.map(\.rawValue)),
+            Set(AIPIMSource.allCases.map(\.rawValue))
+        )
     }
 
     private func makeClient(executor: FakeAIPIMExecutor) -> AIPIMClient {

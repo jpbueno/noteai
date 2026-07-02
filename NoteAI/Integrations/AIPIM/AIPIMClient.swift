@@ -6,6 +6,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
     private static let teamsCommandTimeout: TimeInterval = 10
     private static let teamsSearchTimeout: TimeInterval = 60
     private static let outputLimitBytes = 1_048_576
+    private static let outlookResultLimit = 25
+    private static let outlookDefaultLookbackDays = 30
     private static let slackResultLimit = 100
     private static let teamsChatLimit = 50
     private static let teamsMessageLimit = 200
@@ -42,7 +44,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                 executableURL: executableURL,
                 arguments: statusArguments(for: source),
                 timeout: Self.commandTimeout,
-                maxOutputBytes: Self.outputLimitBytes
+                maxOutputBytes: Self.outputLimitBytes,
+                environment: .noninteractive
             ))
             if result.exitCode == 2 {
                 return authenticationRequiredStatus(source)
@@ -70,7 +73,7 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
         do {
             let result = try await executor.execute(AIPIMCommand(
                 executableURL: executableURL,
-                arguments: ["auth", "login"],
+                arguments: loginArguments(for: source),
                 timeout: Self.authTimeout,
                 maxOutputBytes: Self.outputLimitBytes
             ))
@@ -147,6 +150,66 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
             isPartial: isPartial,
             partialReasons: isPartial ? ["result_limit_reached"] : []
         )
+    }
+
+    func searchOutlook(in interval: DateInterval, limit: Int) async throws -> AIPIMSearchResult {
+        guard (1...Self.outlookResultLimit).contains(limit), interval.start < interval.end else {
+            throw AIPIMError.invalidLimit(.outlook)
+        }
+
+        let response = try await findOutlookMessages(in: interval, folder: .sent, limit: limit)
+        let normalized = try normalizeAndSortOutlookMessages(response.messages, interval: interval)
+        let items = normalized.prefix(limit).compactMap { message -> AIPIMWorkActivityItem? in
+            guard let timestamp = message.sentDate else { return nil }
+            return AIPIMWorkActivityItem(
+                id: message.id,
+                source: .outlook,
+                timestamp: timestamp,
+                title: message.subject.trimmedNonempty ?? "Outlook conversation",
+                body: message.bodyPreview,
+                url: message.webLink.flatMap(URL.init(string:)),
+                contextName: message.sender.trimmedNonempty
+            )
+        }
+        let isPartial = normalized.count > limit || response.hasMore
+
+        return AIPIMSearchResult(
+            source: .outlook,
+            items: Array(items),
+            isPartial: isPartial,
+            partialReasons: isPartial ? ["result_limit_reached"] : []
+        )
+    }
+
+    func searchOutlookTaskCandidates(
+        _ search: OutlookMailSearchRequest
+    ) async throws -> [OutlookTaskCandidate] {
+        let interval = try outlookTaskInterval(for: search)
+        let response = try await findOutlookMessages(
+            in: interval,
+            folder: .inbox,
+            limit: Self.outlookResultLimit
+        )
+        let messages = try normalizeAndSortOutlookMessages(response.messages, interval: interval)
+        let queryTerms = search.query
+            .split(whereSeparator: \.isWhitespace)
+            .map { String($0).lowercased() }
+        let senderFilter = search.sender?.trimmedNonempty?.lowercased()
+
+        return messages
+            .filter { message in
+                if let senderFilter,
+                   !message.sender.lowercased().contains(senderFilter) {
+                    return false
+                }
+                guard !queryTerms.isEmpty else { return true }
+                let searchableText = [message.subject, message.sender, message.bodyPreview]
+                    .joined(separator: "\n")
+                    .lowercased()
+                return queryTerms.allSatisfy(searchableText.contains)
+            }
+            .prefix(search.limit)
+            .map(OutlookTaskCandidate.from)
     }
 
     func searchTeams(
@@ -315,7 +378,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                 executableURL: executableURL,
                 arguments: arguments,
                 timeout: min(max(0.01, timeout), Self.commandTimeout),
-                maxOutputBytes: Self.outputLimitBytes
+                maxOutputBytes: Self.outputLimitBytes,
+                environment: .noninteractive
             ))
         } catch is CancellationError {
             throw CancellationError()
@@ -338,6 +402,14 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
 
     private func parseStatus(_ source: AIPIMSource, data: Data) -> AIPIMSourceStatus {
         switch source {
+        case .outlook:
+            guard let response = try? JSONDecoder().decode(OutlookAuthResponse.self, from: data),
+                  response.success else {
+                return failedStatus(source, message: "Outlook status returned an invalid response.")
+            }
+            guard response.authenticated else {
+                return authenticationRequiredStatus(source)
+            }
         case .slack:
             guard let response = try? JSONDecoder().decode(SlackIdentityResponse.self, from: data),
                   response.success,
@@ -367,8 +439,16 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
 
     private func statusArguments(for source: AIPIMSource) -> [String] {
         switch source {
+        case .outlook: return ["auth", "status", "--json"]
         case .slack: return ["me", "--output", "json"]
         case .teams: return ["auth", "status", "--json"]
+        }
+    }
+
+    private func loginArguments(for source: AIPIMSource) -> [String] {
+        switch source {
+        case .outlook: return ["auth", "login", "--browser"]
+        case .slack, .teams: return ["auth", "login"]
         }
     }
 
@@ -438,6 +518,105 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return (formatter.string(from: start), formatter.string(from: exclusiveEnd))
+    }
+
+    private enum OutlookFolder: String {
+        case sent
+        case inbox
+    }
+
+    private func findOutlookMessages(
+        in interval: DateInterval,
+        folder: OutlookFolder,
+        limit: Int
+    ) async throws -> OutlookMessageFindResult {
+        guard (1...Self.outlookResultLimit).contains(limit), interval.start < interval.end else {
+            throw AIPIMError.invalidLimit(.outlook)
+        }
+
+        let bounds = outlookDateBounds(for: interval)
+        let data = try await run(
+            .outlook,
+            arguments: [
+                "message", "find",
+                "--folder", folder.rawValue,
+                "--after", bounds.after,
+                "--before", bounds.before,
+                "--limit", String(limit),
+                "--fields", "id,conversationId,subject,from,receivedDateTime,bodyPreview,webLink",
+                "--json"
+            ],
+            timeout: Self.commandTimeout
+        )
+        let response = try decode(OutlookMessageFindResponse.self, from: data, source: .outlook)
+        guard response.success else {
+            throw AIPIMError.invalidResponse(.outlook)
+        }
+        let total = response.metadata?.total ?? response.metadata?.count
+        return OutlookMessageFindResult(
+            messages: response.data,
+            hasMore: response.data.count >= limit
+                || response.metadata?.pagination?.hasMore == true
+                || total.map { $0 > response.data.count } == true
+        )
+    }
+
+    private func outlookTaskInterval(for search: OutlookMailSearchRequest) throws -> DateInterval {
+        let now = Date()
+        let exclusiveEnd = search.before ?? now
+
+        let start = search.after
+            ?? calendar.date(
+                byAdding: .day,
+                value: -Self.outlookDefaultLookbackDays,
+                to: exclusiveEnd
+            )
+            ?? exclusiveEnd.addingTimeInterval(-2_592_000)
+        guard start < exclusiveEnd else {
+            throw AIPIMError.invalidResponse(.outlook)
+        }
+        return DateInterval(start: start, end: exclusiveEnd)
+    }
+
+    private func outlookDateBounds(for interval: DateInterval) -> (after: String, before: String) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return (formatter.string(from: interval.start), formatter.string(from: interval.end))
+    }
+
+    private func normalizeAndSortOutlookMessages(
+        _ messages: [OutlookCLIMessage],
+        interval: DateInterval
+    ) throws -> [OutlookMessageSummary] {
+        try messages
+            .compactMap { try normalizeOutlookMessage($0, interval: interval) }
+            .sorted {
+                ($0.sentDate ?? .distantPast) > ($1.sentDate ?? .distantPast)
+            }
+    }
+
+    private func normalizeOutlookMessage(
+        _ message: OutlookCLIMessage,
+        interval: DateInterval
+    ) throws -> OutlookMessageSummary? {
+        guard let id = message.id.trimmedNonempty,
+              let timestamp = parseISO8601(message.receivedDateTime) else {
+            throw AIPIMError.invalidResponse(.outlook)
+        }
+        guard timestamp >= interval.start, timestamp < interval.end else { return nil }
+
+        return OutlookMessageSummary(
+            id: id,
+            conversationID: message.conversationID?.trimmedNonempty,
+            subject: message.subject?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            sender: message.sender?.displayValue ?? "",
+            sentDate: timestamp,
+            bodyPreview: (message.bodyPreview ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .clipped(to: Self.itemBodyLimit),
+            webLink: message.webLink?.trimmedNonempty
+        )
     }
 
     private func normalizeSlackMatch(
@@ -543,6 +722,188 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
 
     private func teamsTimeout(deadline: Date) -> TimeInterval {
         min(Self.teamsCommandTimeout, max(0.01, deadline.timeIntervalSinceNow))
+    }
+}
+
+private struct OutlookMessageFindResult {
+    let messages: [OutlookCLIMessage]
+    let hasMore: Bool
+}
+
+private struct OutlookAuthResponse: Decodable {
+    let success: Bool
+    let authenticated: Bool
+    let username: String?
+
+    private struct Payload: Decodable {
+        let authenticated: Bool
+        let username: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case authenticated, username
+            case userName
+            case email
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            authenticated = try container.decode(Bool.self, forKey: .authenticated)
+            username = try container.decodeIfPresent(String.self, forKey: .username)
+                ?? container.decodeIfPresent(String.self, forKey: .userName)
+                ?? container.decodeIfPresent(String.self, forKey: .email)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case success, data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? true
+        let payload = try container.decodeIfPresent(Payload.self, forKey: .data)
+            ?? Payload(from: decoder)
+        authenticated = payload.authenticated
+        username = payload.username
+    }
+}
+
+private struct OutlookMessageFindResponse: Decodable {
+    let success: Bool
+    let data: [OutlookCLIMessage]
+    let metadata: OutlookMessageMetadata?
+
+    private enum CodingKeys: String, CodingKey {
+        case success, data, metadata
+    }
+
+    private enum DataCodingKeys: String, CodingKey {
+        case messages, items
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        success = try container.decode(Bool.self, forKey: .success)
+        metadata = try? container.decode(OutlookMessageMetadata.self, forKey: .metadata)
+        if try container.decodeNil(forKey: .data) {
+            data = []
+        } else if let messages = try? container.decode([OutlookCLIMessage].self, forKey: .data) {
+            data = messages
+        } else {
+            let wrapped = try container.nestedContainer(keyedBy: DataCodingKeys.self, forKey: .data)
+            if wrapped.contains(.messages) {
+                data = try wrapped.decodeIfPresent([OutlookCLIMessage].self, forKey: .messages) ?? []
+            } else if wrapped.contains(.items) {
+                data = try wrapped.decodeIfPresent([OutlookCLIMessage].self, forKey: .items) ?? []
+            } else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .data,
+                    in: container,
+                    debugDescription: "Outlook message data is missing."
+                )
+            }
+        }
+    }
+}
+
+private struct OutlookMessageMetadata: Decodable {
+    let count: Int?
+    let total: Int?
+    let pagination: OutlookMessagePagination?
+
+    private enum CodingKeys: String, CodingKey {
+        case count, total, pagination
+        case totalCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        count = try? container.decode(Int.self, forKey: .count)
+        total = (try? container.decode(Int.self, forKey: .total))
+            ?? (try? container.decode(Int.self, forKey: .totalCount))
+        pagination = try? container.decode(OutlookMessagePagination.self, forKey: .pagination)
+    }
+}
+
+private struct OutlookMessagePagination: Decodable {
+    let hasMore: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case hasMore
+        case hasMoreSnake = "has_more"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hasMore = try container.decodeIfPresent(Bool.self, forKey: .hasMoreSnake)
+            ?? container.decodeIfPresent(Bool.self, forKey: .hasMore)
+            ?? false
+    }
+}
+
+private struct OutlookCLIMessage: Decodable {
+    let id: String
+    let conversationID: String?
+    let subject: String?
+    let sender: OutlookCLISender?
+    let receivedDateTime: String
+    let bodyPreview: String?
+    let webLink: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, subject, from, receivedDateTime, bodyPreview, webLink
+        case conversationID = "conversationId"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        conversationID = try container.decodeIfPresent(String.self, forKey: .conversationID)
+        subject = try container.decodeIfPresent(String.self, forKey: .subject)
+        sender = try container.decodeIfPresent(OutlookCLISender.self, forKey: .from)
+        receivedDateTime = try container.decode(String.self, forKey: .receivedDateTime)
+        bodyPreview = try container.decodeIfPresent(String.self, forKey: .bodyPreview)
+        webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
+    }
+}
+
+private struct OutlookCLISender: Decodable {
+    let name: String?
+    let address: String?
+
+    var displayValue: String {
+        let normalizedName = name?.trimmedNonempty
+        let normalizedAddress = address?.trimmedNonempty
+        if let normalizedName, let normalizedAddress {
+            return "\(normalizedName) <\(normalizedAddress)>"
+        }
+        return normalizedName ?? normalizedAddress ?? ""
+    }
+
+    private struct EmailAddress: Decodable {
+        let name: String?
+        let address: String?
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case emailAddress, name, address
+    }
+
+    init(from decoder: Decoder) throws {
+        if let value = try? decoder.singleValueContainer().decode(String.self) {
+            name = nil
+            address = value
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let emailAddress = try container.decodeIfPresent(EmailAddress.self, forKey: .emailAddress) {
+            name = emailAddress.name
+            address = emailAddress.address
+        } else {
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            address = try container.decodeIfPresent(String.self, forKey: .address)
+        }
     }
 }
 

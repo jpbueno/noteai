@@ -1,6 +1,6 @@
 import Foundation
 
-struct AIPIMClient: Sendable {
+struct AIPIMClient: AIPIMSourceConnecting, Sendable {
     private static let commandTimeout: TimeInterval = 30
     private static let authTimeout: TimeInterval = 120
     private static let teamsCommandTimeout: TimeInterval = 10
@@ -338,6 +338,9 @@ struct AIPIMClient: Sendable {
             }
             guard response.authenticated else {
                 return authenticationRequiredStatus(source)
+            }
+            guard response.username?.trimmedNonempty != nil else {
+                return failedStatus(source, message: "Teams status returned an invalid identity response.")
             }
         }
 

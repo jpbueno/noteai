@@ -160,13 +160,9 @@ struct AboutSettingsView: View {
 struct AccountSettingsView: View {
     @ObservedObject var authManager: GoogleAuthManager
     @StateObject private var outlookAuth = OutlookGraphAuthManager()
+    @StateObject private var aipimSources = AIPIMAccountSourceModel()
     @AppStorage(OutlookGraphSettings.clientIDKey) private var outlookClientID = ""
     @AppStorage(OutlookGraphSettings.tenantIDKey) private var outlookTenantID = "common"
-    @State private var aipimStatuses = Dictionary(
-        uniqueKeysWithValues: AIPIMSource.allCases.map { ($0, AIPIMSourceStatus.unchecked($0)) }
-    )
-    @State private var busyAIPIMSource: AIPIMSource?
-    private let aipimClient = AIPIMClient()
 
     var body: some View {
         Form {
@@ -288,13 +284,13 @@ struct AccountSettingsView: View {
         .formStyle(.grouped)
         .padding()
         .task {
-            await refreshAIPIMSources()
+            await aipimSources.refreshAll()
         }
     }
 
     @ViewBuilder
     private func aipimSourceRow(_ source: AIPIMSource) -> some View {
-        let status = aipimStatuses[source] ?? .unchecked(source)
+        let status = aipimSources.status(for: source)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(source.displayName)
@@ -306,15 +302,15 @@ struct AccountSettingsView: View {
 
             Spacer()
 
-            Button(status.authenticated ? "Reconnect" : "Connect") {
-                connectAIPIMSource(source)
+            Button(aipimSources.actionTitle(for: source)) {
+                Task { await aipimSources.connect(source) }
             }
-            .disabled(!status.installed || busyAIPIMSource != nil)
+            .disabled(!status.installed || aipimSources.busySource != nil)
 
             Button {
-                refreshAIPIMSource(source)
+                Task { await aipimSources.refresh(source) }
             } label: {
-                if busyAIPIMSource == source {
+                if aipimSources.busySource == source {
                     ProgressView()
                         .controlSize(.small)
                 } else {
@@ -322,7 +318,7 @@ struct AccountSettingsView: View {
                 }
             }
             .buttonStyle(.borderless)
-            .disabled(busyAIPIMSource != nil)
+            .disabled(aipimSources.busySource != nil)
             .help("Refresh \(source.displayName) status")
         }
     }
@@ -343,29 +339,6 @@ struct AccountSettingsView: View {
             return "Installed, authenticated"
         case .unavailable:
             return "Not installed"
-        }
-    }
-
-    private func refreshAIPIMSources() async {
-        async let slackStatus = aipimClient.status(for: .slack)
-        async let teamsStatus = aipimClient.status(for: .teams)
-        aipimStatuses[.slack] = await slackStatus
-        aipimStatuses[.teams] = await teamsStatus
-    }
-
-    private func refreshAIPIMSource(_ source: AIPIMSource) {
-        busyAIPIMSource = source
-        Task {
-            aipimStatuses[source] = await aipimClient.status(for: source)
-            busyAIPIMSource = nil
-        }
-    }
-
-    private func connectAIPIMSource(_ source: AIPIMSource) {
-        busyAIPIMSource = source
-        Task {
-            aipimStatuses[source] = await aipimClient.login(to: source)
-            busyAIPIMSource = nil
         }
     }
 

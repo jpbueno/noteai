@@ -104,6 +104,7 @@
 		67858074E245DF6DA56F88AA /* ImageOverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F872C5A4EF81BA2F00594948 /* ImageOverlayPanel.swift */; };
 		69E22420FE304E978BA56828 /* TranscriptImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C572561568133270C13A7D56 /* TranscriptImportView.swift */; };
 		6AA509C9B8079FD04267299D /* AICoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 161E870D01B1967F0967FCC4 /* AICoachEngine.swift */; };
+		6ABB66EA546AC4B2014FAD48 /* AIPIMAccountSourceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C63E1BD5ECC21326878B65 /* AIPIMAccountSourceModel.swift */; };
 		6B247DC1FB26299D32981554 /* CoachInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAA851BE02CC5560A2384D /* CoachInsight.swift */; };
 		6B81B8C7B802396718C0AFF7 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98F2C76A01A8B0DCDAE040ED /* MeetingStore.swift */; };
 		6CC5E6C52D1116ADDB220B5F /* AnthropicClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AD5789226D7E50CB12F198 /* AnthropicClient.swift */; };
@@ -118,6 +119,7 @@
 		75A48AC3D6681023F602EE36 /* AudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C74A4E13CF1F804E026C2D /* AudioCaptureManager.swift */; };
 		75B5B12FA2F978774C7AC07E /* ExportManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEF817F16010C5A2792323D /* ExportManager.swift */; };
 		75C94602AC7F6BE6E7B25268 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB5AA1AAC32AD1BFAD9B79B4 /* MenuBarView.swift */; };
+		75DD9DAA10992DDE3E499852 /* AIPIMAccountSourceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C63E1BD5ECC21326878B65 /* AIPIMAccountSourceModel.swift */; };
 		76327EC391A961A4B59879EC /* AITasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2023A4E6AFEC84FCCCDC5CD /* AITasks.swift */; };
 		7939BD467F4A555D2235634F /* OnboardingChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB43B513D3EFF5BBB74EC81 /* OnboardingChecklistTests.swift */; };
 		7C2DAF27F62505667186F308 /* ArchitectureModuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DDDBA2624B1F99D3B667A8 /* ArchitectureModuleTests.swift */; };
@@ -231,6 +233,7 @@
 		1FED0F8E1FB46C2798DA0565 /* TeamsCallUIEvidenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamsCallUIEvidenceProvider.swift; sourceTree = "<group>"; };
 		20A2936958A2188902476039 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		21DDDBA2624B1F99D3B667A8 /* ArchitectureModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchitectureModuleTests.swift; sourceTree = "<group>"; };
+		24C63E1BD5ECC21326878B65 /* AIPIMAccountSourceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPIMAccountSourceModel.swift; sourceTree = "<group>"; };
 		24E1357ABA860879459F12A4 /* ProcessMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessMonitor.swift; sourceTree = "<group>"; };
 		24E706668BD58AC6D3CAF974 /* ImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageStore.swift; sourceTree = "<group>"; };
 		2518E6F5F675E601EC1854CD /* CoachPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachPanelView.swift; sourceTree = "<group>"; };
@@ -569,6 +572,7 @@
 		88F8875F8C4C8B6D3346B6A2 /* AIPIM */ = {
 			isa = PBXGroup;
 			children = (
+				24C63E1BD5ECC21326878B65 /* AIPIMAccountSourceModel.swift */,
 				3BEBB5898C0E2361AED278DF /* AIPIMClient.swift */,
 				725DC07CB8C666EEB0C69CA7 /* AIPIMExecutableDiscovery.swift */,
 				0B696725B47A9846AA77F254 /* AIPIMProcessRunner.swift */,
@@ -854,6 +858,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6AA509C9B8079FD04267299D /* AICoachEngine.swift in Sources */,
+				6ABB66EA546AC4B2014FAD48 /* AIPIMAccountSourceModel.swift in Sources */,
 				87F9EE85D859254E607DCB26 /* AIPIMClient.swift in Sources */,
 				9FBDCB72C2C9242F5FE71AEE /* AIPIMExecutableDiscovery.swift in Sources */,
 				373EAC399C1D13A032A67195 /* AIPIMProcessRunner.swift in Sources */,
@@ -953,6 +958,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9E4BF3F19ABD2A299BA9593 /* AICoachEngine.swift in Sources */,
+				75DD9DAA10992DDE3E499852 /* AIPIMAccountSourceModel.swift in Sources */,
 				34A57CA8DE086E1D2FB8E398 /* AIPIMClient.swift in Sources */,
 				1E84EC53F34504869B05A988 /* AIPIMExecutableDiscovery.swift in Sources */,
 				B10C2489805496D6DD9ADBAF /* AIPIMProcessRunner.swift in Sources */,

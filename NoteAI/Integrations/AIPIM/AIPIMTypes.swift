@@ -19,6 +19,11 @@ enum AIPIMSource: String, CaseIterable, Sendable {
     }
 }
 
+protocol AIPIMSourceConnecting: Sendable {
+    func status(for source: AIPIMSource) async -> AIPIMSourceStatus
+    func login(to source: AIPIMSource) async -> AIPIMSourceStatus
+}
+
 enum AIPIMConnectionState: Equatable, Sendable {
     case available
     case authenticationRequired

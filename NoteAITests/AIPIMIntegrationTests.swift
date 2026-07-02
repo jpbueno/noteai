@@ -100,6 +100,44 @@ final class AIPIMIntegrationTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 1)
     }
 
+    func testProcessRunnerSustainedConcurrentOutputCannotBypassOutputLimit() async {
+        let command = AIPIMCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", sustainedConcurrentOutputCommand],
+            timeout: 2,
+            maxOutputBytes: 4_096
+        )
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        do {
+            _ = try await AIPIMProcessRunner().execute(command)
+            XCTFail("Expected output limit failure")
+        } catch {
+            XCTAssertEqual(error as? AIPIMExecutionError, .outputLimitExceeded)
+        }
+
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - startedAt, 0.5)
+    }
+
+    func testProcessRunnerSustainedConcurrentOutputCannotBypassTimeout() async {
+        let command = AIPIMCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", sustainedConcurrentOutputCommand],
+            timeout: 0.01,
+            maxOutputBytes: 64 * 1_024 * 1_024
+        )
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        do {
+            _ = try await AIPIMProcessRunner().execute(command)
+            XCTFail("Expected timeout")
+        } catch {
+            XCTAssertEqual(error as? AIPIMExecutionError, .timedOut)
+        }
+
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - startedAt, 0.5)
+    }
+
     func testSlackStatusRequiresSuccessAndAUserID() async {
         let executor = FakeAIPIMExecutor(results: [
             .success(jsonResult(["success": true, "data": ["user": ["id": "U123", "email": "private@example.com"]]]))
@@ -558,6 +596,12 @@ final class AIPIMIntegrationTests: XCTestCase {
             authenticated: state == .available,
             message: state == .available ? "Authenticated." : "Sign-in required."
         )
+    }
+
+    private var sustainedConcurrentOutputCommand: String {
+        "/usr/bin/yes x & a=$!; "
+            + "/usr/bin/yes y >&2 & b=$!; "
+            + "sleep 1; kill $a $b; wait"
     }
 }
 

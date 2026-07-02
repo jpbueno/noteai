@@ -61,11 +61,23 @@ private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMComman
 
     let deadline = ProcessInfo.processInfo.systemUptime + max(0.01, command.timeout)
     while true {
-        drain(&stdoutPipe, capture: true, accumulator: accumulator)
-        drain(&stderrPipe, capture: false, accumulator: accumulator)
+        let stdoutOutcome = drain(
+            &stdoutPipe,
+            capture: true,
+            accumulator: accumulator,
+            until: deadline
+        )
+        let drainOutcome = stdoutOutcome == .yielded
+            ? drain(
+                &stderrPipe,
+                capture: false,
+                accumulator: accumulator,
+                until: deadline
+            )
+            : stdoutOutcome
         reap(processID, status: &processStatus, wasReaped: &processWasReaped)
 
-        if accumulator.exceededLimit {
+        if let executionError = drainOutcome.executionError {
             terminateProcessGroup(
                 processID,
                 stdoutPipe: &stdoutPipe,
@@ -74,7 +86,7 @@ private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMComman
                 processStatus: &processStatus,
                 processWasReaped: &processWasReaped
             )
-            throw AIPIMExecutionError.outputLimitExceeded
+            throw executionError
         }
 
         if processWasReaped, !stdoutPipe.readIsOpen, !stderrPipe.readIsOpen {
@@ -207,8 +219,22 @@ private func waitForTermination(
     processWasReaped: inout Bool
 ) {
     while ProcessInfo.processInfo.systemUptime < deadline {
-        drain(&stdoutPipe, capture: true, accumulator: accumulator)
-        drain(&stderrPipe, capture: false, accumulator: accumulator)
+        if drain(
+            &stdoutPipe,
+            capture: true,
+            accumulator: accumulator,
+            until: deadline
+        ) == .timedOut {
+            return
+        }
+        if drain(
+            &stderrPipe,
+            capture: false,
+            accumulator: accumulator,
+            until: deadline
+        ) == .timedOut {
+            return
+        }
         reap(processID, status: &processStatus, wasReaped: &processWasReaped)
         if processWasReaped, !processGroupExists(processID) {
             return
@@ -249,29 +275,51 @@ private func decodedExitCode(_ status: Int32) -> Int32 {
 private func drain(
     _ pipe: inout AIPIMPipe,
     capture: Bool,
-    accumulator: AIPIMOutputAccumulator
-) {
-    guard pipe.readIsOpen else { return }
+    accumulator: AIPIMOutputAccumulator,
+    until deadline: TimeInterval
+) -> AIPIMDrainOutcome {
+    guard pipe.readIsOpen else { return .yielded }
     var buffer = [UInt8](repeating: 0, count: 8_192)
 
-    while true {
+    while ProcessInfo.processInfo.systemUptime < deadline {
         let count = Darwin.read(pipe.readDescriptor, &buffer, buffer.count)
         if count > 0 {
-            accumulator.consume(Data(buffer.prefix(count)), capture: capture)
+            if accumulator.consume(Data(buffer.prefix(count)), capture: capture) {
+                return .outputLimitExceeded
+            }
             continue
         }
         if count == 0 {
             pipe.closeReadEnd()
-            return
+            return .yielded
         }
         if errno == EAGAIN || errno == EWOULDBLOCK {
-            return
+            return .yielded
         }
         if errno == EINTR {
             continue
         }
         pipe.closeReadEnd()
-        return
+        return .yielded
+    }
+
+    return .timedOut
+}
+
+private enum AIPIMDrainOutcome: Equatable {
+    case yielded
+    case outputLimitExceeded
+    case timedOut
+
+    var executionError: AIPIMExecutionError? {
+        switch self {
+        case .yielded:
+            nil
+        case .outputLimitExceeded:
+            .outputLimitExceeded
+        case .timedOut:
+            .timedOut
+        }
     }
 }
 
@@ -397,10 +445,6 @@ private final class AIPIMOutputAccumulator: @unchecked Sendable {
             didExceedLimit = true
         }
         return didExceedLimit
-    }
-
-    var exceededLimit: Bool {
-        lock.withLock { didExceedLimit }
     }
 
     var stdout: Data {

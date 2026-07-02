@@ -423,6 +423,18 @@ final class ChatManager: ObservableObject {
             ))
         }
 
+        let aipimClient = AIPIMClient()
+        adapters.append(SlackWorkActivitySourceAdapter { interval, limit in
+            try await aipimClient.searchSlack(in: interval, limit: limit)
+        })
+        adapters.append(TeamsWorkActivitySourceAdapter { interval, limit, messagesPerChat in
+            try await aipimClient.searchTeams(
+                in: interval,
+                limit: limit,
+                messagesPerChat: messagesPerChat
+            )
+        })
+
         return adapters
     }
 

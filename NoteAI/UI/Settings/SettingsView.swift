@@ -162,6 +162,11 @@ struct AccountSettingsView: View {
     @StateObject private var outlookAuth = OutlookGraphAuthManager()
     @AppStorage(OutlookGraphSettings.clientIDKey) private var outlookClientID = ""
     @AppStorage(OutlookGraphSettings.tenantIDKey) private var outlookTenantID = "common"
+    @State private var aipimStatuses = Dictionary(
+        uniqueKeysWithValues: AIPIMSource.allCases.map { ($0, AIPIMSourceStatus.unchecked($0)) }
+    )
+    @State private var busyAIPIMSource: AIPIMSource?
+    private let aipimClient = AIPIMClient()
 
     var body: some View {
         Form {
@@ -260,9 +265,108 @@ struct AccountSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            Section("Work Activity Sources") {
+                ForEach(AIPIMSource.allCases, id: \.self) { source in
+                    aipimSourceRow(source)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("ai-pim-utils 0.105.0 or later is required for Slack and Teams work activity.")
+                    ForEach(AIPIMInstallHelp.commands, id: \.self) { command in
+                        Text(command)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    Text("Authentication is managed externally by ai-pim-utils and macOS Keychain. NoteAI never stores tokens.")
+                    Text("Teams coverage includes chats only. Teams channels are not included.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
+        .task {
+            await refreshAIPIMSources()
+        }
+    }
+
+    @ViewBuilder
+    private func aipimSourceRow(_ source: AIPIMSource) -> some View {
+        let status = aipimStatuses[source] ?? .unchecked(source)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.displayName)
+                    .font(.system(size: 14, weight: .medium))
+                Text(aipimStatusLabel(status))
+                    .font(.caption)
+                    .foregroundStyle(status.state == .failed ? .red : .secondary)
+            }
+
+            Spacer()
+
+            Button(status.authenticated ? "Reconnect" : "Connect") {
+                connectAIPIMSource(source)
+            }
+            .disabled(!status.installed || busyAIPIMSource != nil)
+
+            Button {
+                refreshAIPIMSource(source)
+            } label: {
+                if busyAIPIMSource == source {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(busyAIPIMSource != nil)
+            .help("Refresh \(source.displayName) status")
+        }
+    }
+
+    private func aipimStatusLabel(_ status: AIPIMSourceStatus) -> String {
+        if !status.installed {
+            return "Not installed"
+        }
+        if status.authenticated {
+            return "Installed, authenticated"
+        }
+        switch status.state {
+        case .authenticationRequired:
+            return "Installed, sign-in required"
+        case .failed:
+            return "Installed, status check failed"
+        case .available:
+            return "Installed, authenticated"
+        case .unavailable:
+            return "Not installed"
+        }
+    }
+
+    private func refreshAIPIMSources() async {
+        async let slackStatus = aipimClient.status(for: .slack)
+        async let teamsStatus = aipimClient.status(for: .teams)
+        aipimStatuses[.slack] = await slackStatus
+        aipimStatuses[.teams] = await teamsStatus
+    }
+
+    private func refreshAIPIMSource(_ source: AIPIMSource) {
+        busyAIPIMSource = source
+        Task {
+            aipimStatuses[source] = await aipimClient.status(for: source)
+            busyAIPIMSource = nil
+        }
+    }
+
+    private func connectAIPIMSource(_ source: AIPIMSource) {
+        busyAIPIMSource = source
+        Task {
+            aipimStatuses[source] = await aipimClient.login(to: source)
+            busyAIPIMSource = nil
+        }
     }
 
 }

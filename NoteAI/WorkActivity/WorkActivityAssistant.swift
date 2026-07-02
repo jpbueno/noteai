@@ -63,11 +63,18 @@ struct WorkActivitySourceResult: Equatable {
     let source: WorkActivitySource
     let status: WorkActivitySourceResultStatus
     let records: [WorkActivityRecord]
+    let coverageNote: String?
 
-    init(source: WorkActivitySource, status: WorkActivitySourceResultStatus, records: [WorkActivityRecord] = []) {
+    init(
+        source: WorkActivitySource,
+        status: WorkActivitySourceResultStatus,
+        records: [WorkActivityRecord] = [],
+        coverageNote: String? = nil
+    ) {
         self.source = source
         self.status = status
         self.records = records
+        self.coverageNote = coverageNote
     }
 }
 
@@ -147,6 +154,99 @@ struct OutlookWorkActivitySourceAdapter: WorkActivitySourceAdapter {
                 status: .failed("\(source.statusName) failed: \(WorkActivityText.clipped(error.localizedDescription, limit: 180))")
             )
         }
+    }
+}
+
+struct SlackWorkActivitySourceAdapter: WorkActivitySourceAdapter {
+    let source: WorkActivitySource = .slack
+    var search: (DateInterval, Int) async throws -> AIPIMSearchResult
+
+    init(search: @escaping (DateInterval, Int) async throws -> AIPIMSearchResult) {
+        self.search = search
+    }
+
+    func searchWorkActivity(_ query: WorkActivityQuery) async -> WorkActivitySourceResult {
+        do {
+            let result = try await search(query.range.interval, min(query.limit, 100))
+            let records = result.items.map {
+                WorkActivityRecord(
+                    date: $0.timestamp,
+                    source: source,
+                    kind: "Slack message",
+                    title: WorkActivityText.cleanTitle($0.title, fallback: "Slack message"),
+                    detail: WorkActivityText.cleanOptional($0.body)
+                )
+            }
+            return WorkActivitySourceResult(
+                source: source,
+                status: .searched,
+                records: records,
+                coverageNote: result.isPartial ? "Slack returned a bounded first page; results may be partial." : nil
+            )
+        } catch {
+            return AIPIMWorkActivityFailure.result(source: source, error: error)
+        }
+    }
+}
+
+struct TeamsWorkActivitySourceAdapter: WorkActivitySourceAdapter {
+    let source: WorkActivitySource = .teams
+    var search: (DateInterval, Int, Int) async throws -> AIPIMSearchResult
+
+    init(search: @escaping (DateInterval, Int, Int) async throws -> AIPIMSearchResult) {
+        self.search = search
+    }
+
+    func searchWorkActivity(_ query: WorkActivityQuery) async -> WorkActivitySourceResult {
+        do {
+            let result = try await search(query.range.interval, min(query.limit, 100), 50)
+            let records = result.items.map {
+                WorkActivityRecord(
+                    date: $0.timestamp,
+                    source: source,
+                    kind: "Teams chat",
+                    title: WorkActivityText.cleanTitle($0.title, fallback: "Teams message"),
+                    detail: WorkActivityText.cleanOptional($0.body)
+                )
+            }
+            return WorkActivitySourceResult(
+                source: source,
+                status: .searched,
+                records: records,
+                coverageNote: "Teams chat coverage is partial; Teams channels are not included."
+            )
+        } catch {
+            return AIPIMWorkActivityFailure.result(source: source, error: error)
+        }
+    }
+}
+
+private enum AIPIMWorkActivityFailure {
+    static func result(source: WorkActivitySource, error: Error) -> WorkActivitySourceResult {
+        if let aipimError = error as? AIPIMError {
+            switch aipimError {
+            case .unavailable:
+                return WorkActivitySourceResult(
+                    source: source,
+                    status: .skipped("\(source.statusName) requires ai-pim-utils. Install it from the Account settings help")
+                )
+            case .authenticationRequired:
+                return WorkActivitySourceResult(
+                    source: source,
+                    status: .skipped("\(source.statusName) requires sign-in from Account settings")
+                )
+            default:
+                return WorkActivitySourceResult(
+                    source: source,
+                    status: .failed("\(source.statusName) failed: \(aipimError.localizedDescription)")
+                )
+            }
+        }
+
+        return WorkActivitySourceResult(
+            source: source,
+            status: .failed("\(source.statusName) failed without exposing source output")
+        )
     }
 }
 
@@ -279,6 +379,11 @@ enum WorkActivityAssistant {
         }
         if !failureMessages.isEmpty {
             lines.append("Source errors: \(failureMessages.joined(separator: "; ")).")
+        }
+
+        let coverageNotes = results.compactMap(\.coverageNote).uniqued()
+        if !coverageNotes.isEmpty {
+            lines.append("Source coverage: \(coverageNotes.joined(separator: " "))")
         }
 
         let records = results
@@ -560,8 +665,8 @@ enum AssistantSourceStatusProvider {
     static func currentStatus() -> AssistantSourceStatus {
         AssistantSourceStatus(
             outlook: outlookStatus(),
-            slack: .notAvailable,
-            teams: .notAvailable
+            slack: aipimStatus(.slack),
+            teams: aipimStatus(.teams)
         )
     }
 
@@ -571,5 +676,16 @@ enum AssistantSourceStatusProvider {
         }
 
         return OutlookGraphTokenStore.isSignedIn ? .connected : .needsSignIn
+    }
+
+    private static func aipimStatus(_ source: AIPIMSource) -> AssistantExternalSourceState {
+        AIPIMExecutableDiscovery().executableURL(for: source) == nil ? .notAvailable : .needsSignIn
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

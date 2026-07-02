@@ -2019,6 +2019,11 @@ final class ArchitectureModuleTests: XCTestCase {
                 Note(title: "Nscale notes", content: "Captured runtime ownership decision.", createdDate: inWeek, modifiedDate: inWeek)
             ],
             t5tReports: [],
+            sourceStatus: AssistantSourceStatus(
+                outlook: .connected,
+                slack: .notAvailable,
+                teams: .notAvailable
+            ),
             now: now,
             calendar: calendar
         )
@@ -2031,8 +2036,37 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(output.contains("Nscale runtime sync"))
         XCTAssertTrue(output.contains("Nscale notes"))
         XCTAssertTrue(output.contains("NoteAI local records"))
-        XCTAssertTrue(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
+        XCTAssertTrue(output.contains("Outlook email search is connected"))
+        XCTAssertTrue(output.contains("Slack source search is not connected"))
+        XCTAssertTrue(output.contains("Teams source search is not connected"))
+        XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
         XCTAssertFalse(output.contains("Old task"))
+    }
+
+    func testWorkActivityAssistantDoesNotClaimConfiguredExternalSourcesAreDisabled() throws {
+        let output = try XCTUnwrap(WorkActivityAssistant.response(
+            for: "what did I work on this week?",
+            tasks: [],
+            todos: [],
+            meetings: [],
+            notes: [],
+            t5tReports: [],
+            sourceStatus: AssistantSourceStatus(
+                outlook: .needsSignIn,
+                slack: .notAvailable,
+                teams: .notAvailable
+            )
+        ))
+
+        XCTAssertTrue(output.contains("Outlook email search is configured but not signed in"))
+        XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
+    }
+
+    func testChatManagerPassesExternalSourceStatusToWorkActivityAssistant() throws {
+        let source = try chatManagerSource()
+
+        XCTAssertTrue(source.contains("AssistantSourceStatusProvider.currentStatus()"))
+        XCTAssertTrue(source.contains("sourceStatus:"))
     }
 
     func testWorkActivityAssistantReturnsT5TReadyTasksOnly() throws {

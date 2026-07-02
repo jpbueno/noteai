@@ -8,6 +8,7 @@ enum WorkActivityAssistant {
         meetings: [Meeting],
         notes: [Note],
         t5tReports: [T5TReport],
+        sourceStatus: AssistantSourceStatus = .localOnly,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String? {
@@ -26,6 +27,7 @@ enum WorkActivityAssistant {
             meetings: meetings,
             notes: notes,
             t5tReports: t5tReports,
+            sourceStatus: sourceStatus,
             range: range
         )
     }
@@ -58,12 +60,13 @@ enum WorkActivityAssistant {
         meetings: [Meeting],
         notes: [Note],
         t5tReports: [T5TReport],
+        sourceStatus: AssistantSourceStatus,
         range: ActivityDateRange
     ) -> String {
         var lines = [
             "Work activity \(range.label)",
             "",
-            "Sources: NoteAI local records. Outlook, Slack, and Teams are not enabled in this build."
+            sourceStatus.summaryLine
         ]
 
         let taskRecords = tasks
@@ -212,5 +215,64 @@ enum WorkActivityAssistant {
         func contains(_ date: Date) -> Bool {
             interval.contains(date)
         }
+    }
+}
+
+struct AssistantSourceStatus: Equatable {
+    var outlook: AssistantExternalSourceState
+    var slack: AssistantExternalSourceState
+    var teams: AssistantExternalSourceState
+
+    static let localOnly = AssistantSourceStatus(
+        outlook: .needsConfiguration,
+        slack: .notAvailable,
+        teams: .notAvailable
+    )
+
+    var summaryLine: String {
+        [
+            "Sources: NoteAI local records.",
+            outlook.description(for: "Outlook email search"),
+            slack.description(for: "Slack source search"),
+            teams.description(for: "Teams source search")
+        ].joined(separator: " ")
+    }
+}
+
+enum AssistantExternalSourceState: Equatable {
+    case connected
+    case needsSignIn
+    case needsConfiguration
+    case notAvailable
+
+    func description(for sourceName: String) -> String {
+        switch self {
+        case .connected:
+            return "\(sourceName) is connected for explicit searches."
+        case .needsSignIn:
+            return "\(sourceName) is configured but not signed in."
+        case .needsConfiguration:
+            return "\(sourceName) needs setup before it can be used."
+        case .notAvailable:
+            return "\(sourceName) is not connected in this build."
+        }
+    }
+}
+
+enum AssistantSourceStatusProvider {
+    static func currentStatus() -> AssistantSourceStatus {
+        AssistantSourceStatus(
+            outlook: outlookStatus(),
+            slack: .notAvailable,
+            teams: .notAvailable
+        )
+    }
+
+    private static func outlookStatus() -> AssistantExternalSourceState {
+        guard OutlookGraphSettings.hasClientConfiguration else {
+            return .needsConfiguration
+        }
+
+        return OutlookGraphTokenStore.isSignedIn ? .connected : .needsSignIn
     }
 }

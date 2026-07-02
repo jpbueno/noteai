@@ -361,7 +361,8 @@ final class ChatManager: ObservableObject {
                 todos: manager.todos,
                 meetings: manager.meetings,
                 notes: manager.notes,
-                t5tReports: manager.t5tReports
+                t5tReports: manager.t5tReports,
+                sourceStatus: AssistantSourceStatusProvider.currentStatus()
               )
         else {
             return false

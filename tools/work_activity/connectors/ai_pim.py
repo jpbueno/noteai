@@ -141,9 +141,11 @@ class AIPIMHarness:
 
     def status(self, source: str) -> dict[str, Any]:
         cli_name = self._cli_name(source)
-        args = [cli_name, "auth", "status"]
-        if source == "teams":
-            args.append("--json")
+        args = (
+            [cli_name, "me", "--output", "json"]
+            if source == "slack"
+            else [cli_name, "auth", "status", "--json"]
+        )
         result = self.runner.run(
             args,
             timeout_seconds=COMMAND_TIMEOUT_SECONDS,
@@ -169,10 +171,19 @@ class AIPIMHarness:
         if result.returncode != 0:
             return self._failure(source, "status", "command_error", "Source status check failed.")
 
+        payload = _decode_json(result.stdout)
+        if payload is None:
+            return self._failure(source, "status", "invalid_response", "Source status returned invalid JSON.")
+
         if source == "slack":
-            lowered = result.stdout.casefold()
-            if "not authenticated" in lowered or "authentication required" in lowered:
-                return self._auth_required(source, action="status", success=True)
+            data = payload.get("data")
+            user = data.get("user") if isinstance(data, dict) else None
+            if payload.get("success") is not True:
+                return self._failure(source, "status", "command_error", "Source status check failed.")
+            if not isinstance(user, dict):
+                return self._failure(
+                    source, "status", "invalid_response", "Source status returned an unexpected response."
+                )
             return _envelope(
                 source,
                 "status",
@@ -183,18 +194,12 @@ class AIPIMHarness:
                 authenticated=True,
             )
 
-        payload = _decode_json(result.stdout)
-        if payload is None:
-            return self._failure(source, "status", "invalid_response", "Source status returned invalid JSON.")
-        if payload.get("success") is not True:
-            error = payload.get("error")
-            code = error.get("code", "") if isinstance(error, dict) else ""
-            if "AUTH" in str(code).upper():
-                return self._auth_required(source, action="status", success=False)
-            return self._failure(source, "status", "command_error", "Source status check failed.")
-        data = payload.get("data")
-        authenticated = data.get("authenticated") is True if isinstance(data, dict) else False
-        if not authenticated:
+        authenticated = payload.get("authenticated")
+        if not isinstance(authenticated, bool):
+            return self._failure(
+                source, "status", "invalid_response", "Source status returned an unexpected response."
+            )
+        if authenticated is False:
             return self._auth_required(source, action="status", success=True)
         return _envelope(
             source,
@@ -307,12 +312,17 @@ class AIPIMHarness:
                 "slack", "search", "invalid_response", "Slack returned an unexpected response."
             )
 
-        items = [item for match in matches if (item := self._normalize_slack_match(match))]
+        normalized_items = [
+            item for match in matches if (item := self._normalize_slack_match(match))
+        ]
+        items = normalized_items[:limit]
         total = messages.get("total")
         pagination = messages.get("pagination")
         page_count = pagination.get("page_count") if isinstance(pagination, dict) else None
-        partial = (isinstance(total, int) and total > len(matches)) or (
-            isinstance(page_count, int) and page_count > 1
+        partial = (
+            len(normalized_items) > limit
+            or (isinstance(total, int) and total > len(matches))
+            or (isinstance(page_count, int) and page_count > 1)
         )
         reasons = ["result_limit_reached"] if partial else []
         return _envelope(
@@ -357,6 +367,31 @@ class AIPIMHarness:
             )
 
         deadline = time.monotonic() + TEAMS_SEARCH_TIMEOUT_SECONDS
+        auth_result = self.runner.run(
+            ["teams-cli", "auth", "status", "--json"],
+            timeout_seconds=TEAMS_COMMAND_TIMEOUT_SECONDS,
+            max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
+        )
+        failure = self._search_command_failure("teams", auth_result.returncode)
+        if failure:
+            return failure
+        auth_payload = _decode_json(auth_result.stdout)
+        if auth_payload is None or not isinstance(auth_payload.get("authenticated"), bool):
+            return self._teams_identity_partial(
+                authenticated=False,
+                limit=limit,
+                messages_per_chat=messages_per_chat,
+            )
+        if auth_payload["authenticated"] is False:
+            return self._auth_required("teams", action="search", success=False)
+        username = auth_payload.get("username")
+        if not isinstance(username, str) or not username.strip():
+            return self._teams_identity_partial(
+                authenticated=True,
+                limit=limit,
+                messages_per_chat=messages_per_chat,
+            )
+
         list_result = self.runner.run(
             ["teams-cli", "chat", "list", "--limit", str(TEAMS_CHAT_LIMIT), "--json"],
             timeout_seconds=TEAMS_COMMAND_TIMEOUT_SECONDS,
@@ -391,6 +426,26 @@ class AIPIMHarness:
                 continue
 
             chat_id = chat["id"]
+            searched_chat_count += 1
+            remaining_seconds = max(1, int(deadline - time.monotonic()))
+            members_result = self.runner.run(
+                ["teams-cli", "chat", "members", chat_id, "--json"],
+                timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
+                max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
+            )
+            if members_result.returncode != 0:
+                partial_reasons.append("member_resolution_failed")
+                continue
+            members_payload = _decode_json(members_result.stdout)
+            members = self._successful_data_list(members_payload, nested_key="members")
+            user_id = self._teams_user_id(members, username)
+            if user_id is None:
+                partial_reasons.append("member_resolution_failed")
+                continue
+            if time.monotonic() >= deadline:
+                partial_reasons.append("time_limit_reached")
+                break
+
             remaining_seconds = max(1, int(deadline - time.monotonic()))
             read_result = self.runner.run(
                 [
@@ -405,7 +460,6 @@ class AIPIMHarness:
                 timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
                 max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
             )
-            searched_chat_count += 1
             if read_result.returncode != 0:
                 partial_reasons.append("chat_read_failed")
                 continue
@@ -420,7 +474,9 @@ class AIPIMHarness:
                 partial_reasons.append("message_limit_reached")
 
             for message in messages:
-                item = self._normalize_teams_message(message, chat, date_range, query_text)
+                item = self._normalize_teams_message(
+                    message, chat, date_range, query_text, author_user_id=user_id
+                )
                 if item is None:
                     continue
                 if len(items) >= limit:
@@ -447,6 +503,49 @@ class AIPIMHarness:
                 "chatLimit": TEAMS_CHAT_LIMIT,
                 "messagesPerChat": messages_per_chat,
                 "searchedChatCount": searched_chat_count,
+            },
+        )
+
+    @staticmethod
+    def _teams_user_id(members: list[Any] | None, username: str) -> str | None:
+        if members is None:
+            return None
+        normalized_username = username.strip().casefold()
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            email = member.get("email")
+            user_id = member.get("userId")
+            if (
+                isinstance(email, str)
+                and email.strip().casefold() == normalized_username
+                and isinstance(user_id, str)
+                and user_id
+            ):
+                return user_id
+        return None
+
+    @staticmethod
+    def _teams_identity_partial(
+        *, authenticated: bool, limit: int, messages_per_chat: int
+    ) -> dict[str, Any]:
+        return _envelope(
+            "teams",
+            "search",
+            success=True,
+            status="available" if authenticated else "invalid_response",
+            message="Teams user identity could not be resolved.",
+            installed=True,
+            authenticated=authenticated,
+            metadata={
+                "isPartial": True,
+                "partialReasons": ["identity_resolution_failed"],
+                "requestedLimit": limit,
+                "returnedCount": 0,
+                "filtering": "client_side",
+                "chatLimit": TEAMS_CHAT_LIMIT,
+                "messagesPerChat": messages_per_chat,
+                "searchedChatCount": 0,
             },
         )
 
@@ -481,6 +580,8 @@ class AIPIMHarness:
         chat: dict[str, Any],
         date_range: DateRange,
         query_text: str,
+        *,
+        author_user_id: str,
     ) -> dict[str, Any] | None:
         if not isinstance(message, dict):
             return None
@@ -499,6 +600,8 @@ class AIPIMHarness:
         sender = message.get("from")
         sender = sender.get("user") if isinstance(sender, dict) else None
         sender = sender if isinstance(sender, dict) else {}
+        if sender.get("id") != author_user_id:
+            return None
         display_name = (
             sender.get("displayName") if isinstance(sender.get("displayName"), str) else None
         )

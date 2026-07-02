@@ -32,6 +32,22 @@ def cli_result(args: list[str], returncode: int = 0, payload: object | None = No
     )
 
 
+def teams_auth_payload(username: str = "jp@example.com") -> dict[str, object]:
+    return {"authenticated": True, "username": username}
+
+
+def teams_members_payload(
+    email: str = "jp@example.com", user_id: str = "user-1"
+) -> dict[str, object]:
+    return {
+        "success": True,
+        "data": [
+            {"email": email, "userId": user_id, "displayName": "JP"},
+            {"email": "other@example.com", "userId": "user-2", "displayName": "Other"},
+        ],
+    }
+
+
 class FakeRunner:
     def __init__(self, results: list[CLIResult]) -> None:
         self.results = list(results)
@@ -55,7 +71,7 @@ class AIPIMHarnessStatusTests(unittest.TestCase):
         fake = FakeRunner(
             [
                 CLIResult(
-                    args=["slack-cli", "auth", "status"],
+                    args=["slack-cli", "me", "--output", "json"],
                     returncode=127,
                     stdout="",
                     stderr="Command not found: slack-cli",
@@ -72,13 +88,13 @@ class AIPIMHarnessStatusTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["data"], {"installed": False, "authenticated": False, "items": []})
         self.assertNotIn("Command not found", json.dumps(result))
-        self.assertEqual(fake.calls[0][0], ["slack-cli", "auth", "status"])
+        self.assertEqual(fake.calls[0][0], ["slack-cli", "me", "--output", "json"])
 
     def test_slack_auth_required_is_not_reported_as_unavailable(self):
         fake = FakeRunner(
             [
                 CLIResult(
-                    args=["slack-cli", "auth", "status"],
+                    args=["slack-cli", "me", "--output", "json"],
                     returncode=2,
                     stdout="",
                     stderr="authentication required",
@@ -93,36 +109,60 @@ class AIPIMHarnessStatusTests(unittest.TestCase):
         self.assertTrue(result["data"]["installed"])
         self.assertFalse(result["data"]["authenticated"])
 
-    def test_teams_status_requires_success_true(self):
-        args = ["teams-cli", "auth", "status", "--json"]
+    def test_slack_status_requires_success_true_without_exposing_profile(self):
+        profile_secret = "profile-token-metadata"
         fake = FakeRunner(
             [
                 cli_result(
-                    args,
+                    ["slack-cli", "me", "--output", "json"],
                     payload={
-                        "success": False,
-                        "error": {"code": "AUTH_REQUIRED", "message": "secret detail"},
+                        "success": True,
+                        "data": {
+                            "user": {
+                                "id": "U123",
+                                "email": "jp@example.com",
+                                "profile": {"tokenMetadata": profile_secret},
+                            }
+                        },
+                        "error": None,
                     },
                 )
             ]
         )
 
-        result = AIPIMHarness(runner=fake).status("teams")
+        result = AIPIMHarness(runner=fake).status("slack")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "available")
+        self.assertTrue(result["data"]["authenticated"])
+        serialized = json.dumps(result)
+        self.assertNotIn("jp@example.com", serialized)
+        self.assertNotIn(profile_secret, serialized)
+        self.assertEqual(fake.calls[0][0], ["slack-cli", "me", "--output", "json"])
+
+    def test_slack_status_rejects_success_false_with_zero_exit(self):
+        fake = FakeRunner(
+            [
+                cli_result(
+                    [],
+                    payload={"success": False, "error": {"message": "raw status failure"}},
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).status("slack")
 
         self.assertFalse(result["success"])
-        self.assertEqual(result["status"], "auth_required")
-        self.assertNotIn("secret detail", json.dumps(result))
+        self.assertEqual(result["status"], "command_error")
+        self.assertNotIn("raw status failure", json.dumps(result))
 
-    def test_teams_status_decodes_authenticated_state(self):
+    def test_teams_status_decodes_standalone_authenticated_state(self):
         args = ["teams-cli", "auth", "status", "--json"]
         fake = FakeRunner(
             [
                 cli_result(
                     args,
-                    payload={
-                        "success": True,
-                        "data": {"authenticated": True, "username": "jp@example.com"},
-                    },
+                    payload={"authenticated": True, "username": "jp@example.com"},
                 )
             ]
         )
@@ -133,6 +173,41 @@ class AIPIMHarnessStatusTests(unittest.TestCase):
         self.assertEqual(result["status"], "available")
         self.assertTrue(result["data"]["authenticated"])
         self.assertNotIn("jp@example.com", json.dumps(result))
+
+    def test_teams_status_reports_standalone_authenticated_false(self):
+        fake = FakeRunner(
+            [
+                cli_result(
+                    ["teams-cli", "auth", "status", "--json"],
+                    payload={"authenticated": False, "diagnostics": {"cache": "secret-path"}},
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).status("teams")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "auth_required")
+        self.assertFalse(result["data"]["authenticated"])
+        self.assertNotIn("secret-path", json.dumps(result))
+
+    def test_teams_status_rejects_malformed_json(self):
+        fake = FakeRunner(
+            [
+                CLIResult(
+                    args=["teams-cli", "auth", "status", "--json"],
+                    returncode=0,
+                    stdout="not-json",
+                    stderr="",
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).status("teams")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "invalid_response")
+        self.assertNotIn("not-json", json.dumps(result))
 
     def test_login_uses_exact_command_and_does_not_forward_auth_output(self):
         sentinel = "callback-with-secret-code"
@@ -230,6 +305,40 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         self.assertTrue(result["metadata"]["isPartial"])
         self.assertIn("result_limit_reached", result["metadata"]["partialReasons"])
 
+    def test_slack_enforces_limit_after_normalizing_upstream_over_return(self):
+        matches = [
+            {
+                "ts": f"178291620{index}.125000",
+                "text": f"Message {index}",
+                "channel": {"id": "C123", "name": "noteai"},
+            }
+            for index in range(3)
+        ]
+        fake = FakeRunner(
+            [
+                cli_result(
+                    [],
+                    payload={
+                        "success": True,
+                        "data": {
+                            "messages": {
+                                "total": 3,
+                                "matches": matches,
+                                "pagination": {"page": 1, "page_count": 1},
+                            }
+                        },
+                    },
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("slack", make_range(), limit=2)
+
+        self.assertEqual(len(result["data"]["items"]), 2)
+        self.assertEqual(result["metadata"]["returnedCount"], 2)
+        self.assertTrue(result["metadata"]["isPartial"])
+        self.assertIn("result_limit_reached", result["metadata"]["partialReasons"])
+
     def test_slack_rejects_success_false_even_with_zero_exit_status(self):
         fake = FakeRunner(
             [
@@ -275,6 +384,25 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["status"], "timed_out")
 
+    def test_slack_output_cap_is_a_normalized_error_without_raw_output(self):
+        fake = FakeRunner(
+            [
+                CLIResult(
+                    args=[],
+                    returncode=125,
+                    stdout="raw message content must not escape",
+                    stderr="Command output exceeded limit",
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("slack", make_range())
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "output_limit_exceeded")
+        self.assertEqual(result["data"]["items"], [])
+        self.assertNotIn("raw message content", json.dumps(result))
+
 
 class AIPIMHarnessTeamsTests(unittest.TestCase):
     def test_teams_search_enumerates_chats_filters_dates_and_normalizes_html(self):
@@ -302,10 +430,21 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
                     "from": {"user": {"id": "user-1", "displayName": "JP"}},
                     "body": {"contentType": "text", "content": "Outside the range"},
                 },
+                {
+                    "id": "message-other-user",
+                    "createdDateTime": "2026-07-01T16:00:00Z",
+                    "from": {"user": {"id": "user-2", "displayName": "Other"}},
+                    "body": {"contentType": "text", "content": "Other user NoteAI work"},
+                },
             ],
         }
         fake = FakeRunner(
-            [cli_result([], payload=chats_payload), cli_result([], payload=messages_payload)]
+            [
+                cli_result([], payload=teams_auth_payload("JP@EXAMPLE.COM")),
+                cli_result([], payload=chats_payload),
+                cli_result([], payload=teams_members_payload()),
+                cli_result([], payload=messages_payload),
+            ]
         )
 
         result = AIPIMHarness(runner=fake).search(
@@ -316,9 +455,17 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
             messages_per_chat=2,
         )
 
-        self.assertEqual(fake.calls[0][0], ["teams-cli", "chat", "list", "--limit", "50", "--json"])
+        self.assertEqual(fake.calls[0][0], ["teams-cli", "auth", "status", "--json"])
         self.assertEqual(
             fake.calls[1][0],
+            ["teams-cli", "chat", "list", "--limit", "50", "--json"],
+        )
+        self.assertEqual(
+            fake.calls[2][0],
+            ["teams-cli", "chat", "members", "chat-1", "--json"],
+        )
+        self.assertEqual(
+            fake.calls[3][0],
             ["teams-cli", "chat", "read", "chat-1", "--limit", "2", "--json"],
         )
         self.assertTrue(result["success"])
@@ -333,8 +480,13 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
 
     def test_teams_marks_results_partial_when_chat_limit_is_reached(self):
         chats = [{"id": f"chat-{index}"} for index in range(50)]
-        results = [cli_result([], payload={"success": True, "data": chats})]
-        results.extend(cli_result([], payload={"success": True, "data": []}) for _ in chats)
+        results = [
+            cli_result([], payload=teams_auth_payload()),
+            cli_result([], payload={"success": True, "data": chats}),
+        ]
+        for _ in chats:
+            results.append(cli_result([], payload=teams_members_payload()))
+            results.append(cli_result([], payload={"success": True, "data": []}))
         fake = FakeRunner(results)
 
         result = AIPIMHarness(runner=fake).search("teams", make_range(), messages_per_chat=1)
@@ -343,11 +495,15 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
         self.assertTrue(result["metadata"]["isPartial"])
         self.assertIn("chat_limit_reached", result["metadata"]["partialReasons"])
         self.assertEqual(result["metadata"]["searchedChatCount"], 50)
+        member_calls = [call for call in fake.calls if call[0][2:3] == ["members"]]
+        self.assertEqual(len(member_calls), 50)
 
     def test_teams_marks_results_partial_when_in_range_messages_fill_read_limit(self):
         fake = FakeRunner(
             [
+                cli_result([], payload=teams_auth_payload()),
                 cli_result([], payload={"success": True, "data": [{"id": "chat-1"}]}),
+                cli_result([], payload=teams_members_payload()),
                 cli_result(
                     [],
                     payload={
@@ -356,11 +512,13 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
                             {
                                 "id": "message-1",
                                 "createdDateTime": "2026-07-02T15:00:00Z",
+                                "from": {"user": {"id": "user-1"}},
                                 "body": {"contentType": "text", "content": "First"},
                             },
                             {
                                 "id": "message-2",
                                 "createdDateTime": "2026-07-01T15:00:00Z",
+                                "from": {"user": {"id": "user-1"}},
                                 "body": {"contentType": "text", "content": "Second"},
                             },
                         ],
@@ -377,7 +535,9 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
     def test_teams_rejects_malformed_chat_read_json_and_marks_partial(self):
         fake = FakeRunner(
             [
+                cli_result([], payload=teams_auth_payload()),
                 cli_result([], payload={"success": True, "data": [{"id": "chat-1"}]}),
+                cli_result([], payload=teams_members_payload()),
                 CLIResult(args=[], returncode=0, stdout="not-json", stderr=""),
             ]
         )
@@ -388,6 +548,68 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
         self.assertEqual(result["data"]["items"], [])
         self.assertTrue(result["metadata"]["isPartial"])
         self.assertIn("chat_read_failed", result["metadata"]["partialReasons"])
+
+    def test_teams_member_resolution_failure_is_partial_and_returns_no_other_users(self):
+        fake = FakeRunner(
+            [
+                cli_result([], payload=teams_auth_payload()),
+                cli_result(
+                    [],
+                    payload={
+                        "success": True,
+                        "data": [{"id": "chat-1"}, {"id": "chat-2"}],
+                    },
+                ),
+                cli_result([], payload=teams_members_payload()),
+                cli_result(
+                    [],
+                    payload={
+                        "success": True,
+                        "data": [
+                            {
+                                "id": "mine",
+                                "createdDateTime": "2026-07-01T15:00:00Z",
+                                "from": {"user": {"id": "user-1"}},
+                                "body": {"contentType": "text", "content": "My work"},
+                            },
+                            {
+                                "id": "theirs",
+                                "createdDateTime": "2026-07-01T16:00:00Z",
+                                "from": {"user": {"id": "user-2"}},
+                                "body": {"contentType": "text", "content": "Their work"},
+                            },
+                        ],
+                    },
+                ),
+                cli_result([], payload={"success": True, "data": []}),
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("teams", make_range())
+
+        self.assertEqual([item["id"] for item in result["data"]["items"]], ["mine"])
+        self.assertTrue(result["metadata"]["isPartial"])
+        self.assertIn("member_resolution_failed", result["metadata"]["partialReasons"])
+        self.assertEqual(
+            fake.calls[-1][0],
+            ["teams-cli", "chat", "members", "chat-2", "--json"],
+        )
+
+    def test_teams_missing_auth_username_is_partial_and_stops_before_chat_enumeration(self):
+        fake = FakeRunner(
+            [cli_result([], payload={"authenticated": True, "diagnostics": {"cache": "secret"}})]
+        )
+
+        result = AIPIMHarness(runner=fake).search("teams", make_range())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["items"], [])
+        self.assertTrue(result["metadata"]["isPartial"])
+        self.assertIn("identity_resolution_failed", result["metadata"]["partialReasons"])
+        self.assertEqual(result["metadata"]["requestedLimit"], 50)
+        self.assertEqual(result["metadata"]["messagesPerChat"], 50)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertNotIn("secret", json.dumps(result))
 
 
 class WorkActivitySourceCLITests(unittest.TestCase):

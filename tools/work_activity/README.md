@@ -24,13 +24,15 @@ python3 -m tools.work_activity source-search --source teams --from 2026-07-01 --
 
 Search results are normalized under `data.items`. Each item contains only `id`, `source`, `timestamp`, `title`, `body`, `url`, `author`, and `context`. The harness does not return upstream query echoes, raw metadata, stderr, auth callbacks, or credential fields.
 
+Slack status uses `slack-cli me --output json`. Teams status uses the standalone `teams-cli auth status --json` object and accepts only an explicit boolean `authenticated` field. Neither status path returns the upstream user profile, username, configuration, or diagnostics.
+
 Slack search always calls page 1 with an explicit limit of at most 100 and adds these server-side filters:
 
 ```text
 from:me after:<inclusive-start-date> before:<exclusive-end-date>
 ```
 
-Teams has no server-side search in the inspected ai-pim-utils interface. The harness lists at most 50 chats, reads at most 200 messages per chat, stops after 60 seconds, and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report chat, message, result, time, or read limits that can omit coverage.
+Teams has no server-side search in the inspected ai-pim-utils interface. The harness resolves the authenticated username through Teams auth status, lists at most 50 chats, resolves that username to a per-chat member ID, reads at most 200 messages per chat, and returns only messages authored by that member ID. The complete operation stops after 60 seconds and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report identity, member, chat, message, result, time, or read limits that can omit coverage. A failed identity or member lookup returns no unverified authors' messages.
 
 ## Library Facade
 
@@ -44,8 +46,9 @@ Use `tools.work_activity.assistant_queries` for assistant-facing workflows:
 ## Security
 
 - Source credentials stay behind existing source CLIs and are not stored by this package.
-- Auth actions invoke only `slack-cli auth status/login` and `teams-cli auth status/login`; the package never reads ai-pim-utils credential files.
-- External JSON is accepted only when the process succeeds and the response contains `success: true`.
+- Status and login actions invoke only ai-pim-utils commands; the package never reads ai-pim-utils credential files.
+- Envelope-based JSON operations are accepted only when the process exits 0 and the response contains `success: true`. Teams auth status is validated against its standalone `authenticated` boolean contract.
+- Interactive `auth login` commands do not return the JSON envelope; login completion is based on process exit status 0.
 - Subprocesses use argument arrays without a shell, with bounded runtime and combined output size.
 - NoteAI SQLite is opened read-only with SQLite URI `mode=ro`.
 - External source bodies are not cached by default.

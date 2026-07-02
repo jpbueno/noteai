@@ -1,7 +1,11 @@
 import contextlib
 import io
 import json
+import os
+import signal
 import sys
+import tempfile
+import time
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -34,6 +38,14 @@ def cli_result(args: list[str], returncode: int = 0, payload: object | None = No
 
 def teams_auth_payload(username: str = "jp@example.com") -> dict[str, object]:
     return {"authenticated": True, "username": username}
+
+
+def slack_me_payload(user_id: str = "U123") -> dict[str, object]:
+    return {
+        "success": True,
+        "data": {"user": {"id": user_id, "name": "must-not-escape"}},
+        "error": None,
+    }
 
 
 def teams_members_payload(
@@ -305,7 +317,12 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
                 },
             },
         }
-        fake = FakeRunner([cli_result([], payload=payload)])
+        fake = FakeRunner(
+            [
+                cli_result([], payload=slack_me_payload()),
+                cli_result([], payload=payload),
+            ]
+        )
 
         result = AIPIMHarness(runner=fake).search(
             "slack",
@@ -317,6 +334,10 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(
             fake.calls[0][0],
+            ["slack-cli", "me", "--output", "json"],
+        )
+        self.assertEqual(
+            fake.calls[1][0],
             [
                 "slack-cli",
                 "message",
@@ -333,7 +354,7 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         )
         self.assertEqual(result["data"]["items"][0]["body"], "Shipped the source adapter.")
         self.assertEqual(result["data"]["items"][0]["context"]["name"], "noteai")
-        self.assertEqual(result["metadata"]["filtering"], "server_side")
+        self.assertEqual(result["metadata"]["filtering"], "server_side_and_local")
         self.assertFalse(result["metadata"]["isPartial"])
         serialized = json.dumps(result)
         self.assertNotIn("must-never-escape", serialized)
@@ -350,7 +371,12 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
                 }
             },
         }
-        fake = FakeRunner([cli_result([], payload=payload)])
+        fake = FakeRunner(
+            [
+                cli_result([], payload=slack_me_payload()),
+                cli_result([], payload=payload),
+            ]
+        )
 
         result = AIPIMHarness(runner=fake).search("slack", make_range(), limit=20)
 
@@ -361,6 +387,7 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         matches = [
             {
                 "ts": f"178291620{index}.125000",
+                "user": "U123",
                 "text": f"Message {index}",
                 "channel": {"id": "C123", "name": "noteai"},
             }
@@ -368,6 +395,7 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         ]
         fake = FakeRunner(
             [
+                cli_result([], payload=slack_me_payload()),
                 cli_result(
                     [],
                     payload={
@@ -391,9 +419,82 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
         self.assertTrue(result["metadata"]["isPartial"])
         self.assertIn("result_limit_reached", result["metadata"]["partialReasons"])
 
+    def test_slack_locally_rejects_untrusted_search_matches(self):
+        valid_ts = str(
+            datetime(2026, 7, 1, 12, tzinfo=ZoneInfo("America/New_York")).timestamp()
+        )
+        before_ts = str(
+            datetime(2026, 6, 30, 23, tzinfo=ZoneInfo("America/New_York")).timestamp()
+        )
+        end_ts = str(make_range().end.timestamp())
+
+        def match(**overrides: object) -> dict[str, object]:
+            value: dict[str, object] = {
+                "ts": valid_ts,
+                "user": "U123",
+                "username": "JP",
+                "text": "Valid work update",
+                "channel": {"id": "C123", "name": "noteai"},
+            }
+            value.update(overrides)
+            return value
+
+        matches = [
+            match(),
+            match(user="U999", text="Someone else's message"),
+            match(ts=before_ts, text="Before range"),
+            match(ts=end_ts, text="At exclusive range end"),
+            match(ts="not-a-timestamp", text="Malformed ID"),
+            match(ts=float(valid_ts), text="Non-string ID"),
+            match(text="   "),
+            match(username="", channel={"id": "C123", "name": ""}),
+        ]
+        fake = FakeRunner(
+            [
+                cli_result([], payload=slack_me_payload()),
+                cli_result(
+                    [],
+                    payload={
+                        "success": True,
+                        "data": {
+                            "messages": {
+                                "total": len(matches),
+                                "matches": matches,
+                                "pagination": {"page": 1, "page_count": 1},
+                            }
+                        },
+                    },
+                ),
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("slack", make_range())
+
+        self.assertTrue(result["success"])
+        self.assertEqual([item["body"] for item in result["data"]["items"]], ["Valid work update"])
+
+    def test_slack_search_fails_closed_when_identity_cannot_be_verified(self):
+        fake = FakeRunner(
+            [
+                cli_result(
+                    [],
+                    payload={"success": True, "data": {"user": {"id": ""}}},
+                )
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("slack", make_range())
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "invalid_response")
+        self.assertFalse(result["data"]["authenticated"])
+        self.assertEqual(len(fake.calls), 1)
+        self.assertNotIn("user", json.dumps(result))
+
     def test_slack_rejects_success_false_even_with_zero_exit_status(self):
         fake = FakeRunner(
             [
+                cli_result([], payload=slack_me_payload()),
                 cli_result(
                     [],
                     payload={"success": False, "error": {"message": "raw MCP failure"}},
@@ -411,6 +512,7 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
     def test_slack_malformed_json_is_a_normalized_error(self):
         fake = FakeRunner(
             [
+                cli_result([], payload=slack_me_payload()),
                 CLIResult(
                     args=[],
                     returncode=0,
@@ -428,7 +530,10 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
 
     def test_slack_timeout_is_a_normalized_error(self):
         fake = FakeRunner(
-            [CLIResult(args=[], returncode=124, stdout="", stderr="Command timed out: slack-cli")]
+            [
+                cli_result([], payload=slack_me_payload()),
+                CLIResult(args=[], returncode=124, stdout="", stderr="Command timed out: slack-cli"),
+            ]
         )
 
         result = AIPIMHarness(runner=fake).search("slack", make_range())
@@ -439,6 +544,7 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
     def test_slack_output_cap_is_a_normalized_error_without_raw_output(self):
         fake = FakeRunner(
             [
+                cli_result([], payload=slack_me_payload()),
                 CLIResult(
                     args=[],
                     returncode=125,
@@ -457,6 +563,20 @@ class AIPIMHarnessSlackTests(unittest.TestCase):
 
 
 class AIPIMHarnessTeamsTests(unittest.TestCase):
+    def test_teams_auth_status_expiry_aborts_search(self):
+        fake = FakeRunner(
+            [CLIResult(args=[], returncode=2, stdout="private", stderr="auth expired")]
+        )
+
+        result = AIPIMHarness(runner=fake).search("teams", make_range())
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "auth_required")
+        self.assertFalse(result["data"]["authenticated"])
+        self.assertEqual(result["data"]["items"], [])
+        self.assertEqual(len(fake.calls), 1)
+        self.assertNotIn("private", json.dumps(result))
+
     def test_teams_search_enumerates_chats_filters_dates_and_normalizes_html(self):
         chats_payload = {
             "success": True,
@@ -554,8 +674,45 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
         self.assertEqual(item["context"], {"id": "chat-1", "name": "NoteAI", "type": "group"})
         self.assertEqual(result["metadata"]["filtering"], "client_side")
         self.assertEqual(result["metadata"]["searchedChatCount"], 1)
-        self.assertFalse(result["metadata"]["isPartial"])
+        self.assertTrue(result["metadata"]["isPartial"])
+        self.assertIn("channel_coverage_missing", result["metadata"]["partialReasons"])
+        self.assertEqual(result["message"], "Teams chat search completed with partial coverage.")
         self.assertNotIn("must-never-escape", json.dumps(result))
+
+    def test_teams_member_auth_expiry_aborts_search(self):
+        fake = FakeRunner(
+            [
+                cli_result([], payload=teams_auth_payload()),
+                cli_result([], payload={"success": True, "data": [{"id": "chat-1"}]}),
+                CLIResult(args=[], returncode=2, stdout="private", stderr="auth expired"),
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("teams", make_range())
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "auth_required")
+        self.assertFalse(result["data"]["authenticated"])
+        self.assertEqual(result["data"]["items"], [])
+        self.assertNotIn("private", json.dumps(result))
+
+    def test_teams_read_auth_expiry_aborts_search(self):
+        fake = FakeRunner(
+            [
+                cli_result([], payload=teams_auth_payload()),
+                cli_result([], payload={"success": True, "data": [{"id": "chat-1"}]}),
+                cli_result([], payload=teams_members_payload()),
+                CLIResult(args=[], returncode=2, stdout="private", stderr="auth expired"),
+            ]
+        )
+
+        result = AIPIMHarness(runner=fake).search("teams", make_range())
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "auth_required")
+        self.assertFalse(result["data"]["authenticated"])
+        self.assertEqual(result["data"]["items"], [])
+        self.assertNotIn("private", json.dumps(result))
 
     def test_teams_marks_results_partial_when_chat_limit_is_reached(self):
         chats = [{"id": f"chat-{index}"} for index in range(50)]
@@ -719,6 +876,56 @@ class AIPIMHarnessTeamsTests(unittest.TestCase):
 
 
 class WorkActivitySourceCLITests(unittest.TestCase):
+    def assert_source_search_validation_error(self, date_args: list[str]) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        harness = unittest.mock.Mock()
+
+        with patch.object(work_activity_cli, "AIPIMHarness", return_value=harness):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = work_activity_cli.main(
+                    ["source-search", "--source", "slack", *date_args]
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(stderr.getvalue(), "")
+        output_lines = stdout.getvalue().splitlines()
+        self.assertEqual(len(output_lines), 1)
+        result = json.loads(output_lines[0])
+        self.assertEqual(result["schemaVersion"], 1)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["source"], "slack")
+        self.assertEqual(result["action"], "search")
+        self.assertEqual(result["status"], "validation_error")
+        self.assertEqual(result["data"]["items"], [])
+        self.assertFalse(result["data"]["authenticated"])
+        harness.search.assert_not_called()
+
+    def test_source_search_rejects_malformed_date_as_json(self):
+        self.assert_source_search_validation_error(
+            ["--from", "2026-07-nope", "--to", "2026-07-02"]
+        )
+
+    def test_source_search_rejects_unknown_timezone_as_json(self):
+        self.assert_source_search_validation_error(
+            [
+                "--from",
+                "2026-07-01",
+                "--to",
+                "2026-07-02",
+                "--timezone",
+                "Not/A-Timezone",
+            ]
+        )
+
+    def test_source_search_rejects_reversed_range_as_json(self):
+        self.assert_source_search_validation_error(
+            ["--from", "2026-07-03", "--to", "2026-07-01"]
+        )
+
+    def test_source_search_rejects_empty_range_values_as_json(self):
+        self.assert_source_search_validation_error(["--from", "", "--to", ""])
+
     def test_source_auth_status_prints_only_json_envelope(self):
         envelope = {
             "schemaVersion": 1,
@@ -807,6 +1014,47 @@ class BoundedCLIRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 124)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "Command timed out")
+
+    @unittest.skipUnless(os.name == "posix", "process groups require POSIX")
+    def test_timeout_terminates_spawned_descendant_process(self):
+        runner = CLIRunner(timeout_seconds=1, max_output_bytes=1024)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pid_path = os.path.join(temp_dir, "descendant.pid")
+            child_code = (
+                "import os,time; "
+                f"open({pid_path!r}, 'w').write(str(os.getpid())); "
+                "time.sleep(30)"
+            )
+            parent_code = (
+                "import subprocess,sys,time; "
+                f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+                "time.sleep(30)"
+            )
+            descendant_pid: int | None = None
+
+            try:
+                result = runner.run([sys.executable, "-c", parent_code])
+                self.assertEqual(result.returncode, 124)
+                self.assertTrue(os.path.exists(pid_path), "descendant did not start")
+                with open(pid_path, encoding="utf-8") as pid_file:
+                    descendant_pid = int(pid_file.read())
+
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(descendant_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("descendant process survived runner timeout")
+            finally:
+                if descendant_pid is not None:
+                    try:
+                        os.kill(descendant_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
 
 if __name__ == "__main__":

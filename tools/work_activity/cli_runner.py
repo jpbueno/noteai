@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import selectors
+import signal
 import subprocess
 import time
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ class CLIRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 shell=False,
+                start_new_session=os.name == "posix",
             )
         except FileNotFoundError:
             return CLIResult(args=args, returncode=127, stdout="", stderr=f"Command not found: {args[0]}")
@@ -54,8 +56,7 @@ class CLIRunner:
             while selector.get_map():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    process.kill()
-                    process.wait()
+                    self._kill_and_reap(process)
                     return CLIResult(args=args, returncode=124, stdout="", stderr="Command timed out")
 
                 for key, _ in selector.select(timeout=min(remaining, 0.1)):
@@ -66,8 +67,7 @@ class CLIRunner:
                         continue
                     captured_bytes += len(chunk)
                     if captured_bytes > output_limit:
-                        process.kill()
-                        process.wait()
+                        self._kill_and_reap(process)
                         return CLIResult(
                             args=args,
                             returncode=125,
@@ -78,8 +78,7 @@ class CLIRunner:
 
             returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            self._kill_and_reap(process)
             return CLIResult(args=args, returncode=124, stdout="", stderr="Command timed out")
         finally:
             selector.close()
@@ -94,3 +93,14 @@ class CLIRunner:
             stdout=captured["stdout"].decode("utf-8", errors="replace"),
             stderr=captured["stderr"].decode("utf-8", errors="replace"),
         )
+
+    @staticmethod
+    def _kill_and_reap(process: subprocess.Popen[bytes]) -> None:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            process.kill()
+        process.wait()

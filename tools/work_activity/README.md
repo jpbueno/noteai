@@ -26,13 +26,15 @@ Search results are normalized under `data.items`. Each item contains only `id`, 
 
 Slack status uses `slack-cli me --output json`. Teams status uses the standalone `teams-cli auth status --json` object and accepts only an explicit boolean `authenticated` field. Neither status path returns the upstream user profile, username, configuration, or diagnostics.
 
-Slack search always calls page 1 with an explicit limit of at most 100 and adds these server-side filters:
+Slack search first resolves the authenticated Slack user ID, then calls page 1 with an explicit limit of at most 100 and adds these server-side filters:
 
 ```text
 from:me after:<inclusive-start-date> before:<exclusive-end-date>
 ```
 
-Teams has no server-side search in the inspected ai-pim-utils interface. The harness resolves the authenticated username through Teams auth status, lists at most 50 chats, resolves that username to a per-chat member ID, reads at most 200 messages per chat, and returns only messages authored by that member ID. List, member, and message commands request only the fields needed by the normalized interface. The complete operation stops after 60 seconds and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report member, chat, message, result, time, or read limits that can omit coverage. A malformed auth identity fails the search, and a failed member lookup returns no unverified authors' messages.
+Returned Slack matches are also checked locally against that user ID and the requested date range. Matches without a valid ID, timestamp, body, or title are discarded.
+
+Teams has no server-side search in the inspected ai-pim-utils interface. This harness performs bounded **Teams chat search**, not complete Teams history search: it resolves the authenticated username through Teams auth status, lists at most 50 chats, resolves that username to a per-chat member ID, reads at most 200 messages per chat, and returns only messages authored by that member ID. List, member, and message commands request only the fields needed by the normalized interface. The bounded chat operation stops after 60 seconds and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. Every successful Teams chat search is partial with `channel_coverage_missing`; additional `metadata.partialReasons` report member, chat, message, result, time, or read limits that can omit coverage. A malformed auth identity fails the search, and a failed member lookup returns no unverified authors' messages.
 
 ## Library Facade
 
@@ -49,7 +51,7 @@ Use `tools.work_activity.assistant_queries` for assistant-facing workflows:
 - Status and login actions invoke only ai-pim-utils commands; the package never reads ai-pim-utils credential files.
 - Envelope-based JSON operations are accepted only when the process exits 0 and the response contains `success: true`. Teams auth status is validated against its standalone `authenticated` boolean contract.
 - Interactive `auth login` output is never forwarded. Exit status 0 triggers an immediate machine-readable status check, and login succeeds only when that check confirms authentication.
-- Subprocesses use argument arrays without a shell, with bounded runtime and combined output size.
+- Subprocesses use argument arrays without a shell, with bounded runtime and combined output size. On POSIX systems, timeout and output overflow terminate the isolated subprocess group before the runner reaps the command.
 - NoteAI SQLite is opened read-only with SQLite URI `mode=ro`.
 - External source bodies are not cached by default.
 - Slack write behavior is limited to an explicit `--send-slack` request with an explicit recipient.
@@ -63,4 +65,4 @@ python3 -m unittest discover -s tools/work_activity/tests -v
 
 ## Current Scope
 
-This package supports NoteAI local activity plus live Slack message search and bounded Teams chat enumeration through ai-pim-utils. Live Outlook, calendar, meeting-artifact, and Google Drive ingestion remain future integration slices.
+This package supports NoteAI local activity plus live Slack message search and bounded Teams chat enumeration through ai-pim-utils. Teams channel enumeration remains a follow-up, so Teams results cannot represent complete history. A broader source-adapter refactor is intentionally deferred while the stable public commands remain unchanged. Live Outlook, calendar, meeting-artifact, and Google Drive ingestion remain future integration slices.

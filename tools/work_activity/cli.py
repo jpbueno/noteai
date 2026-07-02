@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfoNotFoundError
 
 from .connectors.ai_pim import AIPIMHarness
 from .connectors.noteai import DEFAULT_NOTEAI_DB, NoteAILocalConnector
@@ -89,7 +90,12 @@ def main(argv: list[str] | None = None) -> int:
         result = harness.status(args.source) if args.action == "status" else harness.login(args.source)
         return _print_json_result(result)
     if args.command == "source-search":
-        date_range = parse_custom_range(args.start_date, args.end_date, args.timezone)
+        try:
+            date_range = parse_custom_range(args.start_date, args.end_date, args.timezone)
+            if date_range.start >= date_range.end:
+                raise ValueError("range start must not follow range end")
+        except (OverflowError, ValueError, ZoneInfoNotFoundError):
+            return _print_json_result(_source_search_validation_error(args.source))
         result = AIPIMHarness().search(
             args.source,
             date_range,
@@ -105,3 +111,23 @@ def main(argv: list[str] | None = None) -> int:
 def _print_json_result(result: dict[str, object]) -> int:
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 0 if result.get("success") is True else 1
+
+
+def _source_search_validation_error(source: str) -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "success": False,
+        "source": source,
+        "action": "search",
+        "status": "validation_error",
+        "message": "Source search date range is invalid.",
+        "data": {
+            "installed": True,
+            "authenticated": False,
+            "items": [],
+        },
+        "metadata": {
+            "isPartial": False,
+            "partialReasons": [],
+        },
+    }

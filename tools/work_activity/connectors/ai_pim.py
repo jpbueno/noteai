@@ -296,6 +296,37 @@ class AIPIMHarness:
                 "validation_error",
                 f"Slack limit must be between 1 and {MAX_SLACK_RESULTS}.",
             )
+        identity_result = self.runner.run(
+            ["slack-cli", "me", "--output", "json"],
+            timeout_seconds=COMMAND_TIMEOUT_SECONDS,
+            max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
+        )
+        identity_failure = self._search_command_failure("slack", identity_result.returncode)
+        if identity_failure:
+            return identity_failure
+        identity_payload = _decode_json(identity_result.stdout)
+        if identity_payload is None:
+            return self._failure(
+                "slack", "search", "invalid_response", "Slack identity returned invalid JSON."
+            )
+        if identity_payload.get("success") is not True:
+            return self._failure(
+                "slack", "search", "command_error", "Slack identity verification failed."
+            )
+        identity_data = identity_payload.get("data")
+        identity_user = identity_data.get("user") if isinstance(identity_data, dict) else None
+        authenticated_user_id = (
+            identity_user.get("id") if isinstance(identity_user, dict) else None
+        )
+        if not isinstance(authenticated_user_id, str) or not authenticated_user_id.strip():
+            return self._failure(
+                "slack",
+                "search",
+                "invalid_response",
+                "Slack identity returned an unexpected response.",
+            )
+        authenticated_user_id = authenticated_user_id.strip()
+
         filters = (
             f"from:me after:{date_range.start.date().isoformat()} "
             f"before:{date_range.end.date().isoformat()}"
@@ -338,7 +369,15 @@ class AIPIMHarness:
             )
 
         normalized_items = [
-            item for match in matches if (item := self._normalize_slack_match(match))
+            item
+            for match in matches
+            if (
+                item := self._normalize_slack_match(
+                    match,
+                    date_range=date_range,
+                    authenticated_user_id=authenticated_user_id,
+                )
+            )
         ]
         items = normalized_items[:limit]
         total = messages.get("total")
@@ -364,7 +403,7 @@ class AIPIMHarness:
                 "partialReasons": reasons,
                 "requestedLimit": limit,
                 "returnedCount": len(items),
-                "filtering": "server_side",
+                "filtering": "server_side_and_local",
             },
         )
 
@@ -443,7 +482,7 @@ class AIPIMHarness:
                 "teams", "search", "invalid_response", "Teams returned an unexpected chat list."
             )
 
-        partial_reasons: list[str] = []
+        partial_reasons: list[str] = ["channel_coverage_missing"]
         if len(chats) >= TEAMS_CHAT_LIMIT:
             partial_reasons.append("chat_limit_reached")
         items: list[dict[str, Any]] = []
@@ -477,6 +516,8 @@ class AIPIMHarness:
                 timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
                 max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
             )
+            if members_result.returncode == 2:
+                return self._auth_required("teams", action="search", success=False)
             if members_result.returncode != 0:
                 partial_reasons.append("member_resolution_failed")
                 continue
@@ -506,6 +547,8 @@ class AIPIMHarness:
                 timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
                 max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
             )
+            if read_result.returncode == 2:
+                return self._auth_required("teams", action="search", success=False)
             if read_result.returncode != 0:
                 partial_reasons.append("chat_read_failed")
                 continue
@@ -536,7 +579,7 @@ class AIPIMHarness:
             "search",
             success=True,
             status="available",
-            message="Teams search completed.",
+            message="Teams chat search completed with partial coverage.",
             installed=True,
             authenticated=True,
             items=items,
@@ -647,28 +690,59 @@ class AIPIMHarness:
         }
 
     @staticmethod
-    def _normalize_slack_match(match: Any) -> dict[str, Any] | None:
+    def _normalize_slack_match(
+        match: Any,
+        *,
+        date_range: DateRange,
+        authenticated_user_id: str,
+    ) -> dict[str, Any] | None:
         if not isinstance(match, dict):
             return None
+        if match.get("user") != authenticated_user_id:
+            return None
+
         timestamp_value = match.get("ts")
-        timestamp = None
-        if isinstance(timestamp_value, (str, int, float)):
-            try:
-                timestamp = datetime.fromtimestamp(float(timestamp_value), tz=UTC).isoformat().replace(
-                    "+00:00", "Z"
-                )
-            except (ValueError, OverflowError):
-                timestamp = None
+        message_id = match.get("ts") or match.get("id")
+        if not isinstance(timestamp_value, str) or not timestamp_value.strip():
+            return None
+        if not isinstance(message_id, str) or not message_id.strip():
+            return None
+        try:
+            parsed_timestamp = datetime.fromtimestamp(float(timestamp_value), tz=UTC)
+        except (ValueError, OverflowError):
+            return None
+        try:
+            if parsed_timestamp < date_range.start or parsed_timestamp >= date_range.end:
+                return None
+        except TypeError:
+            return None
+
         channel = match.get("channel")
         channel = channel if isinstance(channel, dict) else {}
-        channel_name = channel.get("name") if isinstance(channel.get("name"), str) else None
-        username = match.get("username") if isinstance(match.get("username"), str) else None
-        body = match.get("text") if isinstance(match.get("text"), str) else ""
+        channel_name_value = channel.get("name")
+        channel_name = (
+            channel_name_value.strip()
+            if isinstance(channel_name_value, str) and channel_name_value.strip()
+            else None
+        )
+        username_value = match.get("username")
+        username = (
+            username_value.strip()
+            if isinstance(username_value, str) and username_value.strip()
+            else None
+        )
+        if not channel_name and not username:
+            return None
+        body_value = match.get("text")
+        body = body_value.strip() if isinstance(body_value, str) else ""
+        if not body:
+            return None
+
         return {
-            "id": str(match.get("ts") or match.get("id") or ""),
+            "id": message_id.strip(),
             "source": "slack",
-            "timestamp": timestamp,
-            "title": f"#{channel_name}" if channel_name else (username or "Slack message"),
+            "timestamp": parsed_timestamp.isoformat().replace("+00:00", "Z"),
+            "title": f"#{channel_name}" if channel_name else username,
             "body": body[:MAX_ITEM_BODY_CHARACTERS],
             "url": match.get("permalink") if isinstance(match.get("permalink"), str) else None,
             "author": {

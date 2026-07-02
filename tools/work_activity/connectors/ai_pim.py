@@ -35,6 +35,9 @@ MAX_NORMALIZED_RESULTS = 100
 TEAMS_COMMAND_TIMEOUT_SECONDS = 10
 TEAMS_SEARCH_TIMEOUT_SECONDS = 60
 MAX_ITEM_BODY_CHARACTERS = 8_000
+TEAMS_CHAT_FIELDS = "id,chatType,topic"
+TEAMS_MEMBER_FIELDS = "email,userId"
+TEAMS_MESSAGE_FIELDS = "id,createdDateTime,from,body,subject,webUrl"
 
 
 class _HTMLTextParser(HTMLParser):
@@ -219,6 +222,28 @@ class AIPIMHarness:
             max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
         )
         if result.returncode == 0:
+            verification = self.status(source)
+            verification_data = verification.get("data")
+            authenticated = (
+                verification_data.get("authenticated") is True
+                if isinstance(verification_data, dict)
+                else False
+            )
+            if verification.get("success") is not True or not authenticated:
+                installed = (
+                    verification_data.get("installed") is True
+                    if isinstance(verification_data, dict)
+                    else True
+                )
+                return _envelope(
+                    source,
+                    "login",
+                    success=False,
+                    status=str(verification.get("status") or "command_error"),
+                    message=f"{self._display_name(source)} authentication verification failed.",
+                    installed=installed,
+                    authenticated=False,
+                )
             return _envelope(
                 source,
                 "login",
@@ -377,23 +402,34 @@ class AIPIMHarness:
             return failure
         auth_payload = _decode_json(auth_result.stdout)
         if auth_payload is None or not isinstance(auth_payload.get("authenticated"), bool):
-            return self._teams_identity_partial(
-                authenticated=False,
-                limit=limit,
-                messages_per_chat=messages_per_chat,
+            return self._failure(
+                "teams",
+                "search",
+                "invalid_response",
+                "Teams authentication identity returned an invalid response.",
             )
         if auth_payload["authenticated"] is False:
             return self._auth_required("teams", action="search", success=False)
         username = auth_payload.get("username")
         if not isinstance(username, str) or not username.strip():
-            return self._teams_identity_partial(
-                authenticated=True,
-                limit=limit,
-                messages_per_chat=messages_per_chat,
+            return self._failure(
+                "teams",
+                "search",
+                "invalid_response",
+                "Teams authentication identity returned an invalid response.",
             )
 
         list_result = self.runner.run(
-            ["teams-cli", "chat", "list", "--limit", str(TEAMS_CHAT_LIMIT), "--json"],
+            [
+                "teams-cli",
+                "chat",
+                "list",
+                "--limit",
+                str(TEAMS_CHAT_LIMIT),
+                "--fields",
+                TEAMS_CHAT_FIELDS,
+                "--json",
+            ],
             timeout_seconds=TEAMS_COMMAND_TIMEOUT_SECONDS,
             max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
         )
@@ -429,7 +465,15 @@ class AIPIMHarness:
             searched_chat_count += 1
             remaining_seconds = max(1, int(deadline - time.monotonic()))
             members_result = self.runner.run(
-                ["teams-cli", "chat", "members", chat_id, "--json"],
+                [
+                    "teams-cli",
+                    "chat",
+                    "members",
+                    chat_id,
+                    "--fields",
+                    TEAMS_MEMBER_FIELDS,
+                    "--json",
+                ],
                 timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
                 max_output_bytes=COMMAND_OUTPUT_LIMIT_BYTES,
             )
@@ -455,6 +499,8 @@ class AIPIMHarness:
                     chat_id,
                     "--limit",
                     str(messages_per_chat),
+                    "--fields",
+                    TEAMS_MESSAGE_FIELDS,
                     "--json",
                 ],
                 timeout_seconds=min(TEAMS_COMMAND_TIMEOUT_SECONDS, remaining_seconds),
@@ -524,30 +570,6 @@ class AIPIMHarness:
             ):
                 return user_id
         return None
-
-    @staticmethod
-    def _teams_identity_partial(
-        *, authenticated: bool, limit: int, messages_per_chat: int
-    ) -> dict[str, Any]:
-        return _envelope(
-            "teams",
-            "search",
-            success=True,
-            status="available" if authenticated else "invalid_response",
-            message="Teams user identity could not be resolved.",
-            installed=True,
-            authenticated=authenticated,
-            metadata={
-                "isPartial": True,
-                "partialReasons": ["identity_resolution_failed"],
-                "requestedLimit": limit,
-                "returnedCount": 0,
-                "filtering": "client_side",
-                "chatLimit": TEAMS_CHAT_LIMIT,
-                "messagesPerChat": messages_per_chat,
-                "searchedChatCount": 0,
-            },
-        )
 
     @staticmethod
     def _successful_data_list(

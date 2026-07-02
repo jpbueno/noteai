@@ -32,7 +32,7 @@ Slack search always calls page 1 with an explicit limit of at most 100 and adds 
 from:me after:<inclusive-start-date> before:<exclusive-end-date>
 ```
 
-Teams has no server-side search in the inspected ai-pim-utils interface. The harness resolves the authenticated username through Teams auth status, lists at most 50 chats, resolves that username to a per-chat member ID, reads at most 200 messages per chat, and returns only messages authored by that member ID. The complete operation stops after 60 seconds and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report identity, member, chat, message, result, time, or read limits that can omit coverage. A failed identity or member lookup returns no unverified authors' messages.
+Teams has no server-side search in the inspected ai-pim-utils interface. The harness resolves the authenticated username through Teams auth status, lists at most 50 chats, resolves that username to a per-chat member ID, reads at most 200 messages per chat, and returns only messages authored by that member ID. List, member, and message commands request only the fields needed by the normalized interface. The complete operation stops after 60 seconds and filters dates and optional query text locally. Teams HTML message bodies are normalized to plain text. `metadata.isPartial` and `metadata.partialReasons` report member, chat, message, result, time, or read limits that can omit coverage. A malformed auth identity fails the search, and a failed member lookup returns no unverified authors' messages.
 
 ## Library Facade
 
@@ -48,7 +48,7 @@ Use `tools.work_activity.assistant_queries` for assistant-facing workflows:
 - Source credentials stay behind existing source CLIs and are not stored by this package.
 - Status and login actions invoke only ai-pim-utils commands; the package never reads ai-pim-utils credential files.
 - Envelope-based JSON operations are accepted only when the process exits 0 and the response contains `success: true`. Teams auth status is validated against its standalone `authenticated` boolean contract.
-- Interactive `auth login` commands do not return the JSON envelope; login completion is based on process exit status 0.
+- Interactive `auth login` output is never forwarded. Exit status 0 triggers an immediate machine-readable status check, and login succeeds only when that check confirms authentication.
 - Subprocesses use argument arrays without a shell, with bounded runtime and combined output size.
 - NoteAI SQLite is opened read-only with SQLite URI `mode=ro`.
 - External source bodies are not cached by default.

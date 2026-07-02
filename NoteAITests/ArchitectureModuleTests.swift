@@ -2036,7 +2036,7 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(output.contains("Nscale runtime sync"))
         XCTAssertTrue(output.contains("Nscale notes"))
         XCTAssertTrue(output.contains("NoteAI local records"))
-        XCTAssertTrue(output.contains("Outlook email search is connected"))
+        XCTAssertFalse(output.contains("Outlook email search is connected"))
         XCTAssertFalse(output.contains("Slack source search is not connected"))
         XCTAssertFalse(output.contains("Teams source search is not connected"))
         XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
@@ -2058,7 +2058,7 @@ final class ArchitectureModuleTests: XCTestCase {
             )
         ))
 
-        XCTAssertTrue(output.contains("Sources: NoteAI local records."))
+        XCTAssertTrue(output.contains("Sources searched: NoteAI local records."))
         XCTAssertFalse(output.contains("Outlook email search"))
         XCTAssertFalse(output.contains("Slack source search"))
         XCTAssertFalse(output.contains("Teams source search"))
@@ -2085,11 +2085,95 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(output.contains("Teams source search is not connected"))
     }
 
-    func testChatManagerPassesExternalSourceStatusToWorkActivityAssistant() throws {
+    func testWorkActivityAggregatorSearchesConnectedOutlookForWeeklyPrompt() async throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 1, hour: 12)))
+        let inWeek = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 6, day: 30, hour: 9)))
+
+        let local = NoteAIWorkActivitySourceAdapter(
+            tasks: [
+                TaskItem(
+                    title: "Advance Nscale Dynamo PoC",
+                    description: "Aligned runtime ownership and next validation path.",
+                    status: .completed,
+                    workDate: inWeek,
+                    completedDate: inWeek,
+                    createdDate: inWeek,
+                    modifiedDate: inWeek
+                )
+            ],
+            todos: [],
+            meetings: [],
+            notes: [],
+            t5tReports: []
+        )
+        let outlook = MockWorkActivitySourceAdapter(
+            source: .outlook,
+            records: [
+                WorkActivityRecord(
+                    date: inWeek,
+                    source: .outlook,
+                    kind: "Outlook email",
+                    title: "Nscale runtime ownership",
+                    detail: "Customer confirmed the runtime ownership blocker."
+                )
+            ]
+        )
+        let aggregator = WorkActivityAggregator(
+            adapters: [local, outlook],
+            sourceStatus: AssistantSourceStatus(outlook: .connected, slack: .notAvailable, teams: .notAvailable)
+        )
+
+        let response = await aggregator.response(
+            for: "what did I work on this week?",
+            now: now,
+            calendar: calendar
+        )
+        let output = try XCTUnwrap(response)
+
+        XCTAssertTrue(output.contains("Sources searched: NoteAI local records, Outlook email."))
+        XCTAssertTrue(output.contains("Advance Nscale Dynamo PoC"))
+        XCTAssertTrue(output.contains("Nscale runtime ownership"))
+        XCTAssertFalse(output.contains("Outlook email search needs setup"))
+        XCTAssertFalse(output.contains("Slack source search"))
+        XCTAssertFalse(output.contains("Teams source search"))
+    }
+
+    func testWorkActivityAggregatorDoesNotClaimUnavailableSourcesWereSearched() async throws {
+        let aggregator = WorkActivityAggregator(
+            adapters: [NoteAIWorkActivitySourceAdapter(tasks: [], todos: [], meetings: [], notes: [], t5tReports: [])],
+            sourceStatus: AssistantSourceStatus(outlook: .needsConfiguration, slack: .notAvailable, teams: .notAvailable)
+        )
+
+        let response = await aggregator.response(for: "what did I work on this week?")
+        let output = try XCTUnwrap(response)
+
+        XCTAssertTrue(output.contains("Sources searched: NoteAI local records."))
+        XCTAssertFalse(output.contains("Outlook email search"))
+        XCTAssertFalse(output.contains("Slack source search"))
+        XCTAssertFalse(output.contains("Teams source search"))
+    }
+
+    func testWorkActivityAggregatorReportsExplicitUnavailableSourcesAsSkipped() async throws {
+        let aggregator = WorkActivityAggregator(
+            adapters: [NoteAIWorkActivitySourceAdapter(tasks: [], todos: [], meetings: [], notes: [], t5tReports: [])],
+            sourceStatus: AssistantSourceStatus(outlook: .needsSignIn, slack: .notAvailable, teams: .notAvailable)
+        )
+
+        let response = await aggregator.response(for: "what did I work on this week from Outlook, Slack, and Teams?")
+        let output = try XCTUnwrap(response)
+
+        XCTAssertTrue(output.contains("Sources searched: NoteAI local records."))
+        XCTAssertTrue(output.contains("Sources skipped: Outlook email search is configured but not signed in; Slack source search is not connected in this build; Teams source search is not connected in this build."))
+    }
+
+    func testChatManagerUsesAsyncWorkActivityAggregatorInsteadOfLocalOnlyShortcut() throws {
         let source = try chatManagerSource()
 
-        XCTAssertTrue(source.contains("AssistantSourceStatusProvider.currentStatus()"))
-        XCTAssertTrue(source.contains("sourceStatus:"))
+        XCTAssertTrue(source.contains("handleWorkActivityRequest"))
+        XCTAssertTrue(source.contains("WorkActivityAggregator"))
+        XCTAssertTrue(source.contains("isTyping = true"))
+        XCTAssertFalse(source.contains("handleLocalWorkActivityRequest"))
     }
 
     func testWorkActivityAssistantReturnsT5TReadyTasksOnly() throws {
@@ -2133,14 +2217,22 @@ final class ArchitectureModuleTests: XCTestCase {
     func testChatManagerRoutesWorkActivityBeforeGenericTaskListing() throws {
         let source = try chatManagerSource()
 
-        XCTAssertTrue(source.contains("handleLocalWorkActivityRequest"))
-        XCTAssertTrue(source.contains("WorkActivityAssistant.response("))
+        XCTAssertTrue(source.contains("handleWorkActivityRequest"))
 
-        let workActivityRange = try XCTUnwrap(source.range(of: "if handleLocalWorkActivityRequest(trimmed)"))
+        let workActivityRange = try XCTUnwrap(source.range(of: "if handleWorkActivityRequest(trimmed)"))
         let taskListRange = try XCTUnwrap(source.range(of: "if handleLocalTaskOrTodoListRequest(trimmed)"))
         let setupRange = try XCTUnwrap(source.range(of: "if let setupMessage"))
         XCTAssertLessThan(workActivityRange.lowerBound, taskListRange.lowerBound)
         XCTAssertLessThan(taskListRange.lowerBound, setupRange.lowerBound)
+    }
+
+    private struct MockWorkActivitySourceAdapter: WorkActivitySourceAdapter {
+        let source: WorkActivitySource
+        let records: [WorkActivityRecord]
+
+        func searchWorkActivity(_ query: WorkActivityQuery) async -> WorkActivitySourceResult {
+            WorkActivitySourceResult(source: source, status: .searched, records: records)
+        }
     }
 
     func testTaskItemPreservesOutlookSourceMetadataThroughCodable() throws {

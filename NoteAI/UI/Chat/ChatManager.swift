@@ -56,7 +56,7 @@ final class ChatManager: ObservableObject {
     - After the user approves Outlook candidates, use approve_outlook_tasks; do not store full email bodies by default
     - When asked to list tasks, use list_tasks and read from durable Tasks
     - When asked to list todos, use list_todos and read from lightweight Todos
-    - When asked what the user worked on, important projects, or T5T-ready updates, answer from local NoteAI records only unless an explicit external source action exists
+    - When asked what the user worked on, important projects, or T5T-ready updates, use NoteAI's work-activity aggregation path; never claim an external source was searched unless the app actually searched it
     - Be concise and helpful
     """
 
@@ -72,7 +72,7 @@ final class ChatManager: ObservableObject {
 
         messages.append(ChatMessage(role: .user, content: trimmed))
 
-        if handleLocalWorkActivityRequest(trimmed) {
+        if handleWorkActivityRequest(trimmed) {
             return
         }
 
@@ -353,23 +353,77 @@ final class ChatManager: ObservableObject {
         return title.isEmpty ? "Untitled todo" : title
     }
 
-    private func handleLocalWorkActivityRequest(_ text: String) -> Bool {
-        guard let manager = meetingManager,
-              let output = WorkActivityAssistant.response(
-                for: text,
+    private func handleWorkActivityRequest(_ text: String) -> Bool {
+        guard let manager = meetingManager else {
+            return false
+        }
+
+        if WorkActivityAssistant.isT5TReadyRequest(text),
+           let output = WorkActivityAssistant.response(
+            for: text,
+            tasks: manager.tasks,
+            todos: manager.todos,
+            meetings: manager.meetings,
+            notes: manager.notes,
+            t5tReports: manager.t5tReports,
+            sourceStatus: AssistantSourceStatusProvider.currentStatus()
+           ) {
+            messages.append(ChatMessage(role: .assistant, content: output))
+            return true
+        }
+
+        guard WorkActivityAssistant.workActivityQuery(for: text) != nil else {
+            return false
+        }
+
+        isTyping = true
+        lastError = nil
+
+        let sourceStatus = AssistantSourceStatusProvider.currentStatus()
+        let aggregator = WorkActivityAggregator(
+            adapters: workActivityAdapters(for: manager, sourceStatus: sourceStatus),
+            sourceStatus: sourceStatus
+        )
+
+        let chatTask = _Concurrency.Task {
+            let output = await aggregator.response(for: text) ?? "I could not understand the work-activity request."
+            await MainActor.run {
+                messages.append(ChatMessage(role: .assistant, content: output))
+                isTyping = false
+            }
+        }
+        currentChatTask = chatTask
+        return true
+    }
+
+    private func workActivityAdapters(
+        for manager: MeetingManager,
+        sourceStatus: AssistantSourceStatus
+    ) -> [any WorkActivitySourceAdapter] {
+        var adapters: [any WorkActivitySourceAdapter] = [
+            NoteAIWorkActivitySourceAdapter(
                 tasks: manager.tasks,
                 todos: manager.todos,
                 meetings: manager.meetings,
                 notes: manager.notes,
-                t5tReports: manager.t5tReports,
-                sourceStatus: AssistantSourceStatusProvider.currentStatus()
-              )
-        else {
-            return false
+                t5tReports: manager.t5tReports
+            )
+        ]
+
+        if sourceStatus.outlook == .connected {
+            let auth = OutlookGraphAuthManager()
+            let client = OutlookGraphClient(accessTokenProvider: {
+                try await auth.validAccessToken()
+            })
+            adapters.append(OutlookWorkActivitySourceAdapter(
+                status: sourceStatus.outlook,
+                searchCandidates: { request in
+                    try await client.searchTaskCandidates(request)
+                }
+            ))
         }
 
-        messages.append(ChatMessage(role: .assistant, content: output))
-        return true
+        return adapters
     }
 
     private func handleLocalTaskOrTodoListRequest(_ text: String) -> Bool {

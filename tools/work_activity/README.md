@@ -20,7 +20,7 @@ python3 -m tools.work_activity source-search --source teams --from 2026-07-01 --
 
 ## Slack And Teams JSON Interface
 
-`source-status`, `source-auth`, and `source-search` are the stable subprocess interface for the native app. Each valid invocation prints one JSON object with `schemaVersion: 1`, `success`, `source`, `action`, `status`, `message`, `data`, and `metadata`.
+`source-status`, `source-auth`, and `source-search` provide a stable JSON interface for automation and contract testing. The macOS app implements the same bounded source contract directly in Swift and launches `slack-cli` / `teams-cli` without a Python or shell dependency. Each valid harness invocation prints one JSON object with `schemaVersion: 1`, `success`, `source`, `action`, `status`, `message`, `data`, and `metadata`.
 
 Search results are normalized under `data.items`. Each item contains only `id`, `source`, `timestamp`, `title`, `body`, `url`, `author`, and `context`. The harness does not return upstream query echoes, raw metadata, stderr, auth callbacks, or credential fields.
 

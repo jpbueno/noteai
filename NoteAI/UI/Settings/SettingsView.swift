@@ -160,6 +160,7 @@ struct AboutSettingsView: View {
 struct AccountSettingsView: View {
     @ObservedObject var authManager: GoogleAuthManager
     @StateObject private var outlookAuth = OutlookGraphAuthManager()
+    @StateObject private var aipimSources = AIPIMAccountSourceModel()
     @AppStorage(OutlookGraphSettings.clientIDKey) private var outlookClientID = ""
     @AppStorage(OutlookGraphSettings.tenantIDKey) private var outlookTenantID = "common"
 
@@ -260,9 +261,85 @@ struct AccountSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+
+            Section("Work Activity Sources") {
+                ForEach(AIPIMSource.allCases, id: \.self) { source in
+                    aipimSourceRow(source)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("ai-pim-utils 0.105.0 or later is required for Slack and Teams work activity.")
+                    ForEach(AIPIMInstallHelp.commands, id: \.self) { command in
+                        Text(command)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    Text("Authentication is managed externally by ai-pim-utils and macOS Keychain. NoteAI never stores tokens.")
+                    Text("Teams coverage includes chats only. Teams channels are not included.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
+        .task {
+            await aipimSources.refreshAll()
+        }
+    }
+
+    @ViewBuilder
+    private func aipimSourceRow(_ source: AIPIMSource) -> some View {
+        let status = aipimSources.status(for: source)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.displayName)
+                    .font(.system(size: 14, weight: .medium))
+                Text(aipimStatusLabel(status))
+                    .font(.caption)
+                    .foregroundStyle(status.state == .failed ? .red : .secondary)
+            }
+
+            Spacer()
+
+            Button(aipimSources.actionTitle(for: source)) {
+                Task { await aipimSources.connect(source) }
+            }
+            .disabled(!status.installed || aipimSources.busySource != nil)
+
+            Button {
+                Task { await aipimSources.refresh(source) }
+            } label: {
+                if aipimSources.busySource == source {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(aipimSources.busySource != nil)
+            .help("Refresh \(source.displayName) status")
+        }
+    }
+
+    private func aipimStatusLabel(_ status: AIPIMSourceStatus) -> String {
+        if !status.installed {
+            return "Not installed"
+        }
+        if status.authenticated {
+            return "Installed, authenticated"
+        }
+        switch status.state {
+        case .authenticationRequired:
+            return "Installed, sign-in required"
+        case .failed:
+            return "Installed, status check failed"
+        case .available:
+            return "Installed, authenticated"
+        case .unavailable:
+            return "Not installed"
+        }
     }
 
 }

@@ -1,6 +1,28 @@
 import Foundation
 import Combine
 
+struct ChatWorkActivitySnapshot {
+    let tasks: [TaskItem]
+    let todos: [TodoItem]
+    let meetings: [Meeting]
+    let notes: [Note]
+    let t5tReports: [T5TReport]
+
+    static let empty = ChatWorkActivitySnapshot(
+        tasks: [],
+        todos: [],
+        meetings: [],
+        notes: [],
+        t5tReports: []
+    )
+}
+
+struct ChatWorkActivityDependencies {
+    var snapshot: () -> ChatWorkActivitySnapshot?
+    var sourceStatus: () -> AssistantSourceStatus
+    var externalAdapters: (AssistantSourceStatus) -> [any WorkActivitySourceAdapter]
+}
+
 /// Manages AI assistant chat state, LLM communication, and action execution.
 @MainActor
 final class ChatManager: ObservableObject {
@@ -13,6 +35,7 @@ final class ChatManager: ObservableObject {
     weak var meetingManager: MeetingManager?
     private var currentChatTask: _Concurrency.Task<Void, Never>?
     private var pendingOutlookTaskCandidates: [OutlookTaskCandidate] = []
+    private let workActivityDependencies: ChatWorkActivityDependencies?
 
     private enum ChatError: Error {
         case timeout
@@ -60,7 +83,8 @@ final class ChatManager: ObservableObject {
     - Be concise and helpful
     """
 
-    init() {
+    init(workActivityDependencies: ChatWorkActivityDependencies? = nil) {
+        self.workActivityDependencies = workActivityDependencies
         messages.append(ChatMessage(role: .assistant, content: "How can I help you today? I can create notes, todos, T5T reports, search your meetings, and more."))
         refreshConfigurationPreflight()
     }
@@ -118,7 +142,9 @@ final class ChatManager: ObservableObject {
                     return result
                 }
 
+                try Task.checkCancellation()
                 let actionResult = await executeActions(from: response)
+                try Task.checkCancellation()
 
                 var displayText = response
                 while let range = displayText.range(of: "```json\n", options: .caseInsensitive),
@@ -136,8 +162,10 @@ final class ChatManager: ObservableObject {
             } catch is CancellationError {
                 // Cancelled, do nothing
             } catch ChatError.timeout {
+                guard !Task.isCancelled else { return }
                 messages.append(ChatMessage(role: .assistant, content: "Request timed out. Please try again."))
             } catch {
+                guard !Task.isCancelled else { return }
                 lastError = error.localizedDescription
                 messages.append(ChatMessage(role: .assistant, content: "Sorry, I encountered an error: \(error.localizedDescription)"))
             }
@@ -354,19 +382,19 @@ final class ChatManager: ObservableObject {
     }
 
     private func handleWorkActivityRequest(_ text: String) -> Bool {
-        guard let manager = meetingManager else {
+        guard let snapshot = workActivitySnapshot() else {
             return false
         }
 
         if WorkActivityAssistant.isT5TReadyRequest(text),
            let output = WorkActivityAssistant.response(
             for: text,
-            tasks: manager.tasks,
-            todos: manager.todos,
-            meetings: manager.meetings,
-            notes: manager.notes,
-            t5tReports: manager.t5tReports,
-            sourceStatus: AssistantSourceStatusProvider.currentStatus()
+            tasks: snapshot.tasks,
+            todos: snapshot.todos,
+            meetings: snapshot.meetings,
+            notes: snapshot.notes,
+            t5tReports: snapshot.t5tReports,
+            sourceStatus: currentWorkActivitySourceStatus()
            ) {
             messages.append(ChatMessage(role: .assistant, content: output))
             return true
@@ -379,15 +407,17 @@ final class ChatManager: ObservableObject {
         isTyping = true
         lastError = nil
 
-        let sourceStatus = AssistantSourceStatusProvider.currentStatus()
+        let sourceStatus = currentWorkActivitySourceStatus()
         let aggregator = WorkActivityAggregator(
-            adapters: workActivityAdapters(for: manager, sourceStatus: sourceStatus),
+            adapters: workActivityAdapters(for: snapshot, sourceStatus: sourceStatus),
             sourceStatus: sourceStatus
         )
 
         let chatTask = _Concurrency.Task {
             let output = await aggregator.response(for: text) ?? "I could not understand the work-activity request."
+            guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 messages.append(ChatMessage(role: .assistant, content: output))
                 isTyping = false
             }
@@ -397,18 +427,23 @@ final class ChatManager: ObservableObject {
     }
 
     private func workActivityAdapters(
-        for manager: MeetingManager,
+        for snapshot: ChatWorkActivitySnapshot,
         sourceStatus: AssistantSourceStatus
     ) -> [any WorkActivitySourceAdapter] {
         var adapters: [any WorkActivitySourceAdapter] = [
             NoteAIWorkActivitySourceAdapter(
-                tasks: manager.tasks,
-                todos: manager.todos,
-                meetings: manager.meetings,
-                notes: manager.notes,
-                t5tReports: manager.t5tReports
+                tasks: snapshot.tasks,
+                todos: snapshot.todos,
+                meetings: snapshot.meetings,
+                notes: snapshot.notes,
+                t5tReports: snapshot.t5tReports
             )
         ]
+
+        if let workActivityDependencies {
+            adapters.append(contentsOf: workActivityDependencies.externalAdapters(sourceStatus))
+            return adapters
+        }
 
         if sourceStatus.outlook == .connected {
             let auth = OutlookGraphAuthManager()
@@ -423,7 +458,37 @@ final class ChatManager: ObservableObject {
             ))
         }
 
+        let aipimClient = AIPIMClient()
+        adapters.append(SlackWorkActivitySourceAdapter { interval, limit in
+            try await aipimClient.searchSlack(in: interval, limit: limit)
+        })
+        adapters.append(TeamsWorkActivitySourceAdapter { interval, limit, messagesPerChat in
+            try await aipimClient.searchTeams(
+                in: interval,
+                limit: limit,
+                messagesPerChat: messagesPerChat
+            )
+        })
+
         return adapters
+    }
+
+    private func workActivitySnapshot() -> ChatWorkActivitySnapshot? {
+        if let workActivityDependencies {
+            return workActivityDependencies.snapshot()
+        }
+        guard let manager = meetingManager else { return nil }
+        return ChatWorkActivitySnapshot(
+            tasks: manager.tasks,
+            todos: manager.todos,
+            meetings: manager.meetings,
+            notes: manager.notes,
+            t5tReports: manager.t5tReports
+        )
+    }
+
+    private func currentWorkActivitySourceStatus() -> AssistantSourceStatus {
+        workActivityDependencies?.sourceStatus() ?? AssistantSourceStatusProvider.currentStatus()
     }
 
     private func handleLocalTaskOrTodoListRequest(_ text: String) -> Bool {

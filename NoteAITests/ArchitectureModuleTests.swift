@@ -2037,15 +2037,37 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(output.contains("Nscale notes"))
         XCTAssertTrue(output.contains("NoteAI local records"))
         XCTAssertTrue(output.contains("Outlook email search is connected"))
-        XCTAssertTrue(output.contains("Slack source search is not connected"))
-        XCTAssertTrue(output.contains("Teams source search is not connected"))
+        XCTAssertFalse(output.contains("Slack source search is not connected"))
+        XCTAssertFalse(output.contains("Teams source search is not connected"))
         XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
         XCTAssertFalse(output.contains("Old task"))
     }
 
-    func testWorkActivityAssistantDoesNotClaimConfiguredExternalSourcesAreDisabled() throws {
+    func testWorkActivityAssistantHidesUnavailableExternalSourcesInNormalSummary() throws {
         let output = try XCTUnwrap(WorkActivityAssistant.response(
             for: "what did I work on this week?",
+            tasks: [],
+            todos: [],
+            meetings: [],
+            notes: [],
+            t5tReports: [],
+            sourceStatus: AssistantSourceStatus(
+                outlook: .needsConfiguration,
+                slack: .notAvailable,
+                teams: .notAvailable
+            )
+        ))
+
+        XCTAssertTrue(output.contains("Sources: NoteAI local records."))
+        XCTAssertFalse(output.contains("Outlook email search"))
+        XCTAssertFalse(output.contains("Slack source search"))
+        XCTAssertFalse(output.contains("Teams source search"))
+        XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
+    }
+
+    func testWorkActivityAssistantShowsRequestedOutlookSetupState() throws {
+        let output = try XCTUnwrap(WorkActivityAssistant.response(
+            for: "what did I work on this week including Outlook email?",
             tasks: [],
             todos: [],
             meetings: [],
@@ -2059,7 +2081,8 @@ final class ArchitectureModuleTests: XCTestCase {
         ))
 
         XCTAssertTrue(output.contains("Outlook email search is configured but not signed in"))
-        XCTAssertFalse(output.contains("Outlook, Slack, and Teams are not enabled in this build"))
+        XCTAssertFalse(output.contains("Slack source search is not connected"))
+        XCTAssertFalse(output.contains("Teams source search is not connected"))
     }
 
     func testChatManagerPassesExternalSourceStatusToWorkActivityAssistant() throws {

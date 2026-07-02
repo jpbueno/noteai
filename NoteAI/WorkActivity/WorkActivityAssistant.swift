@@ -22,6 +22,7 @@ enum WorkActivityAssistant {
         guard asksForWorkActivity(lowercased) else { return nil }
 
         return workActivityResponse(
+            prompt: lowercased,
             tasks: tasks,
             todos: todos,
             meetings: meetings,
@@ -55,6 +56,7 @@ enum WorkActivityAssistant {
     }
 
     private static func workActivityResponse(
+        prompt: String,
         tasks: [TaskItem],
         todos: [TodoItem],
         meetings: [Meeting],
@@ -66,7 +68,7 @@ enum WorkActivityAssistant {
         var lines = [
             "Work activity \(range.label)",
             "",
-            sourceStatus.summaryLine
+            sourceStatus.summaryLine(for: prompt)
         ]
 
         let taskRecords = tasks
@@ -230,12 +232,26 @@ struct AssistantSourceStatus: Equatable {
     )
 
     var summaryLine: String {
-        [
-            "Sources: NoteAI local records.",
-            outlook.description(for: "Outlook email search"),
-            slack.description(for: "Slack source search"),
-            teams.description(for: "Teams source search")
-        ].joined(separator: " ")
+        summaryLine(for: "")
+    }
+
+    func summaryLine(for prompt: String) -> String {
+        let normalizedPrompt = prompt.lowercased()
+        var parts = ["Sources: NoteAI local records."]
+
+        if outlook == .connected || normalizedPrompt.contains("outlook") || normalizedPrompt.contains("email") {
+            parts.append(outlook.description(for: "Outlook email search"))
+        }
+
+        if normalizedPrompt.contains("slack") {
+            parts.append(slack.description(for: "Slack source search"))
+        }
+
+        if normalizedPrompt.contains("teams") || normalizedPrompt.contains("microsoft teams") {
+            parts.append(teams.description(for: "Teams source search"))
+        }
+
+        return parts.joined(separator: " ")
     }
 }
 

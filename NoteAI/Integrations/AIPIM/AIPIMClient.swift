@@ -193,6 +193,7 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
             partialReasons.append("chat_limit_reached")
         }
         var items: [AIPIMWorkActivityItem] = []
+        var readableChatCount = 0
 
         for chat in chatList.data.prefix(Self.teamsChatLimit) {
             if items.count >= limit {
@@ -219,6 +220,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                     ],
                     timeout: teamsTimeout(deadline: deadline)
                 )
+            } catch is CancellationError {
+                throw CancellationError()
             } catch AIPIMError.authenticationRequired {
                 throw AIPIMError.authenticationRequired(.teams)
             } catch {
@@ -249,6 +252,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                     ],
                     timeout: teamsTimeout(deadline: deadline)
                 )
+            } catch is CancellationError {
+                throw CancellationError()
             } catch AIPIMError.authenticationRequired {
                 throw AIPIMError.authenticationRequired(.teams)
             } catch {
@@ -261,6 +266,7 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                 partialReasons.append("chat_read_failed")
                 continue
             }
+            readableChatCount += 1
             if messages.data.count >= messagesPerChat,
                messagesCanOmitRange(messages.data, interval: interval) {
                 partialReasons.append("message_limit_reached")
@@ -279,6 +285,10 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                 }
                 items.append(item)
             }
+        }
+
+        if !chatList.data.isEmpty, readableChatCount == 0 {
+            throw AIPIMError.commandFailed(.teams)
         }
 
         let reasons = partialReasons.uniqued()
@@ -307,6 +317,8 @@ struct AIPIMClient: AIPIMSourceConnecting, Sendable {
                 timeout: min(max(0.01, timeout), Self.commandTimeout),
                 maxOutputBytes: Self.outputLimitBytes
             ))
+        } catch is CancellationError {
+            throw CancellationError()
         } catch AIPIMExecutionError.timedOut {
             throw AIPIMError.timedOut(source)
         } catch AIPIMExecutionError.outputLimitExceeded {

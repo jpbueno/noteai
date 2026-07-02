@@ -142,7 +142,9 @@ final class ChatManager: ObservableObject {
                     return result
                 }
 
+                try Task.checkCancellation()
                 let actionResult = await executeActions(from: response)
+                try Task.checkCancellation()
 
                 var displayText = response
                 while let range = displayText.range(of: "```json\n", options: .caseInsensitive),
@@ -160,8 +162,10 @@ final class ChatManager: ObservableObject {
             } catch is CancellationError {
                 // Cancelled, do nothing
             } catch ChatError.timeout {
+                guard !Task.isCancelled else { return }
                 messages.append(ChatMessage(role: .assistant, content: "Request timed out. Please try again."))
             } catch {
+                guard !Task.isCancelled else { return }
                 lastError = error.localizedDescription
                 messages.append(ChatMessage(role: .assistant, content: "Sorry, I encountered an error: \(error.localizedDescription)"))
             }
@@ -411,7 +415,9 @@ final class ChatManager: ObservableObject {
 
         let chatTask = _Concurrency.Task {
             let output = await aggregator.response(for: text) ?? "I could not understand the work-activity request."
+            guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 messages.append(ChatMessage(role: .assistant, content: output))
                 isTyping = false
             }

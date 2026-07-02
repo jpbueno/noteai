@@ -25,20 +25,37 @@ protocol AIPIMCommandExecuting: Sendable {
 
 struct AIPIMProcessRunner: AIPIMCommandExecuting, Sendable {
     func execute(_ command: AIPIMCommand) async throws -> AIPIMCommandResult {
-        try await Task.detached(priority: .utility) {
-            try executeSynchronously(command)
-        }.value
+        let cancellationState = AIPIMCancellationState()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await Task.detached(priority: .utility) {
+                try executeSynchronously(command, cancellationState: cancellationState)
+            }.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            cancellationState.cancel()
+        }
     }
 }
 
-private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMCommandResult {
+private func executeSynchronously(
+    _ command: AIPIMCommand,
+    cancellationState: AIPIMCancellationState
+) throws -> AIPIMCommandResult {
     guard !command.executableURL.path.contains("\0"),
           !command.arguments.contains(where: { $0.contains("\0") }) else {
         throw AIPIMExecutionError.launchFailed
     }
+    guard !cancellationState.isCancelled else {
+        throw CancellationError()
+    }
 
-    var stdoutPipe = try AIPIMPipe()
-    var stderrPipe = try AIPIMPipe()
+    let stdoutPipe = try AIPIMPipe()
+    let stderrPipe = try AIPIMPipe()
+    guard !cancellationState.isCancelled else {
+        throw CancellationError()
+    }
     let accumulator = AIPIMOutputAccumulator(limit: command.maxOutputBytes)
     var processID: pid_t = 0
     var processStatus: Int32 = 0
@@ -47,8 +64,6 @@ private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMComman
     do {
         processID = try spawn(command, stdoutPipe: stdoutPipe, stderrPipe: stderrPipe)
     } catch {
-        stdoutPipe.closeAll()
-        stderrPipe.closeAll()
         throw AIPIMExecutionError.launchFailed
     }
 
@@ -62,26 +77,40 @@ private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMComman
     let deadline = ProcessInfo.processInfo.systemUptime + max(0.01, command.timeout)
     while true {
         let stdoutOutcome = drain(
-            &stdoutPipe,
+            stdoutPipe,
             capture: true,
             accumulator: accumulator,
-            until: deadline
+            until: deadline,
+            cancellationState: cancellationState
         )
         let drainOutcome = stdoutOutcome == .yielded
             ? drain(
-                &stderrPipe,
+                stderrPipe,
                 capture: false,
                 accumulator: accumulator,
-                until: deadline
+                until: deadline,
+                cancellationState: cancellationState
             )
             : stdoutOutcome
         reap(processID, status: &processStatus, wasReaped: &processWasReaped)
 
+        if drainOutcome == .cancelled {
+            terminateProcessGroup(
+                processID,
+                stdoutPipe: stdoutPipe,
+                stderrPipe: stderrPipe,
+                accumulator: accumulator,
+                processStatus: &processStatus,
+                processWasReaped: &processWasReaped
+            )
+            throw CancellationError()
+        }
+
         if let executionError = drainOutcome.executionError {
             terminateProcessGroup(
                 processID,
-                stdoutPipe: &stdoutPipe,
-                stderrPipe: &stderrPipe,
+                stdoutPipe: stdoutPipe,
+                stderrPipe: stderrPipe,
                 accumulator: accumulator,
                 processStatus: &processStatus,
                 processWasReaped: &processWasReaped
@@ -100,8 +129,8 @@ private func executeSynchronously(_ command: AIPIMCommand) throws -> AIPIMComman
         if remaining <= 0 {
             terminateProcessGroup(
                 processID,
-                stdoutPipe: &stdoutPipe,
-                stderrPipe: &stderrPipe,
+                stdoutPipe: stdoutPipe,
+                stderrPipe: stderrPipe,
                 accumulator: accumulator,
                 processStatus: &processStatus,
                 processWasReaped: &processWasReaped
@@ -120,14 +149,15 @@ private func spawn(
 ) throws -> pid_t {
     var fileActions: posix_spawn_file_actions_t?
     var attributes: posix_spawnattr_t?
-    guard posix_spawn_file_actions_init(&fileActions) == 0,
-          posix_spawnattr_init(&attributes) == 0 else {
+    guard posix_spawn_file_actions_init(&fileActions) == 0 else {
         throw AIPIMExecutionError.launchFailed
     }
-    defer {
-        posix_spawn_file_actions_destroy(&fileActions)
-        posix_spawnattr_destroy(&attributes)
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
+
+    guard posix_spawnattr_init(&attributes) == 0 else {
+        throw AIPIMExecutionError.launchFailed
     }
+    defer { posix_spawnattr_destroy(&attributes) }
 
     let actionResults = [
         posix_spawn_file_actions_adddup2(&fileActions, stdoutPipe.writeDescriptor, STDOUT_FILENO),
@@ -176,8 +206,8 @@ private func spawn(
 
 private func terminateProcessGroup(
     _ processID: pid_t,
-    stdoutPipe: inout AIPIMPipe,
-    stderrPipe: inout AIPIMPipe,
+    stdoutPipe: AIPIMPipe,
+    stderrPipe: AIPIMPipe,
     accumulator: AIPIMOutputAccumulator,
     processStatus: inout Int32,
     processWasReaped: inout Bool
@@ -186,8 +216,8 @@ private func terminateProcessGroup(
     waitForTermination(
         processID,
         until: ProcessInfo.processInfo.systemUptime + 0.025,
-        stdoutPipe: &stdoutPipe,
-        stderrPipe: &stderrPipe,
+        stdoutPipe: stdoutPipe,
+        stderrPipe: stderrPipe,
         accumulator: accumulator,
         processStatus: &processStatus,
         processWasReaped: &processWasReaped
@@ -197,8 +227,8 @@ private func terminateProcessGroup(
     waitForTermination(
         processID,
         until: ProcessInfo.processInfo.systemUptime + 0.2,
-        stdoutPipe: &stdoutPipe,
-        stderrPipe: &stderrPipe,
+        stdoutPipe: stdoutPipe,
+        stderrPipe: stderrPipe,
         accumulator: accumulator,
         processStatus: &processStatus,
         processWasReaped: &processWasReaped
@@ -212,15 +242,15 @@ private func terminateProcessGroup(
 private func waitForTermination(
     _ processID: pid_t,
     until deadline: TimeInterval,
-    stdoutPipe: inout AIPIMPipe,
-    stderrPipe: inout AIPIMPipe,
+    stdoutPipe: AIPIMPipe,
+    stderrPipe: AIPIMPipe,
     accumulator: AIPIMOutputAccumulator,
     processStatus: inout Int32,
     processWasReaped: inout Bool
 ) {
     while ProcessInfo.processInfo.systemUptime < deadline {
         if drain(
-            &stdoutPipe,
+            stdoutPipe,
             capture: true,
             accumulator: accumulator,
             until: deadline
@@ -228,7 +258,7 @@ private func waitForTermination(
             return
         }
         if drain(
-            &stderrPipe,
+            stderrPipe,
             capture: false,
             accumulator: accumulator,
             until: deadline
@@ -273,15 +303,19 @@ private func decodedExitCode(_ status: Int32) -> Int32 {
 }
 
 private func drain(
-    _ pipe: inout AIPIMPipe,
+    _ pipe: AIPIMPipe,
     capture: Bool,
     accumulator: AIPIMOutputAccumulator,
-    until deadline: TimeInterval
+    until deadline: TimeInterval,
+    cancellationState: AIPIMCancellationState? = nil
 ) -> AIPIMDrainOutcome {
     guard pipe.readIsOpen else { return .yielded }
     var buffer = [UInt8](repeating: 0, count: 8_192)
 
     while ProcessInfo.processInfo.systemUptime < deadline {
+        if cancellationState?.isCancelled == true {
+            return .cancelled
+        }
         let count = Darwin.read(pipe.readDescriptor, &buffer, buffer.count)
         if count > 0 {
             if accumulator.consume(Data(buffer.prefix(count)), capture: capture) {
@@ -303,17 +337,18 @@ private func drain(
         return .yielded
     }
 
-    return .timedOut
+    return cancellationState?.isCancelled == true ? .cancelled : .timedOut
 }
 
 private enum AIPIMDrainOutcome: Equatable {
     case yielded
     case outputLimitExceeded
     case timedOut
+    case cancelled
 
     var executionError: AIPIMExecutionError? {
         switch self {
-        case .yielded:
+        case .yielded, .cancelled:
             nil
         case .outputLimitExceeded:
             .outputLimitExceeded
@@ -368,7 +403,7 @@ private func withCStringArray<Result>(
     }
 }
 
-private struct AIPIMPipe {
+private final class AIPIMPipe {
     private(set) var readDescriptor: Int32
     private(set) var writeDescriptor: Int32
     private(set) var readIsOpen = true
@@ -392,21 +427,40 @@ private struct AIPIMPipe {
         }
     }
 
-    mutating func closeReadEnd() {
+    func closeReadEnd() {
         guard readIsOpen else { return }
         Darwin.close(readDescriptor)
         readIsOpen = false
     }
 
-    mutating func closeWriteEnd() {
+    func closeWriteEnd() {
         guard writeIsOpen else { return }
         Darwin.close(writeDescriptor)
         writeIsOpen = false
     }
 
-    mutating func closeAll() {
+    func closeAll() {
         closeReadEnd()
         closeWriteEnd()
+    }
+
+    deinit {
+        closeAll()
+    }
+}
+
+private final class AIPIMCancellationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+        }
+    }
+
+    var isCancelled: Bool {
+        lock.withLock { cancelled }
     }
 }
 

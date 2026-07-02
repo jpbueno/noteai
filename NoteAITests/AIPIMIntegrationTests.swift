@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import NoteAI
 
 final class AIPIMIntegrationTests: XCTestCase {
@@ -136,6 +137,40 @@ final class AIPIMIntegrationTests: XCTestCase {
         }
 
         XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - startedAt, 0.5)
+    }
+
+    func testProcessRunnerCancellationTerminatesAndReapsProcessGroupPromptly() async throws {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noteai-aipim-\(UUID().uuidString).pid")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let command = AIPIMCommand(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "printf '%s' $$ > \"$1\"; (trap '' TERM HUP; sleep 30) & wait",
+                "aipim-cancellation-test",
+                pidFile.path
+            ],
+            timeout: 1,
+            maxOutputBytes: 1_024
+        )
+        let task = Task {
+            try await AIPIMProcessRunner().execute(command)
+        }
+        let processID = try await waitForProcessID(in: pidFile)
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - startedAt, 0.5)
+        let processGroupExited = await waitForProcessGroupExit(processID)
+        XCTAssertTrue(processGroupExited)
     }
 
     func testSlackStatusRequiresSuccessAndAUserID() async {
@@ -321,28 +356,85 @@ final class AIPIMIntegrationTests: XCTestCase {
         XCTAssertEqual(commands.count, 1)
     }
 
-    func testTeamsSearchRejectsOptionLikeChatIDsBeforeExecution() async throws {
+    func testTeamsSearchRejectsOptionLikeChatIDsAndFailsWhenNoneAreReadable() async throws {
         let executor = FakeAIPIMExecutor(results: [
             .success(jsonResult(["authenticated": true, "username": "jp@example.com"])),
             .success(jsonResult(["success": true, "data": [["id": "--verbose"]]]))
         ])
         let client = makeClient(executor: executor)
 
-        let result = try await client.searchTeams(in: makeInterval(), limit: 20, messagesPerChat: 2)
+        do {
+            _ = try await client.searchTeams(in: makeInterval(), limit: 20, messagesPerChat: 2)
+            XCTFail("Expected unreadable Teams source failure")
+        } catch {
+            XCTAssertEqual(error as? AIPIMError, .commandFailed(.teams))
+        }
 
         let commands = await executor.commands
         XCTAssertEqual(commands.count, 2)
+    }
+
+    func testTeamsSearchFailsWhenEveryListedChatReadFails() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["authenticated": true, "username": "jp@example.com"])),
+            .success(jsonResult(["success": true, "data": [["id": "chat-1"], ["id": "chat-2"]]])),
+            .failure(AIPIMExecutionError.launchFailed),
+            .success(jsonResult(["success": true, "data": [["email": "jp@example.com", "userId": "user-1"]]])),
+            .failure(AIPIMExecutionError.launchFailed)
+        ])
+        let client = makeClient(executor: executor)
+
+        do {
+            _ = try await client.searchTeams(in: makeInterval(), limit: 20, messagesPerChat: 2)
+            XCTFail("Expected unreadable Teams source failure")
+        } catch {
+            XCTAssertEqual(error as? AIPIMError, .commandFailed(.teams))
+        }
+    }
+
+    func testTeamsSearchPreservesPartialCoverageWhenAtLeastOneChatIsReadable() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["authenticated": true, "username": "jp@example.com"])),
+            .success(jsonResult(["success": true, "data": [["id": "chat-1"], ["id": "chat-2"]]])),
+            .failure(AIPIMExecutionError.launchFailed),
+            .success(jsonResult(["success": true, "data": [["email": "jp@example.com", "userId": "user-1"]]])),
+            .success(jsonResult(["success": true, "data": []]))
+        ])
+        let client = makeClient(executor: executor)
+
+        let result = try await client.searchTeams(in: makeInterval(), limit: 20, messagesPerChat: 2)
+
         XCTAssertEqual(result.items, [])
-        XCTAssertTrue(result.partialReasons.contains("chat_read_failed"))
+        XCTAssertTrue(result.isPartial)
+        XCTAssertTrue(result.partialReasons.contains("member_resolution_failed"))
+        XCTAssertTrue(result.partialReasons.contains("channel_coverage_missing"))
+    }
+
+    func testTeamsSearchPropagatesCancellationDuringChatReads() async throws {
+        let executor = FakeAIPIMExecutor(results: [
+            .success(jsonResult(["authenticated": true, "username": "jp@example.com"])),
+            .success(jsonResult(["success": true, "data": [["id": "chat-1"]]])),
+            .failure(CancellationError())
+        ])
+        let client = makeClient(executor: executor)
+
+        do {
+            _ = try await client.searchTeams(in: makeInterval(), limit: 20, messagesPerChat: 2)
+            XCTFail("Expected cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
     }
 
     func testTeamsSearchLocallyCapsOverreturnedChats() async throws {
         let chats = (0..<51).map { ["id": "chat-\($0)"] }
         var results: [Result<AIPIMCommandResult, Error>] = [
             .success(jsonResult(["authenticated": true, "username": "jp@example.com"])),
-            .success(jsonResult(["success": true, "data": chats]))
+            .success(jsonResult(["success": true, "data": chats])),
+            .success(jsonResult(["success": true, "data": [["email": "jp@example.com", "userId": "user-1"]]])),
+            .success(jsonResult(["success": true, "data": []]))
         ]
-        results.append(contentsOf: (0..<50).map { _ in
+        results.append(contentsOf: (0..<49).map { _ in
             .success(jsonResult(["success": true, "data": []]))
         })
         let executor = FakeAIPIMExecutor(results: results)
@@ -527,6 +619,39 @@ final class AIPIMIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testClearChatPreventsCancelledWorkActivityResponseFromPublishingLater() async throws {
+        let sourceStarted = expectation(description: "External source started")
+        let dependencies = ChatWorkActivityDependencies(
+            snapshot: { .empty },
+            sourceStatus: { .localOnly },
+            externalAdapters: { _ in
+                [
+                    SlackWorkActivitySourceAdapter { _, _ in
+                        sourceStarted.fulfill()
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        return AIPIMSearchResult(
+                            source: .slack,
+                            items: [],
+                            isPartial: false,
+                            partialReasons: []
+                        )
+                    }
+                ]
+            }
+        )
+        let chatManager = ChatManager(workActivityDependencies: dependencies)
+
+        chatManager.send("what did I work on this week?")
+        await fulfillment(of: [sourceStarted], timeout: 2)
+        chatManager.clearChat()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        XCTAssertEqual(chatManager.messages.count, 1)
+        XCTAssertEqual(chatManager.messages.first?.content, "Chat cleared. How can I help?")
+        XCTAssertFalse(chatManager.isTyping)
+    }
+
+    @MainActor
     func testAccountSourceModelTransitionsConnectReconnectAndRefresh() async {
         let connector = FakeAIPIMSourceConnector(
             statusResults: [
@@ -603,6 +728,32 @@ final class AIPIMIntegrationTests: XCTestCase {
             + "/usr/bin/yes y >&2 & b=$!; "
             + "sleep 1; kill $a $b; wait"
     }
+
+    private func waitForProcessID(in file: URL) async throws -> pid_t {
+        for _ in 0..<100 {
+            if let value = try? String(contentsOf: file, encoding: .utf8),
+               let processID = pid_t(value.trimmingCharacters(in: .whitespacesAndNewlines)),
+               processID > 0 {
+                return processID
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw AIPIMTestError.processDidNotStart
+    }
+
+    private func waitForProcessGroupExit(_ processID: pid_t) async -> Bool {
+        for _ in 0..<50 {
+            if Darwin.kill(-processID, 0) != 0, errno != EPERM {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+}
+
+private enum AIPIMTestError: Error {
+    case processDidNotStart
 }
 
 private struct FakeAIPIMLocator: AIPIMExecutableLocating {

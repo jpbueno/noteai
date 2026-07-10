@@ -40,6 +40,9 @@ IMPORT_NAMESPACE = uuid.UUID("22d8ead8-19a2-4e76-9ae4-303deaaad377")
 JP_SLACK_USER_ID = "U09BXNGD81L"
 SLACK_TIMESTAMP = re.compile(r"^[0-9]+\.[0-9]{6}$")
 SLACK_DM_CONVERSATION_ID = re.compile(r"^D[A-Z0-9]+$")
+APPLY_PHASE_BACKUP_READY = "backup_ready"
+APPLY_PHASE_TRANSACTION_STARTED = "transaction_started"
+APPLY_PHASE_COMMITTED = "committed"
 DATE_PREFIX = re.compile(
     r"^(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4}|\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})"
@@ -720,6 +723,31 @@ def _assert_import_row_matches(row: sqlite3.Row, expected: dict[str, object]) ->
         raise ApprovalError(f"import key conflict for {expected['importKey']}")
 
 
+def _validated_apply_attempt_phase(
+    revision: dict[str, object],
+    status: object,
+) -> str | None:
+    phase = revision.get("applyAttemptPhase")
+    if status == "applied":
+        valid_phases = {APPLY_PHASE_COMMITTED}
+    else:
+        valid_phases = {
+            APPLY_PHASE_BACKUP_READY,
+            APPLY_PHASE_TRANSACTION_STARTED,
+        }
+    if phase is None:
+        if status == "applied" or "backupCreatedAt" in revision:
+            raise ApprovalError("revision has a missing apply attempt phase")
+        return None
+    if not isinstance(phase, str) or phase not in valid_phases:
+        raise ApprovalError("revision has an invalid apply attempt phase")
+    if not isinstance(revision.get("backupPath"), str) or not isinstance(
+        revision.get("backupCreatedAt"), str
+    ):
+        raise ApprovalError("revision apply attempt phase has incomplete backup state")
+    return str(phase)
+
+
 def _row_is_same_day_task(
     row: sqlite3.Row,
     day: str,
@@ -762,6 +790,7 @@ def apply(
         status = current.get("status")
         if status not in {"approved", "applied"}:
             raise ApprovalError("revision must be approved before apply")
+        attempt_phase = _validated_apply_attempt_phase(current, status)
         delivery = current.get("delivery")
         if not isinstance(delivery, dict):
             raise ApprovalError("approved revision has no bound Slack delivery")
@@ -801,6 +830,21 @@ def apply(
                 raise ApprovalError(
                     f"unexpected tasks schema: expected {sorted(NOTEAI_TASK_COLUMNS)}, got {sorted(schema)}"
                 )
+            existing_import_keys = {
+                str(row[0])
+                for row in db.execute(
+                    "SELECT source_action_item_id FROM tasks "
+                    "WHERE source_action_item_id IS NOT NULL"
+                ).fetchall()
+            }
+            deterministic_key_exists = bool(existing_import_keys.intersection(import_keys))
+            if (
+                attempt_phase == APPLY_PHASE_TRANSACTION_STARTED
+                and not deterministic_key_exists
+            ):
+                raise ApprovalError(
+                    "transaction-started attempt has no deterministic import evidence"
+                )
             persisted_backup = current.get("backupPath")
             backup_created_at = current.get("backupCreatedAt")
             if persisted_backup is None:
@@ -814,19 +858,35 @@ def apply(
                 raise ApprovalError("approved revision has an invalid backup path")
 
             if backup_created_at is None:
-                if not backup_path.exists():
-                    _backup_database(backup_path, db)
+                _backup_database(backup_path, db)
                 _validate_persisted_backup(backup_path, backup_dir)
                 now = datetime.now(timezone.utc).isoformat()
                 current["backupCreatedAt"] = now
+                current["applyAttemptPhase"] = APPLY_PHASE_BACKUP_READY
                 current["updatedAt"] = now
                 _write_state_unlocked(day, state_dir, state)
+                attempt_phase = APPLY_PHASE_BACKUP_READY
             elif not isinstance(backup_created_at, str):
                 raise ApprovalError("approved revision has an invalid backup creation timestamp")
             else:
-                _validate_persisted_backup(backup_path, backup_dir)
+                if (
+                    attempt_phase == APPLY_PHASE_BACKUP_READY
+                    and not deterministic_key_exists
+                ):
+                    _backup_database(backup_path, db)
+                    _validate_persisted_backup(backup_path, backup_dir)
+                    now = datetime.now(timezone.utc).isoformat()
+                    current["backupCreatedAt"] = now
+                    current["updatedAt"] = now
+                    _write_state_unlocked(day, state_dir, state)
+                else:
+                    _validate_persisted_backup(backup_path, backup_dir)
             try:
                 db.execute("BEGIN IMMEDIATE")
+                now = datetime.now(timezone.utc).isoformat()
+                current["applyAttemptPhase"] = APPLY_PHASE_TRANSACTION_STARTED
+                current["updatedAt"] = now
+                _write_state_unlocked(day, state_dir, state)
                 existing_rows = db.execute("SELECT * FROM tasks").fetchall()
                 for expected in expected_tasks:
                     keyed = [
@@ -893,6 +953,7 @@ def apply(
         }
         now = datetime.now(timezone.utc).isoformat()
         current["status"] = "applied"
+        current["applyAttemptPhase"] = APPLY_PHASE_COMMITTED
         current["appliedAt"] = now
         current["updatedAt"] = now
         current["applyResult"] = result
@@ -945,6 +1006,7 @@ def _sanitized_state(state: dict[str, object]) -> dict[str, object]:
     for key in (
         "delivery",
         "approvalEvidence",
+        "applyAttemptPhase",
         "backupPath",
         "backupCreatedAt",
         "createdAt",

@@ -59,7 +59,7 @@ python3 -m tools.work_activity.daily_task_approval decide --date 2026-07-09 --re
 - A retry after a database commit but before state persistence discovers the deterministic keys and does not duplicate tasks, even when NoteAI normalized the title or a user edited title, description, or status presentation fields.
 - Existing legacy same-day tasks without import keys are skipped only when normalized title and description both match; changed descriptions import independently.
 - Import-key identity or immutable source-provenance conflicts fail closed.
-- A database-scoped owner-only lock covers backup planning and creation, the database transaction, and final state persistence. Cross-date imports therefore form a serialized backup sequence, and apply retries reuse the original persisted pre-import backup instead of snapshotting a post-import database.
+- A database-scoped owner-only lock covers backup planning and creation, the database transaction, and final state persistence. Owner-only state records `backup_ready`, `transaction_started`, or `committed`. A retry from `backup_ready` with none of its deterministic import keys present replaces its backup with the current database before beginning. Any deterministic key retains the original backup for possible post-commit recovery; `transaction_started` with no deterministic key is ambiguous and fails closed. Other invalid phase/backup combinations also fail closed.
 
 ## Privacy And Security
 

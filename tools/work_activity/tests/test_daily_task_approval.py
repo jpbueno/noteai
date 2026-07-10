@@ -66,6 +66,27 @@ def create_noteai_db(path: Path, *, unexpected_column: bool = False) -> None:
         db.commit()
 
 
+class CrashBeforeBeginConnection:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    @property
+    def row_factory(self):
+        return self.connection.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value) -> None:
+        self.connection.row_factory = value
+
+    def execute(self, sql: str, parameters=()):
+        if sql == "BEGIN IMMEDIATE":
+            raise RuntimeError("simulated crash before BEGIN IMMEDIATE")
+        return self.connection.execute(sql, parameters)
+
+    def __getattr__(self, name: str):
+        return getattr(self.connection, name)
+
+
 def stage_and_approve(
     root: Path,
     title: str = "Delivered NoteAI approval workflow",
@@ -679,6 +700,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             state = json.loads(state_path.read_text(encoding="utf-8"))
             revision = state["revisions"][0]
             revision["status"] = "approved"
+            revision["applyAttemptPhase"] = "transaction_started"
             revision.pop("applyResult")
             revision.pop("appliedAt")
             state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -696,6 +718,137 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             self.assertEqual(repeated, recovered)
             with closing(sqlite3.connect(db_path)) as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
+
+    def test_pre_transaction_crash_retry_refreshes_backup_after_other_date_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root, "Imported date A", day="2026-07-09")
+            original_connect = daily_task_approval.sqlite3.connect
+
+            def connect_with_pre_begin_crash(database, *args, **kwargs):
+                connection = original_connect(database, *args, **kwargs)
+                try:
+                    is_target = Path(database).resolve() == db_path.resolve()
+                except TypeError:
+                    is_target = False
+                if is_target:
+                    return CrashBeforeBeginConnection(connection)
+                return connection
+
+            with patch.object(
+                daily_task_approval.sqlite3,
+                "connect",
+                side_effect=connect_with_pre_begin_crash,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "before BEGIN IMMEDIATE"):
+                    daily_task_approval.apply(
+                        "2026-07-09", 1, db_path, root / "state", root / "backups"
+                    )
+
+            pre_retry_state = json.loads(
+                (root / "state" / "2026-07-09.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                pre_retry_state["revisions"][0]["applyAttemptPhase"],
+                "backup_ready",
+            )
+
+            stage_and_approve(
+                root,
+                "Imported date B",
+                day="2026-07-10",
+                delivery_message_ts="1720000000.000300",
+                approval_message_ts="1720000000.000400",
+            )
+            daily_task_approval.apply(
+                "2026-07-10", 1, db_path, root / "state", root / "backups"
+            )
+            daily_task_approval.apply(
+                "2026-07-09", 1, db_path, root / "state", root / "backups"
+            )
+
+            state_a = json.loads(
+                (root / "state" / "2026-07-09.json").read_text(encoding="utf-8")
+            )
+            state_b = json.loads(
+                (root / "state" / "2026-07-10.json").read_text(encoding="utf-8")
+            )
+            backup_a = Path(state_a["revisions"][0]["backupPath"])
+            backup_b = Path(state_b["revisions"][0]["backupPath"])
+            with closing(sqlite3.connect(backup_a)) as backup:
+                backup_a_titles = [row[0] for row in backup.execute("SELECT title FROM tasks")]
+            with closing(sqlite3.connect(backup_b)) as backup:
+                backup_b_count = backup.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            with closing(sqlite3.connect(db_path)) as db:
+                final_count = db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+
+            self.assertEqual(backup_a_titles, ["Imported date B"])
+            self.assertEqual(backup_b_count, 0)
+            self.assertEqual(final_count, 2)
+            self.assertEqual(
+                state_a["revisions"][0]["applyAttemptPhase"],
+                "committed",
+            )
+
+    def test_apply_rejects_invalid_persisted_attempt_phase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root)
+            daily_task_approval.apply(
+                "2026-07-09", 1, db_path, root / "state", root / "backups"
+            )
+            state_path = root / "state" / "2026-07-09.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            revision = state["revisions"][0]
+            revision["status"] = "approved"
+            revision.pop("applyResult")
+            revision.pop("appliedAt")
+
+            for invalid_phase in ("unknown", {"phase": "backup_ready"}):
+                with self.subTest(invalid_phase=invalid_phase):
+                    revision["applyAttemptPhase"] = invalid_phase
+                    state_path.write_text(json.dumps(state), encoding="utf-8")
+                    os.chmod(state_path, 0o600)
+
+                    with self.assertRaisesRegex(
+                        daily_task_approval.ApprovalError, "attempt phase"
+                    ):
+                        daily_task_approval.apply(
+                            "2026-07-09", 1, db_path, root / "state", root / "backups"
+                        )
+
+    def test_apply_fails_closed_when_transaction_started_without_import_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            backup_dir = root / "backups"
+            backup_dir.mkdir(mode=0o700)
+            backup_path = backup_dir / "pre-transaction.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root)
+            with closing(sqlite3.connect(db_path)) as db:
+                daily_task_approval._backup_database(backup_path, db)
+
+            state_path = root / "state" / "2026-07-09.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            revision = state["revisions"][0]
+            revision["backupPath"] = str(backup_path.resolve())
+            revision["backupCreatedAt"] = datetime.now(timezone.utc).isoformat()
+            revision["applyAttemptPhase"] = "transaction_started"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            os.chmod(state_path, 0o600)
+
+            with self.assertRaisesRegex(
+                daily_task_approval.ApprovalError,
+                "transaction-started attempt has no deterministic import evidence",
+            ):
+                daily_task_approval.apply(
+                    "2026-07-09", 1, db_path, root / "state", backup_dir
+                )
 
     def test_apply_reuses_persisted_pre_import_backup_after_final_state_write_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -726,6 +879,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             revision = state["revisions"][0]
             backup_path = Path(revision["backupPath"])
             self.assertEqual(revision["status"], "approved")
+            self.assertEqual(revision["applyAttemptPhase"], "transaction_started")
             self.assertEqual(
                 [path.resolve() for path in (root / "backups").glob("*.sqlite")],
                 [backup_path.resolve()],
@@ -820,6 +974,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             state = json.loads(state_path.read_text(encoding="utf-8"))
             revision = state["revisions"][0]
             revision["status"] = "approved"
+            revision["applyAttemptPhase"] = "transaction_started"
             revision.pop("applyResult")
             revision.pop("appliedAt")
             state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -1042,6 +1197,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             state = json.loads(state_path.read_text(encoding="utf-8"))
             revision = state["revisions"][0]
             revision["status"] = "approved"
+            revision["applyAttemptPhase"] = "transaction_started"
             revision.pop("applyResult")
             revision.pop("appliedAt")
             state_path.write_text(json.dumps(state), encoding="utf-8")

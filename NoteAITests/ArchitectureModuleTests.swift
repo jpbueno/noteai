@@ -2824,6 +2824,29 @@ final class ArchitectureModuleTests: XCTestCase {
         )
     }
 
+    func testAppActivationRefreshesExternallyImportedTasks() throws {
+        let managerSource = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
+        let refreshMethod = try sourceFragment(
+            named: "func refreshTasksFromStore()",
+            before: "    private func normalizeLoadedTasks",
+            in: managerSource
+        )
+
+        XCTAssertTrue(refreshMethod.contains("tasks = normalizeLoadedTasks(try meetingStore.fetchAllTasks())"))
+
+        let librarySource = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+        let activationHandler = try sourceFragment(
+            named: ".onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))",
+            before: "        .onChange(of: selection)",
+            in: librarySource
+        )
+
+        XCTAssertTrue(activationHandler.contains("meetingManager.refreshOnboardingChecklistState()"))
+        XCTAssertTrue(activationHandler.contains("meetingManager.refreshTasksFromStore()"))
+    }
+
     func testLibraryListOrderingSortsMajorCollectionsByDate() throws {
         let calendar = Calendar(identifier: .gregorian)
         let older = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 1)))

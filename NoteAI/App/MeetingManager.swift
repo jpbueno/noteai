@@ -167,7 +167,7 @@ final class MeetingManager: ObservableObject {
         loadNotes()
         loadT5TData()
         loadTodos()
-        loadTasks()
+        refreshTasksFromStore()
         refreshOnboardingChecklistState()
         setupToggleListener()
         setupTranscriptionPipeline()
@@ -963,7 +963,7 @@ final class MeetingManager: ObservableObject {
         tasks.filter { $0.isLinked(to: meetingID) }
     }
 
-    private func loadTasks() {
+    func refreshTasksFromStore() {
         do {
             tasks = normalizeLoadedTasks(try meetingStore.fetchAllTasks())
         } catch {

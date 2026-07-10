@@ -147,6 +147,7 @@ struct MeetingLibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             meetingManager.refreshOnboardingChecklistState()
+            meetingManager.refreshTasksFromStore()
         }
         .onChange(of: selection) { _, newSelection in
             if let newSelection {

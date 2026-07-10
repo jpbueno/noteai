@@ -1,9 +1,12 @@
+import hashlib
 import json
+import multiprocessing
 import os
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -18,6 +21,10 @@ JP_SLACK_USER_ID = "U09BXNGD81L"
 SLACK_CHANNEL_ID = "D123"
 DELIVERY_MESSAGE_TS = "1720000000.000100"
 APPROVAL_MESSAGE_TS = "1720000000.000200"
+
+
+def approval_command(day: str, revision: int = 1) -> str:
+    return f"APPROVE {day} R{revision}"
 
 
 def candidate_payload(title: str = "Delivered NoteAI approval workflow") -> dict[str, object]:
@@ -59,22 +66,81 @@ def create_noteai_db(path: Path, *, unexpected_column: bool = False) -> None:
         db.commit()
 
 
-def stage_and_approve(root: Path, title: str = "Delivered NoteAI approval workflow") -> None:
-    tasks_file = root / "tasks.json"
+def stage_and_approve(
+    root: Path,
+    title: str = "Delivered NoteAI approval workflow",
+    *,
+    day: str = "2026-07-09",
+    delivery_message_ts: str = DELIVERY_MESSAGE_TS,
+    approval_message_ts: str = APPROVAL_MESSAGE_TS,
+) -> None:
+    tasks_file = root / f"tasks-{day}.json"
     tasks_file.write_text(json.dumps(candidate_payload(title)), encoding="utf-8")
-    daily_task_approval.stage("2026-07-09", tasks_file, root / "state")
+    daily_task_approval.stage(day, tasks_file, root / "state")
     daily_task_approval.record_delivery(
-        "2026-07-09", 1, SLACK_CHANNEL_ID, DELIVERY_MESSAGE_TS, root / "state"
+        day, 1, SLACK_CHANNEL_ID, delivery_message_ts, root / "state"
     )
     daily_task_approval.decide(
-        "2026-07-09",
+        day,
         1,
         "approved",
         JP_SLACK_USER_ID,
         SLACK_CHANNEL_ID,
-        APPROVAL_MESSAGE_TS,
+        approval_message_ts,
+        approval_command(day),
         root / "state",
     )
+
+
+def concurrent_decide_worker(
+    state_dir: str,
+    day: str,
+    start_event: object,
+    result_queue: object,
+) -> None:
+    start_event.wait()
+    try:
+        daily_task_approval.decide(
+            day,
+            1,
+            "approved",
+            JP_SLACK_USER_ID,
+            SLACK_CHANNEL_ID,
+            APPROVAL_MESSAGE_TS,
+            approval_command(day),
+            Path(state_dir),
+        )
+        result_queue.put("approved")
+    except daily_task_approval.ApprovalError as exc:
+        result_queue.put(f"error:{exc}")
+
+
+def concurrent_apply_worker(
+    root: str,
+    day: str,
+    start_event: object,
+    result_queue: object,
+) -> None:
+    root_path = Path(root)
+    original_backup = daily_task_approval._backup_database
+
+    def delayed_backup(backup_path: Path, db: sqlite3.Connection) -> None:
+        time.sleep(0.3)
+        original_backup(backup_path, db)
+
+    start_event.wait()
+    try:
+        with patch.object(daily_task_approval, "_backup_database", side_effect=delayed_backup):
+            result = daily_task_approval.apply(
+                day,
+                1,
+                root_path / "meetings.sqlite",
+                root_path / "state",
+                root_path / "backups",
+            )
+        result_queue.put({"status": "applied", "result": result})
+    except Exception as exc:
+        result_queue.put({"status": "error", "error": repr(exc)})
 
 
 class DailyTaskApprovalStateTests(unittest.TestCase):
@@ -110,6 +176,21 @@ class DailyTaskApprovalStateTests(unittest.TestCase):
 
             with self.assertRaisesRegex(daily_task_approval.ApprovalError, "task columns"):
                 daily_task_approval.stage("2026-07-09", tasks_file, root / "state")
+
+    def test_stage_rejects_non_null_unsupported_task_fields(self):
+        for field, value in (("dueDate", "2026-07-10"), ("priority", "high")):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                tasks_file = root / "tasks.json"
+                payload = candidate_payload()
+                payload["tasks"][0][field] = value
+                tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    daily_task_approval.ApprovalError,
+                    f"tasks\\[0\\].{field} must be null",
+                ):
+                    daily_task_approval.stage("2026-07-09", tasks_file, root / "state")
 
     def test_stage_merges_sources_for_the_same_canonical_task(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,6 +299,7 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                     JP_SLACK_USER_ID,
                     SLACK_CHANNEL_ID,
                     "1720000000.000300",
+                    "APPROVE 2026-07-09 R1",
                     root / "state",
                 )
 
@@ -232,6 +314,7 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                 JP_SLACK_USER_ID,
                 SLACK_CHANNEL_ID,
                 "1720000000.000300",
+                "APPROVE 2026-07-09 R2",
                 root / "state",
             )
             self.assertEqual(approved["revisions"][1]["status"], "approved")
@@ -244,6 +327,7 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                     JP_SLACK_USER_ID,
                     SLACK_CHANNEL_ID,
                     "1720000000.000400",
+                    "REJECT 2026-07-09 R2",
                     root / "state",
                 )
             with self.assertRaisesRegex(daily_task_approval.ApprovalError, "cannot revise approved"):
@@ -259,6 +343,125 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                 daily_task_approval.record_delivery(
                     "2026-07-09", 1, SLACK_CHANNEL_ID, "not-a-timestamp", root / "state"
                 )
+
+    def test_record_delivery_accepts_only_private_dm_conversation_ids(self):
+        for channel_id in ("C123", "G123", "U123", "D", " D123", "D123 "):
+            with self.subTest(channel_id=channel_id), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._stage(root)
+
+                with self.assertRaisesRegex(daily_task_approval.ApprovalError, "private DM"):
+                    daily_task_approval.record_delivery(
+                        "2026-07-09", 1, channel_id, DELIVERY_MESSAGE_TS, root / "state"
+                    )
+
+    def test_decide_requires_exact_command_and_persists_only_hash_and_type(self):
+        cases = (
+            (
+                "approved",
+                approval_command("2026-07-09"),
+                ("approve 2026-07-09 R1", "APPROVE 2026-07-09 R1 now", " APPROVE 2026-07-09 R1"),
+                "APPROVE",
+            ),
+            (
+                "rejected",
+                "REJECT 2026-07-09 R1",
+                ("REJECT 2026-07-09 R2", "REJECT 2026-07-09 R1 ", "REJECT 2026-07-09"),
+                "REJECT",
+            ),
+            (
+                "needs_revision",
+                "EDIT 2026-07-09 R1: Add customer impact",
+                ("EDIT 2026-07-09 R1:", "EDIT 2026-07-09 R1:   ", "EDIT 2026-07-09 R1 Add customer impact"),
+                "EDIT",
+            ),
+        )
+        for decision, valid_command, invalid_commands, command_type in cases:
+            for invalid_command in invalid_commands:
+                with (
+                    self.subTest(decision=decision, command=invalid_command),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    root = Path(tmp)
+                    self._stage(root)
+                    daily_task_approval.record_delivery(
+                        "2026-07-09", 1, SLACK_CHANNEL_ID, DELIVERY_MESSAGE_TS, root / "state"
+                    )
+
+                    with self.assertRaisesRegex(daily_task_approval.ApprovalError, "exact Slack command"):
+                        daily_task_approval.decide(
+                            "2026-07-09",
+                            1,
+                            decision,
+                            JP_SLACK_USER_ID,
+                            SLACK_CHANNEL_ID,
+                            APPROVAL_MESSAGE_TS,
+                            invalid_command,
+                            root / "state",
+                        )
+
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._stage(root)
+                daily_task_approval.record_delivery(
+                    "2026-07-09", 1, SLACK_CHANNEL_ID, DELIVERY_MESSAGE_TS, root / "state"
+                )
+
+                decided = daily_task_approval.decide(
+                    "2026-07-09",
+                    1,
+                    decision,
+                    JP_SLACK_USER_ID,
+                    SLACK_CHANNEL_ID,
+                    APPROVAL_MESSAGE_TS,
+                    valid_command,
+                    root / "state",
+                )
+
+                evidence = decided["revisions"][0]["approvalEvidence"]
+                self.assertEqual(evidence["commandType"], command_type)
+                self.assertEqual(
+                    evidence["commandHash"],
+                    hashlib.sha256(valid_command.encode("utf-8")).hexdigest(),
+                )
+                self.assertNotIn("commandText", evidence)
+                if decision == "needs_revision":
+                    self.assertNotIn("Add customer impact", json.dumps(decided))
+
+    def test_decision_evidence_cannot_be_reused_across_dates_concurrently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for day in ("2026-07-09", "2026-07-10"):
+                tasks_file = root / f"tasks-{day}.json"
+                tasks_file.write_text(json.dumps(candidate_payload(day)), encoding="utf-8")
+                daily_task_approval.stage(day, tasks_file, root / "state")
+                daily_task_approval.record_delivery(
+                    day, 1, SLACK_CHANNEL_ID, DELIVERY_MESSAGE_TS, root / "state"
+                )
+
+            context = multiprocessing.get_context("spawn")
+            start_event = context.Event()
+            result_queue = context.Queue()
+            processes = [
+                context.Process(
+                    target=concurrent_decide_worker,
+                    args=(str(root / "state"), day, start_event, result_queue),
+                )
+                for day in ("2026-07-09", "2026-07-10")
+            ]
+            for process in processes:
+                process.start()
+            start_event.set()
+            results = [result_queue.get(timeout=10) for _ in processes]
+            for process in processes:
+                process.join(timeout=10)
+                self.assertEqual(process.exitcode, 0)
+
+            self.assertEqual(results.count("approved"), 1)
+            self.assertEqual(sum(result.startswith("error:") for result in results), 1)
+            self.assertTrue(any("already used" in result for result in results))
+            lock_path = root / "state" / ".decision-evidence.lock"
+            self.assertEqual(lock_path.stat().st_mode & 0o777, 0o600)
 
     def test_decide_enforces_and_persists_slack_approval_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,6 +513,7 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                             actor_user_id,
                             channel_id,
                             approval_message_ts,
+                            approval_command("2026-07-09"),
                             root / "state",
                         )
 
@@ -320,6 +524,7 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                 JP_SLACK_USER_ID,
                 SLACK_CHANNEL_ID,
                 APPROVAL_MESSAGE_TS,
+                approval_command("2026-07-09"),
                 root / "state",
             )
 
@@ -329,6 +534,10 @@ class DailyTaskApprovalDecisionTests(unittest.TestCase):
                     "actorUserID": JP_SLACK_USER_ID,
                     "channelID": SLACK_CHANNEL_ID,
                     "messageTS": APPROVAL_MESSAGE_TS,
+                    "commandType": "APPROVE",
+                    "commandHash": hashlib.sha256(
+                        approval_command("2026-07-09").encode("utf-8")
+                    ).hexdigest(),
                 },
             )
 
@@ -370,6 +579,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
                 JP_SLACK_USER_ID,
                 SLACK_CHANNEL_ID,
                 APPROVAL_MESSAGE_TS,
+                approval_command("2026-07-09"),
                 root / "state",
             )
             with self.assertRaisesRegex(daily_task_approval.ApprovalError, "tasks schema"):
@@ -404,6 +614,10 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
                 "actorUserID": "U0000000000",
                 "channelID": SLACK_CHANNEL_ID,
                 "messageTS": APPROVAL_MESSAGE_TS,
+                "commandType": "APPROVE",
+                "commandHash": hashlib.sha256(
+                    approval_command("2026-07-09").encode("utf-8")
+                ).hexdigest(),
             }
             state_path.write_text(json.dumps(state), encoding="utf-8")
             os.chmod(state_path, 0o600)
@@ -553,6 +767,129 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
                     "2026-07-09", 1, db_path, root / "state", root / "backups"
                 )
 
+    def test_apply_revalidates_exact_approved_command_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root)
+            daily_task_approval.apply(
+                "2026-07-09", 1, db_path, root / "state", root / "backups"
+            )
+            state_path = root / "state" / "2026-07-09.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["revisions"][0]["approvalEvidence"]["commandHash"] = "0" * 64
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            os.chmod(state_path, 0o600)
+
+            with self.assertRaisesRegex(daily_task_approval.ApprovalError, "command hash"):
+                daily_task_approval.apply(
+                    "2026-07-09", 1, db_path, root / "state", root / "backups"
+                )
+
+    def test_apply_revalidates_approval_before_database_access(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage_and_approve(root)
+            state_path = root / "state" / "2026-07-09.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["revisions"][0]["approvalEvidence"]["commandHash"] = "0" * 64
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            os.chmod(state_path, 0o600)
+
+            with self.assertRaisesRegex(daily_task_approval.ApprovalError, "command hash"):
+                daily_task_approval.apply(
+                    "2026-07-09",
+                    1,
+                    root / "missing.sqlite",
+                    root / "state",
+                    root / "backups",
+                )
+
+    def test_apply_retry_accepts_normalized_or_user_edited_presentation_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root)
+            first = daily_task_approval.apply(
+                "2026-07-09", 1, db_path, root / "state", root / "backups"
+            )
+
+            state_path = root / "state" / "2026-07-09.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            revision = state["revisions"][0]
+            revision["status"] = "approved"
+            revision.pop("applyResult")
+            revision.pop("appliedAt")
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            os.chmod(state_path, 0o600)
+            with closing(sqlite3.connect(db_path)) as db:
+                row = db.execute("SELECT id, json_data FROM tasks").fetchone()
+                edited = json.loads(row[1])
+                edited["title"] = "07/09/26 - User-renamed task"
+                edited["description"] = "User-curated description"
+                edited["status"] = "open"
+                db.execute(
+                    "UPDATE tasks SET title = ?, status = ?, json_data = ? WHERE id = ?",
+                    (edited["title"], edited["status"], json.dumps(edited), row[0]),
+                )
+                db.commit()
+
+            recovered = daily_task_approval.apply(
+                "2026-07-09", 1, db_path, root / "state", root / "backups"
+            )
+
+            self.assertEqual(recovered["insertedIDs"], [])
+            self.assertEqual(recovered["skippedExistingIDs"], first["insertedIDs"])
+            with closing(sqlite3.connect(db_path)) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
+
+    def test_concurrent_cross_date_import_backups_form_a_safe_sequence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "meetings.sqlite"
+            create_noteai_db(db_path)
+            stage_and_approve(root, "Imported first date", day="2026-07-09")
+            stage_and_approve(
+                root,
+                "Imported second date",
+                day="2026-07-10",
+                delivery_message_ts="1720000000.000300",
+                approval_message_ts="1720000000.000400",
+            )
+
+            context = multiprocessing.get_context("spawn")
+            start_event = context.Event()
+            result_queue = context.Queue()
+            processes = [
+                context.Process(
+                    target=concurrent_apply_worker,
+                    args=(str(root), day, start_event, result_queue),
+                )
+                for day in ("2026-07-09", "2026-07-10")
+            ]
+            for process in processes:
+                process.start()
+            start_event.set()
+            results = [result_queue.get(timeout=15) for _ in processes]
+            for process in processes:
+                process.join(timeout=15)
+                self.assertEqual(process.exitcode, 0)
+
+            self.assertEqual([result["status"] for result in results], ["applied", "applied"])
+            backup_counts = []
+            for backup_path in (root / "backups").glob("*.sqlite"):
+                with closing(sqlite3.connect(backup_path)) as backup:
+                    backup_counts.append(
+                        backup.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+                    )
+            self.assertEqual(sorted(backup_counts), [0, 1])
+            with closing(sqlite3.connect(db_path)) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 2)
+            lock_path = root / ".meetings.sqlite.daily-task-approval.lock"
+            self.assertEqual(lock_path.stat().st_mode & 0o777, 0o600)
+
     def test_apply_imports_same_title_tasks_with_different_descriptions_idempotently(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -574,6 +911,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
                 JP_SLACK_USER_ID,
                 SLACK_CHANNEL_ID,
                 APPROVAL_MESSAGE_TS,
+                approval_command("2026-07-09"),
                 root / "state",
             )
 
@@ -690,7 +1028,7 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 2)
 
-    def test_apply_fails_closed_when_import_key_content_conflicts(self):
+    def test_apply_fails_closed_when_import_key_provenance_conflicts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             db_path = root / "meetings.sqlite"
@@ -711,10 +1049,10 @@ class DailyTaskApprovalApplyTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as db:
                 row = db.execute("SELECT id, json_data FROM tasks").fetchone()
                 altered = json.loads(row[1])
-                altered["description"] = "Tampered content"
+                altered["sourceMetadata"]["messageID"] = "1720000000.999999"
                 db.execute(
-                    "UPDATE tasks SET json_data = ?, title = ? WHERE id = ?",
-                    (json.dumps(altered), "Different content", row[0]),
+                    "UPDATE tasks SET json_data = ? WHERE id = ?",
+                    (json.dumps(altered), row[0]),
                 )
                 db.commit()
 
@@ -736,13 +1074,13 @@ class DailyTaskApprovalExpirationAndCLITests(unittest.TestCase):
             state_path = root / "state" / "2026-07-09.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
             state["revisions"][0]["createdAt"] = (
-                datetime.now(timezone.utc) - timedelta(hours=25)
+                datetime.now(timezone.utc) - timedelta(hours=49)
             ).isoformat()
             state_path.write_text(json.dumps(state), encoding="utf-8")
             os.chmod(state_path, 0o600)
 
             expired = daily_task_approval.expire(
-                "2026-07-09", 1, 24, root / "state"
+                "2026-07-09", 1, 48, root / "state"
             )
 
             self.assertEqual(expired["revisions"][0]["status"], "expired")
@@ -756,7 +1094,7 @@ class DailyTaskApprovalExpirationAndCLITests(unittest.TestCase):
             stage_and_approve(root)
 
             approved = daily_task_approval.expire(
-                "2026-07-09", 1, 0, root / "state"
+                "2026-07-09", 1, 48, root / "state"
             )
 
             self.assertEqual(approved["revisions"][0]["status"], "approved")
@@ -768,7 +1106,7 @@ class DailyTaskApprovalExpirationAndCLITests(unittest.TestCase):
             daily_task_approval.stage("2026-07-09", tasks_file, root / "state")
 
             pending = daily_task_approval.expire(
-                "2026-07-09", 1, 24, root / "state"
+                "2026-07-09", 1, 48, root / "state"
             )
 
             self.assertEqual(pending["revisions"][0]["status"], "pending")
@@ -855,6 +1193,8 @@ class DailyTaskApprovalExpirationAndCLITests(unittest.TestCase):
                     SLACK_CHANNEL_ID,
                     "--approval-message-ts",
                     APPROVAL_MESSAGE_TS,
+                    "--command-text",
+                    approval_command("2026-07-09"),
                 ],
                 check=False,
                 capture_output=True,
@@ -865,6 +1205,7 @@ class DailyTaskApprovalExpirationAndCLITests(unittest.TestCase):
             self.assertIn("--actor-user-id", missing.stderr)
             self.assertIn("--channel-id", missing.stderr)
             self.assertIn("--approval-message-ts", missing.stderr)
+            self.assertIn("--command-text", missing.stderr)
             self.assertEqual(valid.returncode, 0, valid.stderr)
             self.assertEqual(
                 json.loads(valid.stdout)["approvalEvidence"]["actorUserID"],

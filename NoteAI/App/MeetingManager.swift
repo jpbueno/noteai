@@ -167,7 +167,7 @@ final class MeetingManager: ObservableObject {
         loadNotes()
         loadT5TData()
         loadTodos()
-        refreshTasksFromStore()
+        loadTasksWithStartupNormalization()
         refreshOnboardingChecklistState()
         setupToggleListener()
         setupTranscriptionPipeline()
@@ -964,6 +964,14 @@ final class MeetingManager: ObservableObject {
     }
 
     func refreshTasksFromStore() {
+        do {
+            tasks = try meetingStore.fetchAllTasks()
+        } catch {
+            print("Failed to load tasks: \(error)")
+        }
+    }
+
+    private func loadTasksWithStartupNormalization() {
         do {
             tasks = normalizeLoadedTasks(try meetingStore.fetchAllTasks())
         } catch {

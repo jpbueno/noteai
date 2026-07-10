@@ -2829,11 +2829,28 @@ final class ArchitectureModuleTests: XCTestCase {
             .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
         let refreshMethod = try sourceFragment(
             named: "func refreshTasksFromStore()",
-            before: "    private func normalizeLoadedTasks",
+            before: "    private func loadTasksWithStartupNormalization()",
             in: managerSource
         )
 
-        XCTAssertTrue(refreshMethod.contains("tasks = normalizeLoadedTasks(try meetingStore.fetchAllTasks())"))
+        XCTAssertTrue(refreshMethod.contains("tasks = try meetingStore.fetchAllTasks()"))
+        XCTAssertFalse(refreshMethod.contains("normalizeLoadedTasks"))
+        XCTAssertFalse(refreshMethod.contains("meetingStore.saveTask"))
+
+        let initializer = try sourceFragment(
+            named: "init()",
+            before: "    var onboardingChecklist",
+            in: managerSource
+        )
+        XCTAssertTrue(initializer.contains("loadTasksWithStartupNormalization()"))
+        XCTAssertFalse(initializer.contains("refreshTasksFromStore()"))
+
+        let startupLoad = try sourceFragment(
+            named: "private func loadTasksWithStartupNormalization()",
+            before: "    private func normalizeLoadedTasks",
+            in: managerSource
+        )
+        XCTAssertTrue(startupLoad.contains("normalizeLoadedTasks(try meetingStore.fetchAllTasks())"))
 
         let librarySource = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))

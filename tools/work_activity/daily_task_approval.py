@@ -10,7 +10,7 @@ import sqlite3
 import sys
 import tempfile
 import uuid
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -39,6 +39,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 IMPORT_NAMESPACE = uuid.UUID("22d8ead8-19a2-4e76-9ae4-303deaaad377")
 JP_SLACK_USER_ID = "U09BXNGD81L"
 SLACK_TIMESTAMP = re.compile(r"^[0-9]+\.[0-9]{6}$")
+SLACK_DM_CONVERSATION_ID = re.compile(r"^D[A-Z0-9]+$")
 DATE_PREFIX = re.compile(
     r"^(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4}|\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})"
@@ -108,10 +109,10 @@ def _canonical_payload(raw: object) -> dict[str, object]:
         clean_sources = sorted({_clean_text(source, f"tasks[{index}].sources") for source in sources})
         due_date = task["dueDate"]
         priority = task["priority"]
-        if due_date is not None and not isinstance(due_date, str):
-            raise ApprovalError(f"tasks[{index}].dueDate must be a string or null")
-        if priority is not None and not isinstance(priority, (str, int, float)):
-            raise ApprovalError(f"tasks[{index}].priority must be a scalar or null")
+        if due_date is not None:
+            raise ApprovalError(f"tasks[{index}].dueDate must be null")
+        if priority is not None:
+            raise ApprovalError(f"tasks[{index}].priority must be null")
         canonical = {
             "title": title,
             "description": description,
@@ -198,10 +199,7 @@ def _state_path(day: str, state_dir: Path) -> Path:
 
 
 @contextmanager
-def _state_lock(day: str, state_dir: Path) -> Iterator[None]:
-    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(state_dir, 0o700)
-    lock_path = state_dir / f".{day}.lock"
+def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
@@ -210,6 +208,22 @@ def _state_lock(day: str, state_dir: Path) -> Iterator[None]:
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+@contextmanager
+def _state_lock(day: str, state_dir: Path) -> Iterator[None]:
+    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    with _exclusive_file_lock(state_dir / f".{day}.lock"):
+        yield
+
+
+@contextmanager
+def _decision_evidence_lock(state_dir: Path) -> Iterator[None]:
+    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    with _exclusive_file_lock(state_dir / ".decision-evidence.lock"):
+        yield
 
 
 def _read_state_unlocked(day: str, state_dir: Path) -> dict[str, object] | None:
@@ -373,16 +387,53 @@ def _validated_slack_timestamp(value: object, field: str) -> tuple[str, Decimal]
     return cleaned, parsed
 
 
+def _validated_slack_dm_conversation_id(value: object, field: str) -> str:
+    if not isinstance(value, str) or not SLACK_DM_CONVERSATION_ID.fullmatch(value):
+        raise ApprovalError(f"{field} must be a Slack private DM conversation ID")
+    return value
+
+
+def _command_hash(command_text: str) -> str:
+    return hashlib.sha256(command_text.encode("utf-8")).hexdigest()
+
+
+def _validated_decision_command(
+    day: str,
+    revision: int,
+    decision: str,
+    command_text: object,
+) -> dict[str, str]:
+    if not isinstance(command_text, str) or command_text != command_text.strip():
+        raise ApprovalError("decision requires the exact Slack command text")
+    if decision == "approved":
+        command_type = "APPROVE"
+        valid = command_text == f"APPROVE {day} R{revision}"
+    elif decision == "rejected":
+        command_type = "REJECT"
+        valid = command_text == f"REJECT {day} R{revision}"
+    else:
+        command_type = "EDIT"
+        prefix = f"EDIT {day} R{revision}: "
+        requested_changes = command_text[len(prefix) :] if command_text.startswith(prefix) else ""
+        valid = bool(requested_changes and requested_changes == requested_changes.strip())
+    if not valid:
+        raise ApprovalError("decision requires the exact Slack command text")
+    return {
+        "commandType": command_type,
+        "commandHash": _command_hash(command_text),
+    }
+
+
 def _validated_approval_evidence(
     delivery: object,
     evidence: object,
+    command_evidence: dict[str, str],
 ) -> dict[str, str]:
     if not isinstance(delivery, dict):
         raise ApprovalError("Slack delivery reference is missing or malformed")
-    raw_delivery_channel = delivery.get("channelID")
-    delivery_channel = _clean_text(raw_delivery_channel, "delivery channel ID")
-    if raw_delivery_channel != delivery_channel:
-        raise ApprovalError("Slack delivery reference is missing or malformed")
+    delivery_channel = _validated_slack_dm_conversation_id(
+        delivery.get("channelID"), "delivery channel ID"
+    )
     _, delivery_timestamp = _validated_slack_timestamp(
         delivery.get("messageTS"), "delivery Slack timestamp"
     )
@@ -390,6 +441,8 @@ def _validated_approval_evidence(
         "actorUserID",
         "channelID",
         "messageTS",
+        "commandType",
+        "commandHash",
     }:
         raise ApprovalError("approved revision has no valid Slack approval evidence")
     actor_user_id = evidence.get("actorUserID")
@@ -403,11 +456,46 @@ def _validated_approval_evidence(
     )
     if approval_timestamp <= delivery_timestamp:
         raise ApprovalError("approval message timestamp must be newer than delivery")
+    if evidence.get("commandType") != command_evidence["commandType"]:
+        raise ApprovalError("approval evidence has the wrong Slack command type")
+    if evidence.get("commandHash") != command_evidence["commandHash"]:
+        raise ApprovalError("approval evidence has the wrong Slack command hash")
     return {
         "actorUserID": actor_user_id,
         "channelID": channel_id,
         "messageTS": approval_message_ts,
+        "commandType": command_evidence["commandType"],
+        "commandHash": command_evidence["commandHash"],
     }
+
+
+def _assert_decision_evidence_unused(
+    state_dir: Path,
+    day: str,
+    revision: int,
+    channel_id: str,
+    message_ts: str,
+) -> None:
+    for state_path in sorted(state_dir.glob("*.json")):
+        other_day = state_path.stem
+        other_state = _require_state_unlocked(other_day, state_dir)
+        revisions = other_state.get("revisions")
+        if not isinstance(revisions, list):
+            raise ApprovalError(f"approval state is malformed for {other_day}")
+        for other_revision in revisions:
+            if not isinstance(other_revision, dict):
+                raise ApprovalError(f"approval state is malformed for {other_day}")
+            if other_day == day and other_revision.get("revision") == revision:
+                continue
+            evidence = other_revision.get("approvalEvidence")
+            if (
+                isinstance(evidence, dict)
+                and evidence.get("channelID") == channel_id
+                and evidence.get("messageTS") == message_ts
+            ):
+                raise ApprovalError(
+                    "Slack decision evidence is already used by another date or revision"
+                )
 
 
 def record_delivery(
@@ -419,7 +507,7 @@ def record_delivery(
 ) -> dict[str, object]:
     day = _validated_date(day)
     state_dir = Path(state_dir)
-    channel_id = _clean_text(channel_id, "channel ID")
+    channel_id = _validated_slack_dm_conversation_id(channel_id, "channel ID")
     message_ts, _ = _validated_slack_timestamp(message_ts, "delivery Slack timestamp")
     delivery = {"channelID": channel_id, "messageTS": message_ts}
     with _state_lock(day, state_dir):
@@ -445,36 +533,48 @@ def decide(
     actor_user_id: str,
     channel_id: str,
     approval_message_ts: str,
+    command_text: str,
     state_dir: Path,
 ) -> dict[str, object]:
     day = _validated_date(day)
     state_dir = Path(state_dir)
     if decision not in {"approved", "rejected", "needs_revision"}:
         raise ApprovalError(f"unsupported decision: {decision}")
-    with _state_lock(day, state_dir):
-        state = _require_state_unlocked(day, state_dir)
-        current = _require_active_number(state, revision)
-        if current.get("status") != "pending":
-            raise ApprovalError(
-                f"illegal transition from {current.get('status')} to {decision}"
+    command_evidence = _validated_decision_command(day, revision, decision, command_text)
+    with _decision_evidence_lock(state_dir):
+        with _state_lock(day, state_dir):
+            state = _require_state_unlocked(day, state_dir)
+            current = _require_active_number(state, revision)
+            if current.get("status") != "pending":
+                raise ApprovalError(
+                    f"illegal transition from {current.get('status')} to {decision}"
+                )
+            if not isinstance(current.get("delivery"), dict):
+                raise ApprovalError("cannot decide before Slack delivery is recorded")
+            evidence = _validated_approval_evidence(
+                current["delivery"],
+                {
+                    "actorUserID": actor_user_id,
+                    "channelID": channel_id,
+                    "messageTS": approval_message_ts,
+                    **command_evidence,
+                },
+                command_evidence,
             )
-        if not isinstance(current.get("delivery"), dict):
-            raise ApprovalError("cannot decide before Slack delivery is recorded")
-        evidence = _validated_approval_evidence(
-            current["delivery"],
-            {
-                "actorUserID": actor_user_id,
-                "channelID": channel_id,
-                "messageTS": approval_message_ts,
-            },
-        )
-        now = datetime.now(timezone.utc).isoformat()
-        current["status"] = decision
-        current["approvalEvidence"] = evidence
-        current["decidedAt"] = now
-        current["updatedAt"] = now
-        _write_state_unlocked(day, state_dir, state)
-        return state
+            _assert_decision_evidence_unused(
+                state_dir,
+                day,
+                revision,
+                evidence["channelID"],
+                evidence["messageTS"],
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            current["status"] = decision
+            current["approvalEvidence"] = evidence
+            current["decidedAt"] = now
+            current["updatedAt"] = now
+            _write_state_unlocked(day, state_dir, state)
+            return state
 
 
 def _normalized_title_core(title: str) -> str:
@@ -498,6 +598,14 @@ def _noon_timestamps(day: str) -> tuple[float, float]:
     noon = datetime(parsed.year, parsed.month, parsed.day, 12, tzinfo=NEW_YORK)
     unix_value = noon.timestamp()
     return unix_value, unix_value - APPLE_REFERENCE_UNIX
+
+
+@contextmanager
+def _database_lock(database: Path) -> Iterator[None]:
+    resolved_database = database.resolve()
+    lock_path = resolved_database.parent / f".{resolved_database.name}.daily-task-approval.lock"
+    with _exclusive_file_lock(lock_path):
+        yield
 
 
 def _planned_backup_path(
@@ -587,13 +695,6 @@ def _expected_task(
     }
 
 
-def _float_matches(value: object, expected: float) -> bool:
-    try:
-        return abs(float(value) - expected) < 0.001
-    except (TypeError, ValueError):
-        return False
-
-
 def _assert_import_row_matches(row: sqlite3.Row, expected: dict[str, object]) -> None:
     try:
         task_json = json.loads(str(row["json_data"]))
@@ -604,21 +705,12 @@ def _assert_import_row_matches(row: sqlite3.Row, expected: dict[str, object]) ->
     expected_metadata = expected_json["sourceMetadata"]
     matches = (
         row["id"] == expected["id"]
-        and row["title"] == expected["title"]
-        and row["status"] == "completed"
-        and _float_matches(row["work_date"], float(expected["workDateUnix"]))
-        and _float_matches(row["completed_date"], float(expected["completedDateUnix"]))
         and row["source_action_item_id"] == expected["importKey"]
         and isinstance(task_json, dict)
         and task_json.get("id") == expected["id"]
-        and task_json.get("title") == expected["title"]
-        and task_json.get("description") == expected["description"]
-        and task_json.get("status") == "completed"
-        and _float_matches(task_json.get("workDate"), float(expected["json"]["workDate"]))
-        and _float_matches(task_json.get("completedDate"), float(expected["json"]["completedDate"]))
         and task_json.get("sourceActionItemID") == expected["importKey"]
-        and task_json.get("owner") == "JP"
         and isinstance(metadata, dict)
+        and metadata.get("kind") == expected_metadata["kind"]
         and metadata.get("provider") == expected_metadata["provider"]
         and metadata.get("threadID") == expected_metadata["threadID"]
         and metadata.get("messageID") == expected_metadata["messageID"]
@@ -663,7 +755,8 @@ def apply(
     database = Path(database)
     state_dir = Path(state_dir)
     backup_dir = Path(backup_dir)
-    with _state_lock(day, state_dir):
+    with ExitStack() as locks:
+        locks.enter_context(_state_lock(day, state_dir))
         state = _require_state_unlocked(day, state_dir)
         current = _require_active_number(state, revision)
         status = current.get("status")
@@ -672,7 +765,17 @@ def apply(
         delivery = current.get("delivery")
         if not isinstance(delivery, dict):
             raise ApprovalError("approved revision has no bound Slack delivery")
-        _validated_approval_evidence(delivery, current.get("approvalEvidence"))
+        approved_command_evidence = _validated_decision_command(
+            day,
+            revision,
+            "approved",
+            f"APPROVE {day} R{revision}",
+        )
+        _validated_approval_evidence(
+            delivery,
+            current.get("approvalEvidence"),
+            approved_command_evidence,
+        )
         if status == "applied":
             result = current.get("applyResult")
             if not isinstance(result, dict):
@@ -680,7 +783,7 @@ def apply(
             return result
         if not database.is_file():
             raise ApprovalError(f"NoteAI database does not exist: {database}")
-
+        locks.enter_context(_database_lock(database))
         inserted_ids: list[str] = []
         skipped_ids: list[str] = []
         now_unix = datetime.now(timezone.utc).timestamp()
@@ -886,6 +989,7 @@ def _parser() -> argparse.ArgumentParser:
     decide_parser.add_argument("--actor-user-id", required=True)
     decide_parser.add_argument("--channel-id", required=True)
     decide_parser.add_argument("--approval-message-ts", required=True)
+    decide_parser.add_argument("--command-text", required=True)
 
     apply_parser = commands.add_parser("apply")
     common(apply_parser)
@@ -929,6 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.actor_user_id,
                     args.channel_id,
                     args.approval_message_ts,
+                    args.command_text,
                     args.state_dir,
                 )
             )

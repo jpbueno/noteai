@@ -2824,6 +2824,46 @@ final class ArchitectureModuleTests: XCTestCase {
         )
     }
 
+    func testAppActivationRefreshesExternallyImportedTasks() throws {
+        let managerSource = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/App/MeetingManager.swift"))
+        let refreshMethod = try sourceFragment(
+            named: "func refreshTasksFromStore()",
+            before: "    private func loadTasksWithStartupNormalization()",
+            in: managerSource
+        )
+
+        XCTAssertTrue(refreshMethod.contains("tasks = try meetingStore.fetchAllTasks()"))
+        XCTAssertFalse(refreshMethod.contains("normalizeLoadedTasks"))
+        XCTAssertFalse(refreshMethod.contains("meetingStore.saveTask"))
+
+        let initializer = try sourceFragment(
+            named: "init()",
+            before: "    var onboardingChecklist",
+            in: managerSource
+        )
+        XCTAssertTrue(initializer.contains("loadTasksWithStartupNormalization()"))
+        XCTAssertFalse(initializer.contains("refreshTasksFromStore()"))
+
+        let startupLoad = try sourceFragment(
+            named: "private func loadTasksWithStartupNormalization()",
+            before: "    private func normalizeLoadedTasks",
+            in: managerSource
+        )
+        XCTAssertTrue(startupLoad.contains("normalizeLoadedTasks(try meetingStore.fetchAllTasks())"))
+
+        let librarySource = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/MeetingLibrary/MeetingLibraryView.swift"))
+        let activationHandler = try sourceFragment(
+            named: ".onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))",
+            before: "        .onChange(of: selection)",
+            in: librarySource
+        )
+
+        XCTAssertTrue(activationHandler.contains("meetingManager.refreshOnboardingChecklistState()"))
+        XCTAssertTrue(activationHandler.contains("meetingManager.refreshTasksFromStore()"))
+    }
+
     func testLibraryListOrderingSortsMajorCollectionsByDate() throws {
         let calendar = Calendar(identifier: .gregorian)
         let older = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 1)))

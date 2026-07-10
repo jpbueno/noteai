@@ -18,6 +18,40 @@ python3 -m tools.work_activity source-search --source teams --from 2026-07-01 --
 
 `daily-summary` reads the local NoteAI database through `NoteAILocalConnector`, extracts task candidates, deduplicates them, and prints Markdown. Slack delivery is opt-in and requires an explicit `--slack-user-id`.
 
+## Approval-Gated Daily Task Import
+
+`daily_task_approval` is the durable local seam between the previous-day Codex producer, the Slack approval automation, and NoteAI's native tasks table. Slack retrieval, delivery, and approver identity verification remain outside this module. The automation must verify JP's exact Slack user ID and the bound DM/thread before invoking `decide`.
+
+```bash
+python3 -m tools.work_activity.daily_task_approval stage --date 2026-07-09 --tasks-file /secure/candidates.json --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+python3 -m tools.work_activity.daily_task_approval render --date 2026-07-09 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+python3 -m tools.work_activity.daily_task_approval record-delivery --date 2026-07-09 --revision 1 --channel-id D123 --message-ts 1720000000.000100 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+python3 -m tools.work_activity.daily_task_approval decide --date 2026-07-09 --revision 1 --decision approved --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+python3 -m tools.work_activity.daily_task_approval apply --date 2026-07-09 --revision 1 --database "$HOME/Library/Application Support/NoteAI/meetings.sqlite" --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals" --backup-dir "$HOME/Library/Application Support/NoteAI/backups"
+python3 -m tools.work_activity.daily_task_approval expire --date 2026-07-09 --revision 1 --after-hours 24 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+```
+
+Candidate files use a strict schema:
+
+```json
+{
+  "tasks": [
+    {
+      "title": "Concise title",
+      "description": "Completion-focused description",
+      "sources": ["Slack", "Outlook"],
+      "dueDate": null,
+      "priority": null
+    }
+  ],
+  "sourceHealth": {"Slack": "available"}
+}
+```
+
+State is schema-versioned, process-locked, atomically replaced, and owner-readable only. `apply` requires an approved active revision, creates an owner-only SQLite backup, uses `BEGIN IMMEDIATE`, and writes completed records only to `tasks`. Each imported task stores a deterministic import key in both `source_action_item_id` and JSON `sourceActionItemID`; replay skips identical content and fails closed if the key is bound to different content. Work and completion timestamps use noon `America/New_York` to preserve the intended calendar day across time zones.
+
+The protected state contains normalized candidates and Slack delivery references only. Do not place raw source evidence, Slack bodies, credentials, tokens, or secrets in candidate files or state. CLI status output omits task descriptions; `render` is the explicit Slack-ready disclosure path.
+
 ## Slack And Teams JSON Interface
 
 `source-status`, `source-auth`, and `source-search` provide a stable JSON interface for automation and contract testing. The macOS app implements the same bounded source contract directly in Swift and launches `slack-cli` / `teams-cli` without a Python or shell dependency. Each valid harness invocation prints one JSON object with `schemaVersion: 1`, `success`, `source`, `action`, `status`, `message`, `data`, and `metadata`.

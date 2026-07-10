@@ -9,11 +9,11 @@ It never writes proposed work to `Todos`, and it never mutates NoteAI before a v
 ## Modules And Seams
 
 - The **source aggregation Module** is the Codex producer automation. Its Interface is a strict candidate JSON document containing sanitized task titles, descriptions, source labels, and source health.
-- The **approval Module** is `tools.work_activity.daily_task_approval`. It owns revision state, legal transitions, expiry, backups, deduplication, and transactional writes. This is the high-leverage Interface shared by both automations.
+- The **approval Module** is `tools.work_activity.daily_task_approval`. It owns revision state, legal transitions, Slack approval-evidence validation, expiry, backups, deduplication, and transactional writes. This is the high-leverage Interface shared by both automations.
 - The **Slack Adapter** is the connected Codex Slack app. The local `slack-cli` remains read-only and is not used to send approval messages.
 - The **NoteAI Adapter** is the approval Module's narrow SQLite writer. It writes only to `tasks` and validates the complete expected schema before opening a transaction.
 
-This design keeps Slack identity checks at the Slack seam and local persistence at the NoteAI seam, improving Locality without adding a hypothetical application-wide abstraction.
+The Slack Adapter supplies actor, channel, and message timestamp evidence. The approval Module enforces that evidence at its `decide` Interface and revalidates it before `apply`; local persistence remains at the NoteAI seam. This improves Locality without adding a hypothetical application-wide abstraction.
 
 ## Producer
 
@@ -44,21 +44,28 @@ EDIT YYYY-MM-DD R<N>: <requested changes>
 - Ambiguous text, reactions, commands from other users, and stale revision numbers are ignored.
 - Pending approvals expire after 48 hours and write nothing to NoteAI.
 
+Every decision call must carry the Slack event evidence; the approval message timestamp must be strictly newer than the recorded delivery timestamp:
+
+```bash
+python3 -m tools.work_activity.daily_task_approval decide --date 2026-07-09 --revision 1 --decision approved --actor-user-id U09BXNGD81L --channel-id D123 --approval-message-ts 1720000000.000200 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+```
+
 ## Idempotency And Recovery
 
 - One protected state file is used per source date.
-- Each candidate receives a deterministic import key stored in SQL `source_action_item_id` and JSON `sourceActionItemID`.
+- Each staged candidate receives a stable candidate ID. Unambiguous revisions preserve that ID, while same-title candidates with different descriptions receive different IDs.
+- Each candidate ID produces a deterministic import key stored in SQL `source_action_item_id` and JSON `sourceActionItemID`.
 - Replaying an applied revision returns the prior result.
 - A retry after a database commit but before state persistence discovers the deterministic keys and does not duplicate tasks.
-- Existing same-day tasks with the same normalized title are skipped.
+- Existing legacy same-day tasks without import keys are skipped only when normalized title and description both match; changed descriptions import independently.
 - Import-key content conflicts fail closed.
-- Every first apply creates an owner-only online SQLite backup before `BEGIN IMMEDIATE`.
+- The original owner-only online SQLite backup path is persisted before `BEGIN IMMEDIATE`; apply retries reuse that backup instead of snapshotting a post-import database.
 
 ## Privacy And Security
 
 - Candidate state contains concise task output, not raw Slack messages, email bodies, transcripts, credentials, or access tokens.
 - State directories are mode `0700`; state, lock, and backup files are mode `0600`.
-- Approval is bound operationally to JP's exact Slack identity and private DM.
+- Approval is bound in code to JP's exact Slack identity, the recorded delivery channel, and a newer Slack message timestamp. The evidence is persisted with the decision and revalidated by `apply`.
 - Logs contain dates, revision numbers, source health, counts, identifiers, and error classes only.
 - NoteAI schema mismatches abort before any write.
 
@@ -83,4 +90,4 @@ For a smoke test, use a temporary state directory and fixture database. Do not u
 
 ## Rollback
 
-If an approved import must be undone, stop further approval processing, identify the backup path in that revision's `applyResult`, restore the backup while NoteAI is closed, run `PRAGMA quick_check`, and then restart NoteAI. Keep the approval state for audit and idempotency analysis.
+If an approved import must be undone, stop further approval processing, identify the persisted `backupPath` on that revision (also returned in `applyResult` after a successful final state write), restore the backup while NoteAI is closed, run `PRAGMA quick_check`, and then restart NoteAI. Keep the approval state for audit and idempotency analysis.

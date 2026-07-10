@@ -20,13 +20,13 @@ python3 -m tools.work_activity source-search --source teams --from 2026-07-01 --
 
 ## Approval-Gated Daily Task Import
 
-`daily_task_approval` is the durable local seam between the previous-day Codex producer, the Slack approval automation, and NoteAI's native tasks table. Slack retrieval, delivery, and approver identity verification remain outside this module. The automation must verify JP's exact Slack user ID and the bound DM/thread before invoking `decide`.
+`daily_task_approval` is the durable local seam between the previous-day Codex producer, the Slack approval automation, and NoteAI's native tasks table. Slack retrieval and delivery remain outside this module. The `decide` command requires Slack evidence and enforces JP's exact user ID (`U09BXNGD81L`), the channel recorded by `record-delivery`, and an approval message timestamp newer than the delivery timestamp.
 
 ```bash
 python3 -m tools.work_activity.daily_task_approval stage --date 2026-07-09 --tasks-file /secure/candidates.json --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
 python3 -m tools.work_activity.daily_task_approval render --date 2026-07-09 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
 python3 -m tools.work_activity.daily_task_approval record-delivery --date 2026-07-09 --revision 1 --channel-id D123 --message-ts 1720000000.000100 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
-python3 -m tools.work_activity.daily_task_approval decide --date 2026-07-09 --revision 1 --decision approved --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
+python3 -m tools.work_activity.daily_task_approval decide --date 2026-07-09 --revision 1 --decision approved --actor-user-id U09BXNGD81L --channel-id D123 --approval-message-ts 1720000000.000200 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
 python3 -m tools.work_activity.daily_task_approval apply --date 2026-07-09 --revision 1 --database "$HOME/Library/Application Support/NoteAI/meetings.sqlite" --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals" --backup-dir "$HOME/Library/Application Support/NoteAI/backups"
 python3 -m tools.work_activity.daily_task_approval expire --date 2026-07-09 --revision 1 --after-hours 24 --state-dir "$HOME/Library/Application Support/NoteAI/daily-task-approvals"
 ```
@@ -48,9 +48,9 @@ Candidate files use a strict schema:
 }
 ```
 
-State is schema-versioned, process-locked, atomically replaced, and owner-readable only. `apply` requires an approved active revision, creates an owner-only SQLite backup, uses `BEGIN IMMEDIATE`, and writes completed records only to `tasks`. Each imported task stores a deterministic import key in both `source_action_item_id` and JSON `sourceActionItemID`; replay skips identical content and fails closed if the key is bound to different content. Work and completion timestamps use noon `America/New_York` to preserve the intended calendar day across time zones.
+State is schema-versioned, process-locked, atomically replaced, and owner-readable only. Staging assigns each normalized candidate a stable `candidateID`, preserves it across unambiguous revisions, and permits the same title when descriptions differ. `apply` requires valid persisted Slack approval evidence, plans and persists the original owner-only SQLite backup before opening the database transaction, uses `BEGIN IMMEDIATE`, and writes completed records only to `tasks`. A retry reuses that pre-import backup. Each imported task stores a deterministic candidate-based import key in both `source_action_item_id` and JSON `sourceActionItemID`; replay skips identical content and fails closed if the key is bound to different content. Legacy same-day rows without an import key are skipped only when normalized title and description both match. Work and completion timestamps use noon `America/New_York` to preserve the intended calendar day across time zones.
 
-The protected state contains normalized candidates and Slack delivery references only. Do not place raw source evidence, Slack bodies, credentials, tokens, or secrets in candidate files or state. CLI status output omits task descriptions; `render` is the explicit Slack-ready disclosure path.
+The protected state contains normalized candidates, candidate IDs, Slack delivery and approval references, and the backup path only. Do not place raw source evidence, Slack bodies, credentials, tokens, or secrets in candidate files or state. CLI status output omits task descriptions; `render` is the explicit Slack-ready disclosure path.
 
 ## Slack And Teams JSON Interface
 

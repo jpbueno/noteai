@@ -12,6 +12,7 @@ import tempfile
 import uuid
 from contextlib import closing, contextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterator
 from zoneinfo import ZoneInfo
@@ -36,6 +37,8 @@ NOTEAI_TASK_COLUMNS = {
 APPLE_REFERENCE_UNIX = 978307200.0
 NEW_YORK = ZoneInfo("America/New_York")
 IMPORT_NAMESPACE = uuid.UUID("22d8ead8-19a2-4e76-9ae4-303deaaad377")
+JP_SLACK_USER_ID = "U09BXNGD81L"
+SLACK_TIMESTAMP = re.compile(r"^[0-9]+\.[0-9]{6}$")
 DATE_PREFIX = re.compile(
     r"^(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4}|\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})"
@@ -65,6 +68,18 @@ def _clean_text(value: object, field: str) -> str:
     if not cleaned:
         raise ApprovalError(f"{field} must not be empty")
     return cleaned
+
+
+def _candidate_identity(task: dict[str, object]) -> str:
+    identity_fields = {
+        "title": task["title"],
+        "description": task["description"],
+        "dueDate": task["dueDate"],
+        "priority": task["priority"],
+    }
+    return json.dumps(
+        identity_fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
 
 
 def _canonical_payload(raw: object) -> dict[str, object]:
@@ -104,15 +119,7 @@ def _canonical_payload(raw: object) -> dict[str, object]:
             "dueDate": due_date,
             "priority": priority,
         }
-        identity_fields = {
-            "title": title,
-            "description": description,
-            "dueDate": due_date,
-            "priority": priority,
-        }
-        identity = json.dumps(
-            identity_fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        )
+        identity = _candidate_identity(canonical)
         existing = canonical_by_identity.get(identity)
         if existing is not None:
             existing["sources"] = sorted(set(existing["sources"]) | set(clean_sources))
@@ -131,6 +138,59 @@ def _canonical_payload(raw: object) -> dict[str, object]:
 def _content_hash(payload: dict[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _generated_candidate_id(task: dict[str, object]) -> str:
+    identity = f"candidate:{_candidate_identity(task)}"
+    return str(uuid.uuid5(IMPORT_NAMESPACE, identity)).upper()
+
+
+def _assign_candidate_ids(
+    tasks: list[dict[str, object]],
+    previous_tasks: object,
+) -> list[dict[str, object]]:
+    assigned = [dict(task) for task in tasks]
+    previous = (
+        [
+            task
+            for task in previous_tasks
+            if isinstance(task, dict) and isinstance(task.get("candidateID"), str)
+        ]
+        if isinstance(previous_tasks, list)
+        else []
+    )
+    used_ids: set[str] = set()
+
+    previous_by_identity = {_candidate_identity(task): task for task in previous}
+    for task in assigned:
+        match = previous_by_identity.get(_candidate_identity(task))
+        if match is not None and match["candidateID"] not in used_ids:
+            task["candidateID"] = match["candidateID"]
+            used_ids.add(str(match["candidateID"]))
+
+    unmatched_by_title: dict[str, list[dict[str, object]]] = {}
+    for task in assigned:
+        if "candidateID" not in task:
+            title_core = _normalized_title_core(str(task["title"]))
+            unmatched_by_title.setdefault(title_core, []).append(task)
+    for title_core, unmatched in unmatched_by_title.items():
+        prior = [
+            task
+            for task in previous
+            if task["candidateID"] not in used_ids
+            and _normalized_title_core(str(task["title"])) == title_core
+        ]
+        if len(unmatched) == 1 and len(prior) == 1:
+            unmatched[0]["candidateID"] = prior[0]["candidateID"]
+            used_ids.add(str(prior[0]["candidateID"]))
+
+    for task in assigned:
+        if "candidateID" not in task:
+            task["candidateID"] = _generated_candidate_id(task)
+    candidate_ids = [str(task["candidateID"]) for task in assigned]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ApprovalError("candidate tasks produce duplicate candidate IDs")
+    return assigned
 
 
 def _state_path(day: str, state_dir: Path) -> Path:
@@ -240,7 +300,13 @@ def stage(day: str, tasks_file: Path, state_dir: Path) -> dict[str, object]:
             raise ApprovalError("approval state date does not match its file name")
 
         current = _active_revision(state) if state["activeRevision"] else None
+        previous_tasks = current.get("tasks") if current is not None else None
+        staged_tasks = _assign_candidate_ids(payload["tasks"], previous_tasks)
         if current is not None and current.get("contentHash") == digest:
+            if current.get("tasks") != staged_tasks:
+                current["tasks"] = staged_tasks
+                current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+                _write_state_unlocked(day, state_dir, state)
             return state
         if current is not None and current.get("status") not in {
             "pending",
@@ -255,7 +321,7 @@ def stage(day: str, tasks_file: Path, state_dir: Path) -> dict[str, object]:
             "revision": revision_number,
             "status": "pending",
             "contentHash": digest,
-            "tasks": payload["tasks"],
+            "tasks": staged_tasks,
             "sourceHealth": payload["sourceHealth"],
             "createdAt": now,
             "updatedAt": now,
@@ -294,6 +360,56 @@ def render(day: str, state_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def _validated_slack_timestamp(value: object, field: str) -> tuple[str, Decimal]:
+    cleaned = _clean_text(value, field)
+    if not SLACK_TIMESTAMP.fullmatch(cleaned):
+        raise ApprovalError(f"{field} must be a valid Slack timestamp")
+    try:
+        parsed = Decimal(cleaned)
+    except InvalidOperation as exc:  # pragma: no cover - regex excludes invalid decimals.
+        raise ApprovalError(f"{field} must be a valid Slack timestamp") from exc
+    if not parsed.is_finite() or parsed <= 0:
+        raise ApprovalError(f"{field} must be a valid Slack timestamp")
+    return cleaned, parsed
+
+
+def _validated_approval_evidence(
+    delivery: object,
+    evidence: object,
+) -> dict[str, str]:
+    if not isinstance(delivery, dict):
+        raise ApprovalError("Slack delivery reference is missing or malformed")
+    raw_delivery_channel = delivery.get("channelID")
+    delivery_channel = _clean_text(raw_delivery_channel, "delivery channel ID")
+    if raw_delivery_channel != delivery_channel:
+        raise ApprovalError("Slack delivery reference is missing or malformed")
+    _, delivery_timestamp = _validated_slack_timestamp(
+        delivery.get("messageTS"), "delivery Slack timestamp"
+    )
+    if not isinstance(evidence, dict) or set(evidence) != {
+        "actorUserID",
+        "channelID",
+        "messageTS",
+    }:
+        raise ApprovalError("approved revision has no valid Slack approval evidence")
+    actor_user_id = evidence.get("actorUserID")
+    if actor_user_id != JP_SLACK_USER_ID:
+        raise ApprovalError("approval actor is not the authorized Slack user")
+    channel_id = evidence.get("channelID")
+    if channel_id != delivery_channel:
+        raise ApprovalError("approval channel does not match recorded delivery")
+    approval_message_ts, approval_timestamp = _validated_slack_timestamp(
+        evidence.get("messageTS"), "approval Slack timestamp"
+    )
+    if approval_timestamp <= delivery_timestamp:
+        raise ApprovalError("approval message timestamp must be newer than delivery")
+    return {
+        "actorUserID": actor_user_id,
+        "channelID": channel_id,
+        "messageTS": approval_message_ts,
+    }
+
+
 def record_delivery(
     day: str,
     revision: int,
@@ -304,7 +420,7 @@ def record_delivery(
     day = _validated_date(day)
     state_dir = Path(state_dir)
     channel_id = _clean_text(channel_id, "channel ID")
-    message_ts = _clean_text(message_ts, "message timestamp")
+    message_ts, _ = _validated_slack_timestamp(message_ts, "delivery Slack timestamp")
     delivery = {"channelID": channel_id, "messageTS": message_ts}
     with _state_lock(day, state_dir):
         state = _require_state_unlocked(day, state_dir)
@@ -326,6 +442,9 @@ def decide(
     day: str,
     revision: int,
     decision: str,
+    actor_user_id: str,
+    channel_id: str,
+    approval_message_ts: str,
     state_dir: Path,
 ) -> dict[str, object]:
     day = _validated_date(day)
@@ -341,8 +460,17 @@ def decide(
             )
         if not isinstance(current.get("delivery"), dict):
             raise ApprovalError("cannot decide before Slack delivery is recorded")
+        evidence = _validated_approval_evidence(
+            current["delivery"],
+            {
+                "actorUserID": actor_user_id,
+                "channelID": channel_id,
+                "messageTS": approval_message_ts,
+            },
+        )
         now = datetime.now(timezone.utc).isoformat()
         current["status"] = decision
+        current["approvalEvidence"] = evidence
         current["decidedAt"] = now
         current["updatedAt"] = now
         _write_state_unlocked(day, state_dir, state)
@@ -354,11 +482,14 @@ def _normalized_title_core(title: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", without_date.lower()).split())
 
 
-def _import_key(day: str, title: str) -> str:
-    core = _normalized_title_core(title)
-    if not core:
-        raise ApprovalError("task title has no usable import identity")
-    digest = hashlib.sha256(core.encode("utf-8")).hexdigest()[:32]
+def _import_key(day: str, candidate_id: str) -> str:
+    try:
+        parsed = uuid.UUID(candidate_id)
+    except (ValueError, AttributeError) as exc:
+        raise ApprovalError("staged task has an invalid candidate ID") from exc
+    if str(parsed).upper() != candidate_id:
+        raise ApprovalError("staged task has an invalid candidate ID")
+    digest = hashlib.sha256(candidate_id.encode("utf-8")).hexdigest()[:32]
     return f"codex-daily-task-summary:{day}:{digest}"
 
 
@@ -369,20 +500,48 @@ def _noon_timestamps(day: str) -> tuple[float, float]:
     return unix_value, unix_value - APPLE_REFERENCE_UNIX
 
 
-def _backup_database(
+def _planned_backup_path(
     backup_dir: Path,
     day: str,
     revision: int,
-    db: sqlite3.Connection,
 ) -> Path:
     backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(backup_dir, 0o700)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    backup_path = backup_dir / f"meetings-before-{day}-r{revision}-{stamp}.sqlite"
-    with closing(sqlite3.connect(backup_path)) as backup:
-        db.backup(backup)
+    return backup_dir.resolve() / f"meetings-before-{day}-r{revision}-{stamp}.sqlite"
+
+
+def _backup_database(backup_path: Path, db: sqlite3.Connection) -> None:
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{backup_path.name}.", suffix=".tmp", dir=backup_path.parent
+    )
+    os.close(descriptor)
+    try:
+        with closing(sqlite3.connect(temp_name)) as backup:
+            db.backup(backup)
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, backup_path)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
     os.chmod(backup_path, 0o600)
-    return backup_path
+
+
+def _validate_persisted_backup(backup_path: Path, backup_dir: Path) -> None:
+    if backup_path.parent != backup_dir.resolve():
+        raise ApprovalError("persisted backup path does not match the configured backup directory")
+    if not backup_path.is_file():
+        raise ApprovalError("persisted pre-import backup is missing")
+    try:
+        with closing(sqlite3.connect(f"{backup_path.as_uri()}?mode=ro", uri=True)) as backup:
+            result = backup.execute("PRAGMA quick_check").fetchone()
+    except sqlite3.Error as exc:
+        raise ApprovalError("persisted pre-import backup is unreadable") from exc
+    if result is None or result[0] != "ok":
+        raise ApprovalError("persisted pre-import backup failed integrity validation")
 
 
 def _expected_task(
@@ -391,7 +550,7 @@ def _expected_task(
     delivery: dict[str, object],
     now_unix: float,
 ) -> dict[str, object]:
-    import_key = _import_key(day, str(task["title"]))
+    import_key = _import_key(day, str(task.get("candidateID", "")))
     task_id = str(uuid.uuid5(IMPORT_NAMESPACE, import_key)).upper()
     noon_unix, noon_apple = _noon_timestamps(day)
     now_apple = now_unix - APPLE_REFERENCE_UNIX
@@ -469,7 +628,12 @@ def _assert_import_row_matches(row: sqlite3.Row, expected: dict[str, object]) ->
         raise ApprovalError(f"import key conflict for {expected['importKey']}")
 
 
-def _row_is_same_day_title(row: sqlite3.Row, day: str, title: str) -> bool:
+def _row_is_same_day_task(
+    row: sqlite3.Row,
+    day: str,
+    title: str,
+    description: str,
+) -> bool:
     timestamp = row["work_date"] or row["completed_date"] or row["created_date"]
     if timestamp is None:
         return False
@@ -477,7 +641,15 @@ def _row_is_same_day_title(row: sqlite3.Row, day: str, title: str) -> bool:
         row_day = datetime.fromtimestamp(float(timestamp), tz=NEW_YORK).date().isoformat()
     except (OSError, OverflowError, TypeError, ValueError):
         return False
-    return row_day == day and _normalized_title_core(str(row["title"])) == _normalized_title_core(title)
+    if row_day != day or _normalized_title_core(str(row["title"])) != _normalized_title_core(title):
+        return False
+    try:
+        task_json = json.loads(str(row["json_data"]))
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(task_json, dict) or not isinstance(task_json.get("description"), str):
+        return False
+    return " ".join(task_json["description"].split()) == " ".join(description.split())
 
 
 def apply(
@@ -494,16 +666,18 @@ def apply(
     with _state_lock(day, state_dir):
         state = _require_state_unlocked(day, state_dir)
         current = _require_active_number(state, revision)
-        if current.get("status") == "applied":
-            result = current.get("applyResult")
-            if not isinstance(result, dict):
-                raise ApprovalError("applied revision is missing its result")
-            return result
-        if current.get("status") != "approved":
+        status = current.get("status")
+        if status not in {"approved", "applied"}:
             raise ApprovalError("revision must be approved before apply")
         delivery = current.get("delivery")
         if not isinstance(delivery, dict):
             raise ApprovalError("approved revision has no bound Slack delivery")
+        _validated_approval_evidence(delivery, current.get("approvalEvidence"))
+        if status == "applied":
+            result = current.get("applyResult")
+            if not isinstance(result, dict):
+                raise ApprovalError("applied revision is missing its result")
+            return result
         if not database.is_file():
             raise ApprovalError(f"NoteAI database does not exist: {database}")
 
@@ -524,7 +698,30 @@ def apply(
                 raise ApprovalError(
                     f"unexpected tasks schema: expected {sorted(NOTEAI_TASK_COLUMNS)}, got {sorted(schema)}"
                 )
-            backup_path = _backup_database(backup_dir, day, revision, db)
+            persisted_backup = current.get("backupPath")
+            backup_created_at = current.get("backupCreatedAt")
+            if persisted_backup is None:
+                backup_path = _planned_backup_path(backup_dir, day, revision)
+                current["backupPath"] = str(backup_path)
+                current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+                _write_state_unlocked(day, state_dir, state)
+            elif isinstance(persisted_backup, str) and persisted_backup:
+                backup_path = Path(persisted_backup)
+            else:
+                raise ApprovalError("approved revision has an invalid backup path")
+
+            if backup_created_at is None:
+                if not backup_path.exists():
+                    _backup_database(backup_path, db)
+                _validate_persisted_backup(backup_path, backup_dir)
+                now = datetime.now(timezone.utc).isoformat()
+                current["backupCreatedAt"] = now
+                current["updatedAt"] = now
+                _write_state_unlocked(day, state_dir, state)
+            elif not isinstance(backup_created_at, str):
+                raise ApprovalError("approved revision has an invalid backup creation timestamp")
+            else:
+                _validate_persisted_backup(backup_path, backup_dir)
             try:
                 db.execute("BEGIN IMMEDIATE")
                 existing_rows = db.execute("SELECT * FROM tasks").fetchall()
@@ -543,7 +740,12 @@ def apply(
                     same_day = [
                         row
                         for row in existing_rows
-                        if _row_is_same_day_title(row, day, str(expected["title"]))
+                        if _row_is_same_day_task(
+                            row,
+                            day,
+                            str(expected["title"]),
+                            str(expected["description"]),
+                        )
                     ]
                     if len(same_day) > 1:
                         raise ApprovalError(
@@ -637,7 +839,18 @@ def _sanitized_state(state: dict[str, object]) -> dict[str, object]:
         "taskCount": len(current["tasks"]),
         "sourceHealth": current["sourceHealth"],
     }
-    for key in ("delivery", "createdAt", "updatedAt", "decidedAt", "expiredAt", "appliedAt", "applyResult"):
+    for key in (
+        "delivery",
+        "approvalEvidence",
+        "backupPath",
+        "backupCreatedAt",
+        "createdAt",
+        "updatedAt",
+        "decidedAt",
+        "expiredAt",
+        "appliedAt",
+        "applyResult",
+    ):
         if key in current:
             result[key] = current[key]
     return result
@@ -670,6 +883,9 @@ def _parser() -> argparse.ArgumentParser:
     decide_parser.add_argument(
         "--decision", choices=("approved", "rejected", "needs_revision"), required=True
     )
+    decide_parser.add_argument("--actor-user-id", required=True)
+    decide_parser.add_argument("--channel-id", required=True)
+    decide_parser.add_argument("--approval-message-ts", required=True)
 
     apply_parser = commands.add_parser("apply")
     common(apply_parser)
@@ -706,7 +922,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "decide":
             output = _sanitized_state(
-                decide(args.date, args.revision, args.decision, args.state_dir)
+                decide(
+                    args.date,
+                    args.revision,
+                    args.decision,
+                    args.actor_user_id,
+                    args.channel_id,
+                    args.approval_message_ts,
+                    args.state_dir,
+                )
             )
         elif args.command == "apply":
             output = apply(

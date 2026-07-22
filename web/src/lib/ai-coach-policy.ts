@@ -870,29 +870,15 @@ function isDuplicate(candidate: string, previousContents: string[]): boolean {
   });
 }
 
-const FUTURE_COMMITMENT_ACTION = String.raw`(?:[\p{L}][\p{L}\p{M}'\u2019-]*(?:\s+up)?)`;
-const OPTIONAL_PREDICATE_NEGATION = String.raw`(?:(?:not|never)\s+|not\s+only\s+)?`;
 const WILL_CONTRACTION = String.raw`(?:i|you|he|she|it|we|they)['\u2019]ll`;
 const BE_CONTRACTION = String.raw`(?:i['\u2019]m|(?:you|we|they)['\u2019]re|(?:he|she|it)['\u2019]s)`;
-const COMMITMENT_PREDICATE_SOURCE = String.raw`\b(?:will\s+${OPTIONAL_PREDICATE_NEGATION}(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|won['\u2019]t\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|${WILL_CONTRACTION}\s+${OPTIONAL_PREDICATE_NEGATION}(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:plans?|intends?|expects?)\s+${OPTIONAL_PREDICATE_NEGATION}to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:am|is|are)\s+${OPTIONAL_PREDICATE_NEGATION}going\s+to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:isn['\u2019]t|aren['\u2019]t)\s+going\s+to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|${BE_CONTRACTION}\s+${OPTIONAL_PREDICATE_NEGATION}going\s+to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|committed|agreed|promised)\b`;
+const PROSPECTIVE_AUXILIARY = String.raw`(?:am|is|are|isn['\u2019]t|aren['\u2019]t|${BE_CONTRACTION})`;
+const COMMITMENT_MARKER_SOURCE = String.raw`(?:\b${PROSPECTIVE_AUXILIARY}\s+(?:not\s+)?(?:going\s+to|gonna)\b|\b(?:going\s+to|gonna)\b|\b${WILL_CONTRACTION}\b|\bwon['\u2019]t\b|\bwill\b|\b(?:plans?|intends?|expects?)\s+(?:(?:not|never)\s+)?to\b|\b(?:committed|agreed|promised)\b)`;
 const COMMITMENT_CLAUSE_PATTERN = /[^.!?;\n]+(?:[.!?;]+|\n+|$)/g;
 const QUESTION_CLAUSE_PATTERN = /\?[.!?]*$/;
-const INQUIRY_CUE = String.raw`(?:whether|if|when|how|what|why|who|where)`;
-const INQUIRY_VERB = String.raw`(?:ask(?:s|ed|ing)?|check(?:s|ed|ing)?|clarif(?:y|ies|ied|ying)|confirm(?:s|ed|ing)?|determin(?:e|es|ed|ing)|prob(?:e|es|ed|ing)|verif(?:y|ies|ied|ying))`;
-const QUALIFIED_INQUIRY_PATTERN = new RegExp(
-  String.raw`\b${INQUIRY_VERB}\b[\s\S]*\b${INQUIRY_CUE}\b`,
-  "iu",
-);
-const EMBEDDED_INQUIRY_PATTERN = new RegExp(
-  String.raw`^(?:and\s+|or\s+)?${INQUIRY_CUE}\b`,
-  "iu",
-);
 const DIRECT_NEGATION_PATTERN = /\b(?:not|never)(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/i;
 const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/iu;
 const ANTI_ASSUMPTION_PATTERN = /^(?:please\s+)?(?:do\s+not|don['\u2019]t|never)\s+(?:assume|infer|presume|claim|state|treat)\b/i;
-const EPISTEMIC_ABSENCE_PATTERN = /\b(?:no\s+(?:evidence|indication|confirmation|proof)|(?:not|never)(?:\s+yet)?\s+confirm(?:ed|ing)?|cannot\s+confirm|can['\u2019]t\s+confirm|unconfirmed)\b/iu;
-const REPORTED_CONFIRMATION_REQUEST_PATTERN = /\bask(?:s|ed|ing)?\b[\s\S]*\bto\s+confirm\b/iu;
-const REPORTED_UNCERTAINTY_PATTERN = /\b(?:(?:remain(?:s|ed|ing)?|(?:is|are|was|were))\s+(?:still\s+)?unclear\b[\s\S]*\b(?:whether|if)\b|(?:i|we|they|he|she|it)\s+(?:(?:do|does|did)\s+not|don['\u2019]t|doesn['\u2019]t|didn['\u2019]t)\s+(?:think|believe|expect)\b)/iu;
 const NEGATED_PREDICATE_PATTERN = /\b(?:won['\u2019]t|isn['\u2019]t|aren['\u2019]t)\b/iu;
 const LOCAL_BOUNDARY_WORD = String.raw`(?:but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)`;
 const STRONG_PREDICATE_BOUNDARY_PATTERN = new RegExp(
@@ -904,13 +890,18 @@ const ACTOR_PREDICATE_BOUNDARY_PATTERN = new RegExp(
   "giu",
 );
 const COORDINATING_PREDICATE_BOUNDARY_PATTERN = /\b(?:and|or)\b[\s,:]*/giu;
-const TIMING_ANCHOR_PATTERN = /\b(?:end\s+of\s+(?:the\s+)?(?:day|week|month|quarter|year)|(?:next|this|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|today|tomorrow|tonight|yesterday|soon|later|morning|afternoon|evening|(?:next|this|last)\s+(?:day|week|month|quarter|year)|(?:first|second|third|fourth)\s+quarter|q[1-4]|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/giu;
-const CONTRACTION_ACTOR_PATTERN = /^(i|you|he|she|it|we|they)['\u2019](?:ll|m|re|s)\b/iu;
-const REPORTED_COMMITMENT_PATTERN = /^(?:committed|agreed|promised)$/iu;
-const REPORTED_ACTION_PATTERN = new RegExp(
-  String.raw`^\s*(?:to\s+)?(?:be\s+)?(${FUTURE_COMMITMENT_ACTION})\b`,
+const ACTION_COORDINATOR_PATTERN = /\b(?:and|or)\b/giu;
+const WEEKDAY_SOURCE = String.raw`(?:mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)`;
+const TIMING_ANCHOR_PATTERN = new RegExp(
+  String.raw`\b(?:end\s+of\s+(?:the\s+)?(?:business\s+)?(?:day|week|month|quarter|year)|(?:next|this|last)\s+${WEEKDAY_SOURCE}|today|tomorrow|tonight|yesterday|soon|later|morning|afternoon|evening|(?:next|this|last)\s+(?:day|week|month|quarter|year)|(?:first|second|third|fourth)\s+quarter|q[1-4]|${WEEKDAY_SOURCE})\b\.?`,
+  "giu",
+);
+const QUESTION_AUXILIARY_SOURCE = String.raw`(?:(?:is|are|was|were|do|does|did|has|have|had|can|could|won|would|should|might|must)n['\u2019]t|am|is|are|was|were|do|does|did|has|have|had|can|could|will|would|should|may|might|must)`;
+const TRAILING_QUESTION_TAG_PATTERN = new RegExp(
+  String.raw`(?:,|\s[-\u2013\u2014]\s)\s*(?:(?:and|or|but|so|yet|because)\s+)?(?:${QUESTION_AUXILIARY_SOURCE}\b|(?:correct|right|confirmed|agreed|true)\b)[^?]*\?[.!?]*$`,
   "iu",
 );
+const CONTRACTION_ACTOR_PATTERN = /^(i|you|he|she|it|we|they)['\u2019](?:ll|m|re|s)\b/iu;
 
 interface CommitmentFact {
   actorIdentity: string | null;
@@ -919,6 +910,7 @@ interface CommitmentFact {
   timingAnchors: Set<string>;
   affirmative: boolean;
   synthetic: boolean;
+  parseable: boolean;
 }
 
 interface PredicateMatchContext {
@@ -932,6 +924,19 @@ interface PredicateBoundary {
   end: number;
 }
 
+interface ParsedCommitmentAction {
+  index: number;
+  end: number;
+  text: string;
+  boundaryStart: number;
+}
+
+interface WordToken {
+  index: number;
+  end: number;
+  value: string;
+}
+
 function looksLikeUnsupportedCommitment(content: string): boolean {
   return commitmentFacts(content).some((fact) => fact.affirmative);
 }
@@ -941,44 +946,177 @@ function commitmentFacts(content: string): CommitmentFact[] {
 }
 
 function commitmentFactsFromClause(clause: string): CommitmentFact[] {
-  const matches: PredicateMatchContext[] = [
-    ...clause.matchAll(new RegExp(COMMITMENT_PREDICATE_SOURCE, "giu")),
+  const markers: PredicateMatchContext[] = [
+    ...clause.matchAll(new RegExp(COMMITMENT_MARKER_SOURCE, "giu")),
   ].map((match) => ({
     index: match.index ?? 0,
     end: (match.index ?? 0) + match[0].length,
     text: match[0],
   }));
-  if (matches.length === 0) return [];
+  if (markers.length === 0) return [];
 
-  const localStarts = matches.map((match, index) =>
-    predicateLocalBoundary(clause, match, matches[index - 1]),
+  const localStarts = markers.map((marker, index) =>
+    predicateLocalBoundary(clause, marker, markers[index - 1]),
   );
   let inheritedActorIdentity: string | null = null;
-  return matches.map((match, index) => {
+  const facts: CommitmentFact[] = [];
+
+  markers.forEach((marker, index) => {
     const localStart = localStarts[index]?.end ?? 0;
-    const localEnd = index + 1 < matches.length
-      ? localStarts[index + 1]?.start ?? matches[index + 1].index
+    const scopeEnd = index + 1 < markers.length
+      ? localStarts[index + 1]?.start ?? markers[index + 1].index
       : clause.length;
-    const prefix = clause.slice(localStart, match.index).trim();
-    const suffix = clause.slice(match.end, localEnd);
-    const factText = clause.slice(localStart, localEnd).trim();
-    const actorPrefix = predicateActorPrefix(clause, match, matches[index - 1]);
-    const actorIdentity = commitmentActorIdentity(actorPrefix, match.text)
+    const prefix = clause.slice(localStart, marker.index).trim();
+    const actorPrefix = predicateActorPrefix(clause, marker, markers[index - 1]);
+    const actorIdentity = commitmentActorIdentity(actorPrefix, marker.text)
       ?? inheritedActorIdentity;
     if (actorIdentity) inheritedActorIdentity = actorIdentity;
-    return {
-      actorIdentity,
-      actionIdentity: commitmentActionIdentity(match.text, suffix),
-      objectAnchors: groundingObjectAnchors(suffix),
-      timingAnchors: timingAnchors(factText),
-      affirmative: isAffirmativeCommitment(
-        QUESTION_CLAUSE_PATTERN.test(factText),
-        prefix,
-        match.text,
-      ),
-      synthetic: false,
-    };
+    const markerTail = clause.slice(marker.end, scopeEnd);
+    const questionTagOffset = trailingQuestionTagOffset(markerTail);
+    const semanticScopeEnd = questionTagOffset === null
+      ? scopeEnd
+      : marker.end + questionTagOffset;
+    const primaryAction = parseCommitmentAction(
+      clause,
+      marker.end,
+      semanticScopeEnd,
+      marker.index,
+      false,
+    );
+    const actions = primaryAction
+      ? [
+          primaryAction,
+          ...coordinatedCommitmentActions(clause, primaryAction.end, semanticScopeEnd),
+        ]
+      : [];
+    const scopeText = clause.slice(localStart, scopeEnd).trim();
+    const predicateText = clause.slice(marker.index, primaryAction?.end ?? marker.end);
+    const baseAffirmative = isAffirmativeCommitment(
+      commitmentScopeIsQuestion(scopeText, questionTagOffset),
+      prefix,
+      predicateText,
+    );
+    const scopeTimingAnchors = timingAnchors(clause.slice(localStart, semanticScopeEnd));
+
+    if (actions.length === 0) {
+      facts.push({
+        actorIdentity,
+        actionIdentity: null,
+        objectAnchors: groundingObjectAnchors(clause.slice(marker.end, semanticScopeEnd)),
+        timingAnchors: scopeTimingAnchors,
+        affirmative: baseAffirmative,
+        synthetic: false,
+        parseable: false,
+      });
+      return;
+    }
+
+    actions.forEach((action, actionIndex) => {
+      const objectEnd = actions[actionIndex + 1]?.boundaryStart ?? semanticScopeEnd;
+      const actionPredicateText = actionIndex === 0
+        ? predicateText
+        : clause.slice(action.boundaryStart, action.end);
+      facts.push({
+        actorIdentity,
+        actionIdentity: canonicalActionIdentity(action.text),
+        objectAnchors: groundingObjectAnchors(clause.slice(action.end, objectEnd)),
+        timingAnchors: scopeTimingAnchors,
+        affirmative: baseAffirmative
+          && !isDirectlyNegatedPredicate("", actionPredicateText),
+        synthetic: false,
+        parseable: true,
+      });
+    });
   });
+
+  return facts;
+}
+
+function parseCommitmentAction(
+  content: string,
+  start: number,
+  end: number,
+  boundaryStart: number,
+  coordinated: boolean,
+): ParsedCommitmentAction | null {
+  const tokens = wordTokens(content, start, end);
+  let tokenIndex = 0;
+  while (
+    tokenIndex < tokens.length
+    && isLeadingPredicateModifier(tokens[tokenIndex]?.value ?? "")
+  ) {
+    tokenIndex += 1;
+  }
+
+  const firstToken = tokens[tokenIndex];
+  if (!firstToken || NON_ACTION_HEAD_WORDS.has(firstToken.value)) return null;
+  if (coordinated && SHARED_ACTION_BLOCKING_WORDS.has(firstToken.value)) return null;
+
+  const nextToken = tokens[tokenIndex + 1];
+  const includesParticle = canonicalActionToken(firstToken.value) === "follow"
+    && nextToken?.value === "up";
+  const actionEnd = includesParticle ? nextToken.end : firstToken.end;
+  return {
+    index: firstToken.index,
+    end: actionEnd,
+    text: content.slice(firstToken.index, actionEnd),
+    boundaryStart,
+  };
+}
+
+function coordinatedCommitmentActions(
+  content: string,
+  start: number,
+  end: number,
+): ParsedCommitmentAction[] {
+  const coordinators = [
+    ...content.slice(start, end).matchAll(
+      new RegExp(ACTION_COORDINATOR_PATTERN.source, ACTION_COORDINATOR_PATTERN.flags),
+    ),
+  ].map((match) => ({
+    index: start + (match.index ?? 0),
+    end: start + (match.index ?? 0) + match[0].length,
+  }));
+
+  return coordinators.flatMap((coordinator, index) => {
+    const action = parseCommitmentAction(
+      content,
+      coordinator.end,
+      coordinators[index + 1]?.index ?? end,
+      coordinator.index,
+      true,
+    );
+    return action ? [action] : [];
+  });
+}
+
+function wordTokens(content: string, start: number, end: number): WordToken[] {
+  return [...content.slice(start, end).matchAll(/[\p{L}][\p{L}\p{M}'\u2019-]*/gu)]
+    .map((match) => {
+      const index = start + (match.index ?? 0);
+      return {
+        index,
+        end: index + match[0].length,
+        value: normalizedWords(match[0]).join(" "),
+      };
+    })
+    .filter((token) => token.value.length > 0);
+}
+
+function isLeadingPredicateModifier(value: string): boolean {
+  return LEADING_PREDICATE_WORDS.has(value) || PREDICATE_MODIFIER_WORDS.has(value);
+}
+
+function trailingQuestionTagOffset(value: string): number | null {
+  return TRAILING_QUESTION_TAG_PATTERN.exec(value)?.index ?? null;
+}
+
+function commitmentScopeIsQuestion(
+  scopeText: string,
+  questionTagOffset: number | null,
+): boolean {
+  if (!QUESTION_CLAUSE_PATTERN.test(scopeText)) return false;
+  return questionTagOffset === null;
 }
 
 function commitmentClauses(content: string): string[] {
@@ -1068,16 +1206,56 @@ function isAffirmativeCommitment(
 ): boolean {
   if (clauseIsQuestion) return false;
   if (
-    QUALIFIED_INQUIRY_PATTERN.test(prefix)
-    || EMBEDDED_INQUIRY_PATTERN.test(prefix)
-    || ANTI_ASSUMPTION_PATTERN.test(prefix)
-    || EPISTEMIC_ABSENCE_PATTERN.test(prefix)
-    || REPORTED_CONFIRMATION_REQUEST_PATTERN.test(prefix)
-    || REPORTED_UNCERTAINTY_PATTERN.test(prefix)
+    ANTI_ASSUMPTION_PATTERN.test(prefix)
+    || hasScopedUncertainty(prefix)
   ) {
     return false;
   }
   return !isDirectlyNegatedPredicate(prefix, predicateText);
+}
+
+function hasScopedUncertainty(prefix: string): boolean {
+  const words = commitmentWords(prefix);
+  if (words.length === 0) return false;
+
+  const hasInterrogative = words.some((word) => INTERROGATIVE_CUES.has(word));
+  const hasInquiryReport = words.some((word) => hasCategoryRoot(word, INQUIRY_ROOTS));
+  if (hasInterrogative && hasInquiryReport) return true;
+  if (INTERROGATIVE_CUES.has(words[0] ?? "")) return true;
+
+  const hasConfirmation = words.some((word) => hasCategoryRoot(word, CONFIRMATION_ROOTS));
+  const hasRequest = words.some((word) => hasCategoryRoot(word, REQUEST_ROOTS));
+  if (hasConfirmation && hasRequest) return true;
+
+  if (words.some((word) => hasCategoryRoot(word, UNCERTAINTY_ROOTS))) return true;
+
+  const hasEpistemicNoun = words.some((word) => hasCategoryRoot(word, EPISTEMIC_ROOTS));
+  if (
+    hasEpistemicNoun
+    && words.some((word) => EPISTEMIC_ABSENCE_CUES.has(word))
+  ) {
+    return true;
+  }
+
+  return words.some((word, index) =>
+    word === "not"
+    && words.slice(index + 1, index + 4).some(
+      (candidate) => hasCategoryRoot(candidate, NEGATED_KNOWLEDGE_ROOTS),
+    ),
+  );
+}
+
+function commitmentWords(value: string): string[] {
+  const expanded = value
+    .replace(/\u2019/gu, "'")
+    .replace(/\bwon't\b/giu, "will not")
+    .replace(/\bcannot\b/giu, "can not")
+    .replace(/\b([\p{L}]+)n't\b/giu, "$1 not");
+  return normalizedWords(expanded);
+}
+
+function hasCategoryRoot(value: string, roots: Set<string>): boolean {
+  return [...roots].some((root) => value.startsWith(root));
 }
 
 function isDirectlyNegatedPredicate(prefix: string, predicateText: string): boolean {
@@ -1132,24 +1310,6 @@ function canonicalActorAnchor(value: string): string {
   return genericActors[normalizedValue] ?? normalizedValue;
 }
 
-function commitmentActionIdentity(
-  predicateText: string,
-  suffix: string,
-): string | null {
-  if (REPORTED_COMMITMENT_PATTERN.test(predicateText)) {
-    const reportedAction = REPORTED_ACTION_PATTERN.exec(suffix)?.[1];
-    return reportedAction ? canonicalActionIdentity(reportedAction) : null;
-  }
-
-  const predicateWords = normalizedWords(predicateText);
-  const actionWords = predicateWords.at(-1) === "up"
-    ? predicateWords.slice(-2)
-    : predicateWords.slice(-1);
-  return actionWords.length > 0
-    ? canonicalActionIdentity(actionWords.join(" "))
-    : null;
-}
-
 function canonicalActionIdentity(value: string): string {
   return normalizedWords(value)
     .map(canonicalActionToken)
@@ -1195,13 +1355,32 @@ function canonicalActionToken(value: string): string {
 function timingAnchors(value: string): Set<string> {
   return new Set(
     [...value.matchAll(new RegExp(TIMING_ANCHOR_PATTERN.source, TIMING_ANCHOR_PATTERN.flags))]
-      .map((match) => normalizedWords(match[0]).filter((word) => word !== "the").join(" ")),
+      .map((match) => canonicalTimingAnchor(match[0])),
   );
+}
+
+function canonicalTimingAnchor(value: string): string {
+  return normalizedWords(value)
+    .filter((word) => word !== "the")
+    .map(canonicalWeekday)
+    .join(" ");
+}
+
+function canonicalWeekday(value: string): string {
+  if (value === "mon" || value === "monday") return "monday";
+  if (["tue", "tues", "tuesday"].includes(value)) return "tuesday";
+  if (value === "wed" || value === "wednesday") return "wednesday";
+  if (["thu", "thur", "thurs", "thursday"].includes(value)) return "thursday";
+  if (value === "fri" || value === "friday") return "friday";
+  if (value === "sat" || value === "saturday") return "saturday";
+  if (value === "sun" || value === "sunday") return "sunday";
+  return value;
 }
 
 function groundingObjectAnchors(value: string): Set<string> {
   return new Set(
     normalizedWords(value)
+      .map(canonicalWeekday)
       .map(stemWord)
       .filter((word) => word.length > 1 && !GROUNDING_IGNORED_TOKENS.has(word)),
   );
@@ -1215,6 +1394,7 @@ function syntheticActionItemFact(content: string): CommitmentFact {
     timingAnchors: timingAnchors(content),
     affirmative: true,
     synthetic: true,
+    parseable: true,
   };
 }
 
@@ -1249,6 +1429,7 @@ function commitmentFactsAreCompatible(
   candidate: CommitmentFact,
   evidence: CommitmentFact,
 ): boolean {
+  if (!candidate.parseable || !evidence.parseable) return false;
   if (candidate.actorIdentity && candidate.actorIdentity !== evidence.actorIdentity) {
     return false;
   }
@@ -1320,7 +1501,125 @@ const DUPLICATE_STOP_WORDS = new Set([
   "with",
 ]);
 
+const LEADING_PREDICATE_WORDS = new Set([
+  "be",
+  "been",
+  "being",
+  "have",
+  "never",
+  "not",
+  "only",
+  "to",
+]);
+
+const PREDICATE_MODIFIER_WORDS = new Set([
+  "actually",
+  "already",
+  "certainly",
+  "clearly",
+  "currently",
+  "definitely",
+  "eventually",
+  "explicitly",
+  "formally",
+  "immediately",
+  "just",
+  "later",
+  "likely",
+  "probably",
+  "promptly",
+  "quickly",
+  "soon",
+  "still",
+]);
+
+const NON_ACTION_HEAD_WORDS = new Set([
+  "a",
+  "an",
+  "end",
+  "how",
+  "if",
+  "last",
+  "next",
+  "the",
+  "this",
+  "today",
+  "tomorrow",
+  "when",
+  "where",
+  "whether",
+  "who",
+  "why",
+]);
+
+const SHARED_ACTION_BLOCKING_WORDS = new Set([
+  "am",
+  "are",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "had",
+  "has",
+  "have",
+  "is",
+  "may",
+  "might",
+  "must",
+  "should",
+  "was",
+  "were",
+  "will",
+  "would",
+]);
+
+const INTERROGATIVE_CUES = new Set([
+  "how",
+  "if",
+  "what",
+  "when",
+  "where",
+  "whether",
+  "who",
+  "why",
+]);
+
+const INQUIRY_ROOTS = new Set([
+  "ask",
+  "check",
+  "clarif",
+  "confirm",
+  "determin",
+  "probe",
+  "verif",
+  "wonder",
+]);
+const REQUEST_ROOTS = new Set(["ask", "request"]);
+const CONFIRMATION_ROOTS = new Set(["confirm"]);
+const UNCERTAINTY_ROOTS = new Set(["doubt", "uncertain", "unclear", "unconfirm", "unsure"]);
+const EPISTEMIC_ROOTS = new Set(["confirm", "evidence", "guarantee", "indicat", "proof"]);
+const EPISTEMIC_ABSENCE_CUES = new Set([
+  "insufficient",
+  "lack",
+  "lacking",
+  "lacks",
+  "no",
+  "not",
+  "without",
+]);
+const NEGATED_KNOWLEDGE_ROOTS = new Set([
+  "believ",
+  "confirm",
+  "expect",
+  "guarantee",
+  "know",
+  "sure",
+  "think",
+]);
+
 const ACTOR_PREFIX_IGNORED_WORDS = new Set([
+  ...PREDICATE_MODIFIER_WORDS,
   "a",
   "about",
   "an",

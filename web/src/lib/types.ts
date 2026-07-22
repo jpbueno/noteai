@@ -1,10 +1,23 @@
 export type CoachInsightType = "key_insight" | "talking_point" | "technical_answer" | "action_item" | "follow_up";
 
+export type CoachInsightBasis = "transcript" | "domainKnowledge" | "recommendation";
+
+export type CoachInsightPriority = "high" | "medium";
+
+export interface CoachInsightEvidence {
+  segmentId: number;
+  startTime: number;
+  endTime: number;
+}
+
 export interface CoachInsight {
   id: string;
   timestamp: string;
   type: CoachInsightType;
   content: string;
+  priority?: CoachInsightPriority;
+  basis?: CoachInsightBasis;
+  evidence?: CoachInsightEvidence[];
   /** When set, this entry is a chat message rather than an auto-generated insight. */
   role?: "user" | "assistant";
 }

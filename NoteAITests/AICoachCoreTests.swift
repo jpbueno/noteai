@@ -738,6 +738,104 @@ final class AICoachModelTests: XCTestCase {
     }
 }
 
+final class AICoachPanelPresentationTests: XCTestCase {
+    func testPresentationSeparatesAutoInsightsFromChatAndOrdersActiveGuidanceByPriority() {
+        let activeHighID = UUID()
+        let activeCriticalID = UUID()
+        let dismissedID = UUID()
+        let userID = UUID()
+        let assistantID = UUID()
+        let entries = [
+            CoachInsight(
+                id: userID,
+                timestamp: Date(timeIntervalSince1970: 10),
+                type: .keyInsight,
+                content: "What should I clarify?",
+                role: .user
+            ),
+            CoachInsight(
+                id: activeHighID,
+                timestamp: Date(timeIntervalSince1970: 40),
+                type: .talkingPoint,
+                content: "Confirm the production owner.",
+                priority: .high
+            ),
+            CoachInsight(
+                id: assistantID,
+                timestamp: Date(timeIntervalSince1970: 20),
+                type: .keyInsight,
+                content: "Ask which team owns launch approval.",
+                role: .assistant
+            ),
+            CoachInsight(
+                id: dismissedID,
+                timestamp: Date(timeIntervalSince1970: 50),
+                type: .followUp,
+                content: "Revisit the capacity plan.",
+                priority: .medium,
+                lifecycle: .dismissed
+            ),
+            CoachInsight(
+                id: activeCriticalID,
+                timestamp: Date(timeIntervalSince1970: 30),
+                type: .technicalAnswer,
+                content: "Block sizing until the p99 target is defined.",
+                priority: .critical
+            ),
+        ]
+
+        let presentation = CoachPanelPresentation(entries: entries)
+
+        XCTAssertEqual(presentation.activeInsights.map(\.id), [activeCriticalID, activeHighID])
+        XCTAssertEqual(presentation.historyInsights.map(\.id), [dismissedID])
+        XCTAssertEqual(presentation.chatMessages.map(\.id), [userID, assistantID])
+        XCTAssertEqual(presentation.autoInsightCount, 3)
+    }
+
+    func testPresentationOnlyExposesEvidenceForTranscriptBackedInsights() throws {
+        let firstReference = CoachEvidenceReference(segmentID: 7, startTime: 12, endTime: 15)
+        let secondReference = CoachEvidenceReference(segmentID: 9, startTime: 18, endTime: 21)
+        let transcriptInsight = CoachInsight(
+            type: .keyInsight,
+            content: "Confirm whether the p99 target includes queueing.",
+            basis: .transcript,
+            evidence: [firstReference, secondReference],
+            priority: .high
+        )
+        let recommendation = CoachInsight(
+            type: .talkingPoint,
+            content: "Recommend a staged rollout.",
+            basis: .recommendation,
+            evidence: [firstReference],
+            priority: .high
+        )
+
+        XCTAssertEqual(CoachPanelPresentation.primaryEvidence(for: transcriptInsight), firstReference)
+        XCTAssertNil(CoachPanelPresentation.primaryEvidence(for: recommendation))
+    }
+
+    func testTranscriptScrollStatePausesForEvidenceAndUserScrollingUntilResumed() throws {
+        var state = LiveTranscriptScrollState()
+        XCTAssertTrue(state.isFollowingLive)
+
+        state.revealSource(segmentID: 42)
+        let firstRequest = try XCTUnwrap(state.sourceRequest)
+        XCTAssertEqual(firstRequest.segmentID, 42)
+        XCTAssertFalse(state.isFollowingLive)
+
+        state.revealSource(segmentID: 42)
+        let repeatedRequest = try XCTUnwrap(state.sourceRequest)
+        XCTAssertNotEqual(repeatedRequest.sequence, firstRequest.sequence)
+
+        state.resumeFollowing()
+        XCTAssertTrue(state.isFollowingLive)
+        XCTAssertNil(state.sourceRequest)
+
+        state.userDidScroll()
+        XCTAssertFalse(state.isFollowingLive)
+    }
+}
+
 private struct FixedCoachClock: CoachClock {
     let now: Date
 

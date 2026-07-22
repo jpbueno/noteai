@@ -57,7 +57,7 @@
       "text_steps": ["NFC", "trim allowed collapsible whitespace", "collapse allowed whitespace runs to U+0020"],
       "comparison": "exact after normalization",
       "collapsible_whitespace_code_points": ["U+0020", "U+00A0", "U+1680", "U+2000-U+200A", "U+202F", "U+205F", "U+3000"],
-      "reject_code_points": ["U+0000-U+001F", "U+007F-U+009F", "U+061C", "U+200B-U+200F", "U+202A-U+202E", "U+2060", "U+2066-U+2069", "U+FEFF"],
+      "reject_code_points": ["U+0000-U+001F", "U+007F-U+009F", "U+061C", "U+200B-U+200F", "U+2028", "U+2029", "U+202A-U+202E", "U+2060", "U+2066-U+2069", "U+FEFF"],
       "unicode_version_rule": "Use each platform runtime's Unicode normalization tables; corpus NFC equivalence is the compatibility gate."
     },
     "derived_limits": {
@@ -457,7 +457,7 @@
     {
       "id": "reject-evidence-id-string",
       "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": "36", "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
-      "transcript_segments": [{"source_segment_id": 36, "text": "Capacity is missing."}],
+      "transcript_segments": [{"source_segment_id": "36", "text": "Capacity is missing."}],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
@@ -515,6 +515,18 @@
       "expected": {"outcome": "accepted", "derived": [{"content": "Ask: What is p99?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "p99", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
+      "id": "reject-question-line-separator-u2028",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is\u2028p99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-paragraph-separator-u2029",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is\u2029p99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
       "id": "accept-question-24-derived-words",
       "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Can a b c d e f g h i j k l m n o p q r s t u pass?", "priority": "high", "topic": "word-boundary"}]},
       "transcript_segments": [],
@@ -522,9 +534,9 @@
     },
     {
       "id": "accept-question-180-derived-scalars",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "priority": "high", "topic": "character-boundary"}]},
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is \ud83d\ude00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "priority": "high", "topic": "character-boundary"}]},
       "transcript_segments": [],
-      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: Is xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "character-boundary", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: Is \ud83d\ude00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "character-boundary", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-question-zero-width-space",
@@ -534,13 +546,13 @@
     },
     {
       "id": "reject-question-earlier-period",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Latency is fixed. Who verified it?", "priority": "high", "topic": "latency"}]},
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is latency fixed. Who verified it?", "priority": "high", "topic": "latency"}]},
       "transcript_segments": [],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-question-earlier-exclamation",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Capacity is ready! Who verified it?", "priority": "high", "topic": "capacity"}]},
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is capacity ready! Who verified it?", "priority": "high", "topic": "capacity"}]},
       "transcript_segments": [],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
@@ -601,19 +613,19 @@
     {
       "id": "reject-evidence-fractional-id",
       "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 1.5, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
-      "transcript_segments": [{"source_segment_id": 1, "text": "Capacity is missing."}],
+      "transcript_segments": [{"source_segment_id": 1.5, "text": "Capacity is missing."}],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-evidence-boolean-id",
       "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": true, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
-      "transcript_segments": [{"source_segment_id": 1, "text": "Capacity is missing."}],
+      "transcript_segments": [{"source_segment_id": true, "text": "Capacity is missing."}],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-evidence-unsafe-integer-id",
       "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 9007199254740992, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
-      "transcript_segments": [{"source_segment_id": 46, "text": "Capacity is missing."}],
+      "transcript_segments": [{"source_segment_id": 9007199254740992, "text": "Capacity is missing."}],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {

@@ -857,12 +857,46 @@ function isDuplicate(candidate: string, previousContents: string[]): boolean {
   });
 }
 
+const BASE_COMMITMENT_ACTION = String.raw`(?:complete|deliver|follow\s+up|provide|send|share|submit)`;
+const FUTURE_COMMITMENT_ACTION = String.raw`(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)`;
+const COMMITMENT_FORM_PATTERN = new RegExp(
+  String.raw`\b(?:will\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:plans?|intends?|expects?)\s+to\s+${BASE_COMMITMENT_ACTION}|committed|agreed|promised)\b`,
+  "gi",
+);
+const QUALIFIED_INQUIRY_PATTERN = /^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b(?:whether|if)\b/i;
+const NEGATED_PREFIX_PATTERN = /\b(?:not|never|no)\b(?:\s+[\p{L}\p{N}'-]+){0,6}\s*$/iu;
+const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t\b(?:\s+[\p{L}\p{N}'-]+){0,6}\s*$/iu;
+
 function looksLikeUnsupportedCommitment(content: string): boolean {
-  if (/\?\s*$/.test(content) || /^(ask|check|clarify|confirm|determine|probe)\b/i.test(content)) {
+  return commitmentClauses(content).some((clause) => {
+    for (const match of clause.matchAll(COMMITMENT_FORM_PATTERN)) {
+      const matchIndex = match.index ?? 0;
+      if (
+        !isQualifiedInquiry(clause, matchIndex)
+        && !isNegatedCommitment(clause, matchIndex)
+      ) {
+        return true;
+      }
+    }
     return false;
-  }
-  if (/\b(committed|agreed|promised)\b/i.test(content)) return true;
-  return /\b(customer|client|partner|they|we)\b[\s\S]{0,60}\bwill\s+(complete|deliver|follow up|provide|send|share|submit)\b/i.test(content);
+  });
+}
+
+function commitmentClauses(content: string): string[] {
+  return (content.match(/[^.!?;:\n]+(?:[.!?;:]+|\n+|$)/g) ?? [])
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
+function isQualifiedInquiry(clause: string, matchIndex: number): boolean {
+  return QUALIFIED_INQUIRY_PATTERN.test(clause.slice(0, matchIndex));
+}
+
+function isNegatedCommitment(clause: string, matchIndex: number): boolean {
+  const prefix = clause.slice(0, matchIndex);
+  const negation = prefix.match(NEGATED_PREFIX_PATTERN)?.[0].trim() ?? "";
+  if (/^(?:not\s+only|no\s+(?:doubt|question))\b/i.test(negation)) return false;
+  return Boolean(negation || NEGATED_CONTRACTION_PATTERN.test(prefix));
 }
 
 function normalizedExactText(value: string): string {

@@ -9,6 +9,26 @@ const fixedAdapters = {
   now: () => new Date("2026-07-22T16:00:00.000Z"),
 };
 
+const unsupportedCommitmentCases = [
+  "Customer will deliver results tomorrow.",
+  "Ask for logs; customer will deliver tomorrow.",
+  "Customer committed to deliver tomorrow. Is that confirmed?",
+  "Acme will deliver tomorrow.",
+  "I will send the results.",
+  "Customer will be delivering tomorrow.",
+  "Team will deliver results tomorrow.",
+  "Speaker promised to share benchmarks.",
+];
+
+const qualifiedCommitmentRecommendationCases = [
+  "Ask whether the customer will deliver results tomorrow.",
+  "Recommend asking whether Acme will deliver tomorrow.",
+  "Do not assume the customer agreed.",
+  "The customer has not agreed to deliver tomorrow.",
+  "How will the team deliver these results?",
+  "Confirm whether the team plans to deliver tomorrow.",
+];
+
 function segment(id, text = `Transcript segment ${id}`) {
   return {
     id,
@@ -405,6 +425,65 @@ test("admission preserves valid transcript evidence identifiers and timestamps",
       evidence: [{ segmentId: 12, startTime: 120, endTime: 128 }],
     },
   ]);
+});
+
+test("commitment conformance rejects every ungrounded declarative claim", () => {
+  for (const content of unsupportedCommitmentCases) {
+    const result = coachPolicy.admit(
+      JSON.stringify([candidate(content)]),
+      buildContext(),
+      fixedAdapters,
+    );
+
+    assert.equal(result.status, "rejected", content);
+    assert.deepEqual(
+      result.rejections.map((item) => item.reason),
+      ["unsupported_commitment"],
+      content,
+    );
+  }
+});
+
+test("commitment conformance allows qualified non-transcript recommendations", () => {
+  for (const content of qualifiedCommitmentRecommendationCases) {
+    const result = coachPolicy.admit(
+      JSON.stringify([candidate(content)]),
+      buildContext(),
+      fixedAdapters,
+    );
+
+    assert.equal(result.status, "insights", content);
+    assert.equal(result.insights[0].content, content);
+  }
+});
+
+test("commitment conformance allows transcript-grounded equivalents with evidence", () => {
+  const cases = [
+    ...unsupportedCommitmentCases.map((content) => ({ content, type: "key_insight" })),
+    { content: unsupportedCommitmentCases[0], type: "action_item" },
+  ];
+
+  for (const [index, entry] of cases.entries()) {
+    const context = buildContext({ segments: [segment(index + 20, entry.content)] });
+    const result = coachPolicy.admit(
+      JSON.stringify([
+        candidate(entry.content, {
+          type: entry.type,
+          basis: "transcript",
+          source_segment_ids: [index + 20],
+        }),
+      ]),
+      context,
+      fixedAdapters,
+    );
+
+    assert.equal(result.status, "insights", entry.content);
+    assert.deepEqual(result.insights[0].evidence, [{
+      segmentId: index + 20,
+      startTime: (index + 20) * 10,
+      endTime: (index + 20) * 10 + 8,
+    }]);
+  }
 });
 
 test("admission rejects unsupported commitments and invalid transcript evidence", () => {

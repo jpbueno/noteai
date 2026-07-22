@@ -19,9 +19,17 @@ const unsupportedCommitmentCases = [
   "Team will deliver results tomorrow.",
   "Speaker promised to share benchmarks.",
   "Customer is going to deliver tomorrow.",
+  "Customer is going to be delivering results tomorrow.",
+  "We'll send results tomorrow.",
+  "We’ll send results tomorrow.",
+  "We're going to deliver results tomorrow.",
+  "We’re going to deliver results tomorrow.",
   "Ask for logs and customer will deliver tomorrow.",
   "Ask whether logs are available, but customer will deliver tomorrow.",
+  "Ask whether customer will deliver results, and partner will send logs tomorrow.",
+  "Do not assume customer agreed while partner will deliver results tomorrow.",
   "Do not speculate about timing because customer will deliver tomorrow.",
+  "They asked for logs and customer will deliver tomorrow.",
 ];
 
 const qualifiedCommitmentRecommendationCases = [
@@ -34,6 +42,11 @@ const qualifiedCommitmentRecommendationCases = [
   "Ask whether: customer will deliver tomorrow.",
   "Customer will deliver tomorrow?",
   "Ask when the customer will deliver results.",
+  "Please do not assume the customer agreed.",
+  "Don’t assume the customer agreed.",
+  "Please don’t assume the customer agreed.",
+  "Customer won't deliver results tomorrow.",
+  "Customer won’t deliver results tomorrow.",
 ];
 
 function segment(id, text = `Transcript segment ${id}`) {
@@ -521,33 +534,107 @@ test("commitment conformance allows transcript-grounded equivalents with evidenc
 
 test("transcript commitment grounding rejects noncommittal, unrelated, and inquiry evidence", () => {
   const evidenceCases = [
-    "No commitment was discussed.",
-    "Partner will deliver logs tomorrow.",
-    "Will the customer deliver results tomorrow?",
+    { candidate: "Customer will deliver results tomorrow.", evidence: "No commitment was discussed." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "Partner will deliver logs tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "Will the customer deliver results tomorrow?" },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "Partner will deliver results tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "Customer will deliver results next quarter." },
+    { candidate: "Customer will deliver benchmark results tomorrow.", evidence: "Customer will deliver benchmark documentation tomorrow." },
+    ...[
+      "asked",
+      "checked",
+      "clarified",
+      "confirmed",
+      "determined",
+      "probed",
+      "verified",
+    ].map((verb) => ({
+      candidate: "Customer will deliver results tomorrow.",
+      evidence: `They ${verb} whether the customer will deliver results tomorrow.`,
+    })),
+    ...[
+      "There is no evidence the customer will deliver results tomorrow.",
+      "There is no indication the customer will deliver results tomorrow.",
+      "There is no confirmation the customer will deliver results tomorrow.",
+      "It is not confirmed that the customer will deliver results tomorrow.",
+      "We cannot confirm that the customer will deliver results tomorrow.",
+      "It is unconfirmed that the customer will deliver results tomorrow.",
+      "Customer has not confirmed it will deliver results tomorrow.",
+    ].map((evidence) => ({
+      candidate: "Customer will deliver results tomorrow.",
+      evidence,
+    })),
   ];
 
-  for (const [index, evidenceText] of evidenceCases.entries()) {
+  for (const [index, entry] of evidenceCases.entries()) {
     for (const type of ["key_insight", "action_item"]) {
       const segmentID = index + 40;
       const result = coachPolicy.admit(
         JSON.stringify([
-          candidate("Customer will deliver results tomorrow.", {
+          candidate(entry.candidate, {
             type,
             basis: "transcript",
             source_segment_ids: [segmentID],
           }),
         ]),
-        buildContext({ segments: [segment(segmentID, evidenceText)] }),
+        buildContext({ segments: [segment(segmentID, entry.evidence)] }),
         fixedAdapters,
       );
 
-      assert.equal(result.status, "rejected", `${type}: ${evidenceText}`);
+      assert.equal(result.status, "rejected", `${type}: ${entry.evidence}`);
       assert.deepEqual(
         result.rejections.map((item) => item.reason),
         ["invalid_evidence"],
-        `${type}: ${evidenceText}`,
+        `${type}: ${entry.evidence}`,
       );
     }
+  }
+});
+
+test("transcript grounding accepts compatible actors and actorless action wording", () => {
+  const cases = [
+    {
+      candidate: "Customer will deliver results tomorrow.",
+      evidence: "Customer will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Customer will deliver results tomorrow.",
+      evidence: "Customer: We will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Acme will deliver results tomorrow.",
+      evidence: "Acme will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "I will send results tomorrow.",
+      evidence: "I will send results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Track utilization data.",
+      evidence: "The customer committed to sending utilization data.",
+      type: "action_item",
+    },
+  ];
+
+  for (const [index, entry] of cases.entries()) {
+    const segmentID = index + 80;
+    const result = coachPolicy.admit(
+      JSON.stringify([
+        candidate(entry.candidate, {
+          type: entry.type,
+          basis: "transcript",
+          source_segment_ids: [segmentID],
+        }),
+      ]),
+      buildContext({ segments: [segment(segmentID, entry.evidence)] }),
+      fixedAdapters,
+    );
+
+    assert.equal(result.status, "insights", `${entry.candidate} <= ${entry.evidence}`);
   }
 });
 

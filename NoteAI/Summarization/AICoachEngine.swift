@@ -60,11 +60,12 @@ final class AICoachEngine: AICoachGenerating, @unchecked Sendable {
     }
 
     static func makeAnalysisMessages(request: CoachAnalysisRequest) -> [(role: String, content: String)] {
+        let deltaSegmentIDs = Set(request.transcriptDelta.map(\.id))
         let payload = AnalysisPromptPayload(
             sessionID: request.sessionID,
             rollingContext: request.rollingContext,
             transcriptDelta: request.transcriptDelta,
-            recentTranscript: request.recentTranscript,
+            recentTranscript: request.recentTranscript.filter { !deltaSegmentIDs.contains($0.id) },
             priorInsights: request.priorInsights.map(CoachPromptInsight.init)
         )
         return [

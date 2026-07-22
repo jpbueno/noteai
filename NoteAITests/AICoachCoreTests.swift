@@ -10,6 +10,8 @@ final class AICoachContextTests: XCTestCase {
             failureRetryInterval: 30,
             maxRecentSegments: 6,
             maxDeltaSegments: 3,
+            maxTranscriptCharacters: 9_000,
+            maxSpeakerCharacters: 80,
             maxRollingContextCharacters: 120,
             maxChatMessages: 4
         ))
@@ -51,6 +53,8 @@ final class AICoachContextTests: XCTestCase {
             failureRetryInterval: 30,
             maxRecentSegments: 12,
             maxDeltaSegments: 6,
+            maxTranscriptCharacters: 9_000,
+            maxSpeakerCharacters: 80,
             maxRollingContextCharacters: 500,
             maxChatMessages: 4
         ))
@@ -89,6 +93,8 @@ final class AICoachContextTests: XCTestCase {
             failureRetryInterval: 30,
             maxRecentSegments: 12,
             maxDeltaSegments: 6,
+            maxTranscriptCharacters: 9_000,
+            maxSpeakerCharacters: 80,
             maxRollingContextCharacters: 500,
             maxChatMessages: 4
         ))
@@ -110,6 +116,38 @@ final class AICoachContextTests: XCTestCase {
             now: start.addingTimeInterval(30)
         )
         XCTAssertEqual(retry?.transcriptDelta.map(\.id), [1, 2])
+    }
+
+    func testAnalysisRequestBoundsTranscriptCharactersAndSpeakerMetadata() throws {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 0,
+            failureRetryInterval: 0,
+            maxRecentSegments: 6,
+            maxDeltaSegments: 6,
+            maxTranscriptCharacters: 40,
+            maxSpeakerCharacters: 8,
+            maxRollingContextCharacters: 120,
+            maxChatMessages: 4
+        ))
+        let oversized = TranscriptSegment(
+            id: 1,
+            text: String(repeating: "context ", count: 50),
+            startTime: 0,
+            endTime: 1,
+            speaker: String(repeating: "speaker", count: 20)
+        )
+
+        let request = try XCTUnwrap(context.prepareAnalysis(
+            sessionID: UUID(),
+            transcript: [oversized],
+            now: Date()
+        ))
+
+        XCTAssertLessThanOrEqual(request.recentTranscript.reduce(0) { $0 + $1.text.count }, 40)
+        XCTAssertLessThanOrEqual(request.transcriptDelta.reduce(0) { $0 + $1.text.count }, 40)
+        XCTAssertEqual(request.recentTranscript.first?.speaker?.count, 8)
     }
 
     private func makeSegments(_ ids: ClosedRange<Int>) -> [TranscriptSegment] {
@@ -447,6 +485,48 @@ final class AICoachEngineTests: XCTestCase {
         XCTAssertFalse(messages[0].content.contains(transcriptText))
         XCTAssertTrue(messages.dropFirst().contains { $0.content.contains(transcriptText) })
         XCTAssertTrue(messages[0].content.localizedCaseInsensitiveContains("untrusted"))
+    }
+
+    func testAnalysisMessagesDoNotDuplicateDeltaSegmentsInRecentContext() throws {
+        let request = CoachAnalysisRequest(
+            sessionID: UUID(),
+            transcriptDelta: [CoachTranscriptExcerpt(
+                id: 2,
+                text: "new evidence",
+                startTime: 1,
+                endTime: 2,
+                speaker: "customer"
+            )],
+            recentTranscript: [
+                CoachTranscriptExcerpt(
+                    id: 1,
+                    text: "prior context",
+                    startTime: 0,
+                    endTime: 1,
+                    speaker: "customer"
+                ),
+                CoachTranscriptExcerpt(
+                    id: 2,
+                    text: "new evidence",
+                    startTime: 1,
+                    endTime: 2,
+                    speaker: "customer"
+                ),
+            ],
+            rollingContext: "",
+            priorInsights: []
+        )
+
+        let message = try XCTUnwrap(AICoachEngine.makeAnalysisMessages(request: request).last?.content)
+        let json = try XCTUnwrap(message.split(separator: "\n", maxSplits: 1).last)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let recent = try XCTUnwrap(object["recentTranscript"] as? [[String: Any]])
+        let delta = try XCTUnwrap(object["transcriptDelta"] as? [[String: Any]])
+
+        XCTAssertEqual(recent.compactMap { $0["id"] as? Int }, [1])
+        XCTAssertEqual(delta.compactMap { $0["id"] as? Int }, [2])
     }
 }
 
@@ -959,6 +1039,8 @@ private extension CoachContextPolicy {
         failureRetryInterval: 0,
         maxRecentSegments: 12,
         maxDeltaSegments: 6,
+        maxTranscriptCharacters: 9_000,
+        maxSpeakerCharacters: 80,
         maxRollingContextCharacters: 500,
         maxChatMessages: 6
     )

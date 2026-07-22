@@ -7,6 +7,8 @@ struct CoachContextPolicy: Equatable, Sendable {
     let failureRetryInterval: TimeInterval
     let maxRecentSegments: Int
     let maxDeltaSegments: Int
+    let maxTranscriptCharacters: Int
+    let maxSpeakerCharacters: Int
     let maxRollingContextCharacters: Int
     let maxChatMessages: Int
 
@@ -17,6 +19,8 @@ struct CoachContextPolicy: Equatable, Sendable {
         failureRetryInterval: 30,
         maxRecentSegments: 24,
         maxDeltaSegments: 12,
+        maxTranscriptCharacters: 9_000,
+        maxSpeakerCharacters: 80,
         maxRollingContextCharacters: 1_200,
         maxChatMessages: 12
     )
@@ -131,11 +135,12 @@ struct CoachContext: Sendable {
         guard isAnalysisReady(transcript: transcript, now: now) else { return nil }
 
         updateRollingContext(with: transcript)
-        let recent = transcript.suffix(policy.maxRecentSegments).map(CoachTranscriptExcerpt.init(segment:))
-        let delta = transcript
+        let recent = boundedTranscriptExcerpts(from: transcript)
+        let deltaSegmentIDs = Set(transcript
             .dropFirst(analyzedSegmentCount)
             .suffix(policy.maxDeltaSegments)
-            .map(CoachTranscriptExcerpt.init(segment:))
+            .map(\.id))
+        let delta = recent.filter { deltaSegmentIDs.contains($0.id) }
 
         return CoachAnalysisRequest(
             sessionID: sessionID,
@@ -168,7 +173,7 @@ struct CoachContext: Sendable {
         return CoachQuestionRequest(
             sessionID: sessionID,
             question: question,
-            recentTranscript: transcript.suffix(policy.maxRecentSegments).map(CoachTranscriptExcerpt.init(segment:)),
+            recentTranscript: boundedTranscriptExcerpts(from: transcript),
             rollingContext: rollingContext,
             priorInsights: priorInsights,
             chatHistory: Array(chatHistory.suffix(policy.maxChatMessages))
@@ -188,11 +193,19 @@ struct CoachContext: Sendable {
         let upperBound = max(0, transcript.count - policy.maxRecentSegments)
         guard upperBound > rolledSegmentCount else { return }
 
-        let contextLines: [String] = transcript[rolledSegmentCount..<upperBound]
-            .map { segment -> String in
-                let speaker = segment.speaker.map { " \($0)" } ?? ""
-                return "[\(segment.id) \(segment.formattedTimestamp)\(speaker)] \(segment.text)"
-            }
+        var remainingCharacters = policy.maxRollingContextCharacters
+        var contextLines: [String] = []
+        for segment in transcript[rolledSegmentCount..<upperBound].reversed() {
+            guard remainingCharacters > 0 else { break }
+            let speaker = boundedSpeaker(segment.speaker).map { " \($0)" } ?? ""
+            let prefix = "[\(segment.id) \(segment.formattedTimestamp)\(speaker)] "
+            let availableTextCharacters = max(0, remainingCharacters - prefix.count)
+            guard availableTextCharacters > 0 else { break }
+            let text = String(segment.text.suffix(availableTextCharacters))
+            let line = prefix + text
+            contextLines.insert(line, at: 0)
+            remainingCharacters -= line.count + 1
+        }
         let additions = contextLines.joined(separator: "\n")
         rollingContext = [rollingContext, additions]
             .filter { !$0.isEmpty }
@@ -201,5 +214,44 @@ struct CoachContext: Sendable {
             rollingContext = String(rollingContext.suffix(policy.maxRollingContextCharacters))
         }
         rolledSegmentCount = upperBound
+    }
+
+    private func boundedTranscriptExcerpts(
+        from transcript: [TranscriptSegment]
+    ) -> [CoachTranscriptExcerpt] {
+        var excerpts: [CoachTranscriptExcerpt] = []
+        var characterCount = 0
+
+        for segment in transcript.reversed() {
+            guard excerpts.count < policy.maxRecentSegments else { break }
+            var text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+
+            let remainingCharacters = policy.maxTranscriptCharacters - characterCount
+            guard remainingCharacters > 0 else { break }
+            if text.count > remainingCharacters {
+                guard excerpts.isEmpty else { break }
+                text = String(text.suffix(remainingCharacters))
+            }
+
+            excerpts.insert(CoachTranscriptExcerpt(
+                id: segment.id,
+                text: text,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                speaker: boundedSpeaker(segment.speaker)
+            ), at: 0)
+            characterCount += text.count
+        }
+
+        return excerpts
+    }
+
+    private func boundedSpeaker(_ speaker: String?) -> String? {
+        guard let trimmed = speaker?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return String(trimmed.prefix(policy.maxSpeakerCharacters))
     }
 }

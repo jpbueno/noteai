@@ -20,6 +20,9 @@ const unsupportedCommitmentCases = [
   "Speaker promised to share benchmarks.",
   "Customer is going to deliver tomorrow.",
   "Customer is going to be delivering results tomorrow.",
+  "Customer will upload the report tomorrow.",
+  "We'll email the customer tomorrow.",
+  "We are going to review the plan next week.",
   "We'll send results tomorrow.",
   "We’ll send results tomorrow.",
   "We're going to deliver results tomorrow.",
@@ -30,6 +33,7 @@ const unsupportedCommitmentCases = [
   "Do not assume customer agreed while partner will deliver results tomorrow.",
   "Do not speculate about timing because customer will deliver tomorrow.",
   "They asked for logs and customer will deliver tomorrow.",
+  "Customer will deliver results, but will partner send logs tomorrow?",
 ];
 
 const qualifiedCommitmentRecommendationCases = [
@@ -494,6 +498,14 @@ test("commitment conformance rejects future domain claims but allows present cap
     buildContext(),
     fixedAdapters,
   );
+  const presentTechnicalGuidance = coachPolicy.admit(
+    JSON.stringify([candidate("Dynamo reviews routing state continuously.", {
+      type: "technical_answer",
+      basis: "domain_knowledge",
+    })]),
+    buildContext(),
+    fixedAdapters,
+  );
 
   assert.equal(futureClaim.status, "rejected");
   assert.deepEqual(futureClaim.rejections.map((item) => item.reason), [
@@ -501,6 +513,7 @@ test("commitment conformance rejects future domain claims but allows present cap
   ]);
   assert.equal(presentCapability.status, "insights");
   assert.equal(presentCapability.insights[0].content, "Dynamo provides cache-aware routing.");
+  assert.equal(presentTechnicalGuidance.status, "insights");
 });
 
 test("commitment conformance allows transcript-grounded equivalents with evidence", () => {
@@ -540,6 +553,14 @@ test("transcript commitment grounding rejects noncommittal, unrelated, and inqui
     { candidate: "Customer will deliver results tomorrow.", evidence: "Partner will deliver results tomorrow." },
     { candidate: "Customer will deliver results tomorrow.", evidence: "Customer will deliver results next quarter." },
     { candidate: "Customer will deliver benchmark results tomorrow.", evidence: "Customer will deliver benchmark documentation tomorrow." },
+    { candidate: "Customer: We will deliver results tomorrow.", evidence: "Partner: We will deliver results tomorrow." },
+    { candidate: "Customer will deliver results by end of day.", evidence: "Customer will deliver results by end of week." },
+    { candidate: "Customer will deliver results next Friday.", evidence: "Customer will deliver results this Friday." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "Customer will follow up on results tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "They asked customer to confirm customer will deliver results tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "There is no proof that customer will deliver results tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "It remains unclear whether customer will deliver results tomorrow." },
+    { candidate: "Customer will deliver results tomorrow.", evidence: "I don't think customer will deliver results tomorrow." },
     ...[
       "asked",
       "checked",
@@ -604,6 +625,11 @@ test("transcript grounding accepts compatible actors and actorless action wordin
       type: "key_insight",
     },
     {
+      candidate: "Customer will deliver results tomorrow.",
+      evidence: "Customer, after reviewing the plan, will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
       candidate: "Acme will deliver results tomorrow.",
       evidence: "Acme will deliver results tomorrow.",
       type: "key_insight",
@@ -611,6 +637,21 @@ test("transcript grounding accepts compatible actors and actorless action wordin
     {
       candidate: "I will send results tomorrow.",
       evidence: "I will send results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "We'll send results tomorrow.",
+      evidence: "we will send results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "we’ll send results tomorrow.",
+      evidence: "We will send results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Customer will deliver results tomorrow.",
+      evidence: "Customer will be delivering results tomorrow.",
       type: "key_insight",
     },
     {

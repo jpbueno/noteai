@@ -870,7 +870,7 @@ function isDuplicate(candidate: string, previousContents: string[]): boolean {
   });
 }
 
-const FUTURE_COMMITMENT_ACTION = String.raw`(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)`;
+const FUTURE_COMMITMENT_ACTION = String.raw`(?:[\p{L}][\p{L}\p{M}'\u2019-]*(?:\s+up)?)`;
 const OPTIONAL_PREDICATE_NEGATION = String.raw`(?:(?:not|never)\s+|not\s+only\s+)?`;
 const WILL_CONTRACTION = String.raw`(?:i|you|he|she|it|we|they)['\u2019]ll`;
 const BE_CONTRACTION = String.raw`(?:i['\u2019]m|(?:you|we|they)['\u2019]re|(?:he|she|it)['\u2019]s)`;
@@ -890,19 +890,31 @@ const EMBEDDED_INQUIRY_PATTERN = new RegExp(
 const DIRECT_NEGATION_PATTERN = /\b(?:not|never)(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/i;
 const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/iu;
 const ANTI_ASSUMPTION_PATTERN = /^(?:please\s+)?(?:do\s+not|don['\u2019]t|never)\s+(?:assume|infer|presume|claim|state|treat)\b/i;
-const EPISTEMIC_ABSENCE_PATTERN = /\b(?:no\s+(?:evidence|indication|confirmation)|(?:not|never)(?:\s+yet)?\s+confirm(?:ed|ing)?|cannot\s+confirm|can['\u2019]t\s+confirm|unconfirmed)\b/iu;
+const EPISTEMIC_ABSENCE_PATTERN = /\b(?:no\s+(?:evidence|indication|confirmation|proof)|(?:not|never)(?:\s+yet)?\s+confirm(?:ed|ing)?|cannot\s+confirm|can['\u2019]t\s+confirm|unconfirmed)\b/iu;
+const REPORTED_CONFIRMATION_REQUEST_PATTERN = /\bask(?:s|ed|ing)?\b[\s\S]*\bto\s+confirm\b/iu;
+const REPORTED_UNCERTAINTY_PATTERN = /\b(?:(?:remain(?:s|ed|ing)?|(?:is|are|was|were))\s+(?:still\s+)?unclear\b[\s\S]*\b(?:whether|if)\b|(?:i|we|they|he|she|it)\s+(?:(?:do|does|did)\s+not|don['\u2019]t|doesn['\u2019]t|didn['\u2019]t)\s+(?:think|believe|expect)\b)/iu;
 const NEGATED_PREDICATE_PATTERN = /\b(?:won['\u2019]t|isn['\u2019]t|aren['\u2019]t)\b/iu;
 const LOCAL_BOUNDARY_WORD = String.raw`(?:but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)`;
 const STRONG_PREDICATE_BOUNDARY_PATTERN = new RegExp(
   String.raw`,\s*(?:(?:and|or|${LOCAL_BOUNDARY_WORD})\b[\s,:]*)?|\b${LOCAL_BOUNDARY_WORD}\b[\s,:]*`,
   "giu",
 );
+const ACTOR_PREDICATE_BOUNDARY_PATTERN = new RegExp(
+  String.raw`,\s*(?:(?:and|or|${LOCAL_BOUNDARY_WORD})\b[\s,:]*)|\b${LOCAL_BOUNDARY_WORD}\b[\s,:]*`,
+  "giu",
+);
 const COORDINATING_PREDICATE_BOUNDARY_PATTERN = /\b(?:and|or)\b[\s,:]*/giu;
-const TIMING_ANCHOR_PATTERN = /\b(?:today|tomorrow|tonight|yesterday|soon|later|morning|afternoon|evening|(?:next|this|last)\s+(?:day|week|month|quarter|year)|(?:first|second|third|fourth)\s+quarter|q[1-4]|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/giu;
+const TIMING_ANCHOR_PATTERN = /\b(?:end\s+of\s+(?:the\s+)?(?:day|week|month|quarter|year)|(?:next|this|last)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|today|tomorrow|tonight|yesterday|soon|later|morning|afternoon|evening|(?:next|this|last)\s+(?:day|week|month|quarter|year)|(?:first|second|third|fourth)\s+quarter|q[1-4]|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/giu;
 const CONTRACTION_ACTOR_PATTERN = /^(i|you|he|she|it|we|they)['\u2019](?:ll|m|re|s)\b/iu;
+const REPORTED_COMMITMENT_PATTERN = /^(?:committed|agreed|promised)$/iu;
+const REPORTED_ACTION_PATTERN = new RegExp(
+  String.raw`^\s*(?:to\s+)?(?:be\s+)?(${FUTURE_COMMITMENT_ACTION})\b`,
+  "iu",
+);
 
 interface CommitmentFact {
-  actorAnchors: Set<string>;
+  actorIdentity: string | null;
+  actionIdentity: string | null;
   objectAnchors: Set<string>;
   timingAnchors: Set<string>;
   affirmative: boolean;
@@ -941,20 +953,29 @@ function commitmentFactsFromClause(clause: string): CommitmentFact[] {
   const localStarts = matches.map((match, index) =>
     predicateLocalBoundary(clause, match, matches[index - 1]),
   );
-  const clauseIsQuestion = QUESTION_CLAUSE_PATTERN.test(clause);
-
+  let inheritedActorIdentity: string | null = null;
   return matches.map((match, index) => {
     const localStart = localStarts[index]?.end ?? 0;
     const localEnd = index + 1 < matches.length
       ? localStarts[index + 1]?.start ?? matches[index + 1].index
       : clause.length;
     const prefix = clause.slice(localStart, match.index).trim();
+    const suffix = clause.slice(match.end, localEnd);
     const factText = clause.slice(localStart, localEnd).trim();
+    const actorPrefix = predicateActorPrefix(clause, match, matches[index - 1]);
+    const actorIdentity = commitmentActorIdentity(actorPrefix, match.text)
+      ?? inheritedActorIdentity;
+    if (actorIdentity) inheritedActorIdentity = actorIdentity;
     return {
-      actorAnchors: commitmentActorAnchors(prefix, match.text),
-      objectAnchors: groundingObjectAnchors(clause.slice(match.end, localEnd)),
+      actorIdentity,
+      actionIdentity: commitmentActionIdentity(match.text, suffix),
+      objectAnchors: groundingObjectAnchors(suffix),
       timingAnchors: timingAnchors(factText),
-      affirmative: isAffirmativeCommitment(clauseIsQuestion, prefix, match.text),
+      affirmative: isAffirmativeCommitment(
+        QUESTION_CLAUSE_PATTERN.test(factText),
+        prefix,
+        match.text,
+      ),
       synthetic: false,
     };
   });
@@ -992,6 +1013,38 @@ function predicateLocalBoundary(
     : coordinatingBoundary;
 }
 
+function predicateActorPrefix(
+  clause: string,
+  match: PredicateMatchContext,
+  previousMatch: PredicateMatchContext | undefined,
+): string {
+  const strongBoundary = lastPredicateBoundary(
+    clause,
+    ACTOR_PREDICATE_BOUNDARY_PATTERN,
+    0,
+    match.index,
+  );
+  const coordinatingBoundary = previousMatch
+    ? lastPredicateBoundary(
+        clause,
+        COORDINATING_PREDICATE_BOUNDARY_PATTERN,
+        previousMatch.end,
+        match.index,
+      )
+    : null;
+  const boundary = !strongBoundary
+    ? coordinatingBoundary
+    : !coordinatingBoundary || strongBoundary.start > coordinatingBoundary.start
+      ? strongBoundary
+      : coordinatingBoundary;
+  const start = boundary?.end ?? previousMatch?.end ?? 0;
+  return stripCommaParentheticals(clause.slice(start, match.index));
+}
+
+function stripCommaParentheticals(value: string): string {
+  return value.replace(/,\s*[^,]+,\s*/gu, " ");
+}
+
 function lastPredicateBoundary(
   content: string,
   pattern: RegExp,
@@ -1019,6 +1072,8 @@ function isAffirmativeCommitment(
     || EMBEDDED_INQUIRY_PATTERN.test(prefix)
     || ANTI_ASSUMPTION_PATTERN.test(prefix)
     || EPISTEMIC_ABSENCE_PATTERN.test(prefix)
+    || REPORTED_CONFIRMATION_REQUEST_PATTERN.test(prefix)
+    || REPORTED_UNCERTAINTY_PATTERN.test(prefix)
   ) {
     return false;
   }
@@ -1033,30 +1088,24 @@ function isDirectlyNegatedPredicate(prefix: string, predicateText: string): bool
     || NEGATED_CONTRACTION_PATTERN.test(prefix);
 }
 
-function commitmentActorAnchors(prefix: string, predicateText: string): Set<string> {
-  const anchors = new Set<string>();
+function commitmentActorIdentity(prefix: string, predicateText: string): string | null {
   const contractionActor = CONTRACTION_ACTOR_PATTERN.exec(predicateText)?.[1];
   const contractionAnchor = contractionActor
     ? canonicalActorAnchor(contractionActor)
     : null;
-  if (contractionAnchor) anchors.add(contractionAnchor);
 
   const colonIndex = prefix.lastIndexOf(":");
   const actorPrefix = colonIndex >= 0 ? prefix.slice(colonIndex + 1) : prefix;
-  const nearestActor = nearestActorAnchor(actorPrefix);
-  if (nearestActor) anchors.add(nearestActor);
+  const nearestActor = nearestActorAnchor(actorPrefix) ?? contractionAnchor;
 
   if (
     colonIndex >= 0
-    && (contractionAnchor === "i"
-      || contractionAnchor === "we"
-      || nearestActor === "i"
-      || nearestActor === "we")
+    && (nearestActor === "i" || nearestActor === "we")
   ) {
     const speakerAnchor = nearestActorAnchor(prefix.slice(0, colonIndex));
-    if (speakerAnchor) anchors.add(speakerAnchor);
+    if (speakerAnchor) return speakerAnchor;
   }
-  return anchors;
+  return nearestActor;
 }
 
 function nearestActorAnchor(value: string): string | null {
@@ -1070,6 +1119,7 @@ function nearestActorAnchor(value: string): string | null {
 }
 
 function canonicalActorAnchor(value: string): string {
+  const normalizedValue = normalizedWords(value)[0] ?? value.toLowerCase();
   const genericActors: Record<string, string> = {
     clients: "client",
     customers: "customer",
@@ -1079,13 +1129,73 @@ function canonicalActorAnchor(value: string): string {
     users: "user",
     vendors: "vendor",
   };
-  return genericActors[value] ?? value;
+  return genericActors[normalizedValue] ?? normalizedValue;
+}
+
+function commitmentActionIdentity(
+  predicateText: string,
+  suffix: string,
+): string | null {
+  if (REPORTED_COMMITMENT_PATTERN.test(predicateText)) {
+    const reportedAction = REPORTED_ACTION_PATTERN.exec(suffix)?.[1];
+    return reportedAction ? canonicalActionIdentity(reportedAction) : null;
+  }
+
+  const predicateWords = normalizedWords(predicateText);
+  const actionWords = predicateWords.at(-1) === "up"
+    ? predicateWords.slice(-2)
+    : predicateWords.slice(-1);
+  return actionWords.length > 0
+    ? canonicalActionIdentity(actionWords.join(" "))
+    : null;
+}
+
+function canonicalActionIdentity(value: string): string {
+  return normalizedWords(value)
+    .map(canonicalActionToken)
+    .join(" ");
+}
+
+function canonicalActionToken(value: string): string {
+  const knownInflections: Record<string, string> = {
+    completed: "complete",
+    completes: "complete",
+    completing: "complete",
+    delivered: "deliver",
+    delivers: "deliver",
+    delivering: "deliver",
+    emailed: "email",
+    emailing: "email",
+    emails: "email",
+    followed: "follow",
+    following: "follow",
+    follows: "follow",
+    provided: "provide",
+    provides: "provide",
+    providing: "provide",
+    reviewed: "review",
+    reviewing: "review",
+    reviews: "review",
+    sent: "send",
+    sends: "send",
+    sending: "send",
+    shared: "share",
+    shares: "share",
+    sharing: "share",
+    submitted: "submit",
+    submits: "submit",
+    submitting: "submit",
+    uploaded: "upload",
+    uploading: "upload",
+    uploads: "upload",
+  };
+  return knownInflections[value] ?? stemWord(value);
 }
 
 function timingAnchors(value: string): Set<string> {
   return new Set(
     [...value.matchAll(new RegExp(TIMING_ANCHOR_PATTERN.source, TIMING_ANCHOR_PATTERN.flags))]
-      .map((match) => normalizedExactText(match[0])),
+      .map((match) => normalizedWords(match[0]).filter((word) => word !== "the").join(" ")),
   );
 }
 
@@ -1099,7 +1209,8 @@ function groundingObjectAnchors(value: string): Set<string> {
 
 function syntheticActionItemFact(content: string): CommitmentFact {
   return {
-    actorAnchors: syntheticActionActorAnchors(content),
+    actorIdentity: syntheticActionActorIdentity(content),
+    actionIdentity: null,
     objectAnchors: groundingObjectAnchors(content),
     timingAnchors: timingAnchors(content),
     affirmative: true,
@@ -1107,13 +1218,10 @@ function syntheticActionItemFact(content: string): CommitmentFact {
   };
 }
 
-function syntheticActionActorAnchors(content: string): Set<string> {
-  const anchors = new Set<string>();
+function syntheticActionActorIdentity(content: string): string | null {
   const knownActorPattern = /\b(?:customer|client|partner|speaker|team|user|vendor)s?\b/giu;
-  for (const match of content.matchAll(knownActorPattern)) {
-    anchors.add(canonicalActorAnchor(match[0].toLowerCase()));
-  }
-  return anchors;
+  const actor = knownActorPattern.exec(content)?.[0];
+  return actor ? canonicalActorAnchor(actor.toLowerCase()) : null;
 }
 
 function hasGroundedCommitmentSupport(
@@ -1141,22 +1249,16 @@ function commitmentFactsAreCompatible(
   candidate: CommitmentFact,
   evidence: CommitmentFact,
 ): boolean {
-  if (
-    candidate.actorAnchors.size > 0
-    && !setsIntersect(candidate.actorAnchors, evidence.actorAnchors)
-  ) {
+  if (candidate.actorIdentity && candidate.actorIdentity !== evidence.actorIdentity) {
     return false;
   }
+  if (candidate.actionIdentity && candidate.actionIdentity !== evidence.actionIdentity) return false;
   if (!setIsSubset(candidate.timingAnchors, evidence.timingAnchors)) return false;
   if (!setIsSubset(candidate.objectAnchors, evidence.objectAnchors)) return false;
   return !candidate.synthetic
-    || candidate.actorAnchors.size > 0
+    || candidate.actorIdentity !== null
     || candidate.timingAnchors.size > 0
     || candidate.objectAnchors.size > 0;
-}
-
-function setsIntersect(left: Set<string>, right: Set<string>): boolean {
-  return [...left].some((value) => right.has(value));
 }
 
 function setIsSubset(subset: Set<string>, superset: Set<string>): boolean {

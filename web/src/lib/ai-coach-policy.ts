@@ -742,6 +742,13 @@ function validateCandidate(
   if (candidate.basis === "transcript" && resolvedEvidence.value.length === 0) {
     return { ok: false, reason: "missing_evidence" };
   }
+  if (
+    candidate.basis === "transcript"
+    && (candidate.type === "action_item" || looksLikeUnsupportedCommitment(content))
+    && !hasGroundedCommitmentSupport(content, resolvedEvidence.segments)
+  ) {
+    return { ok: false, reason: "invalid_evidence" };
+  }
 
   return {
     ok: true,
@@ -760,9 +767,13 @@ function resolveEvidence(
   rawIds: unknown,
   context: CoachContext,
 ):
-  | { ok: true; value: CoachInsightEvidence[] }
+  | {
+      ok: true;
+      value: CoachInsightEvidence[];
+      segments: CoachContextSegment[];
+    }
   | { ok: false; reason: "invalid_evidence" } {
-  if (rawIds === undefined) return { ok: true, value: [] };
+  if (rawIds === undefined) return { ok: true, value: [], segments: [] };
   if (!Array.isArray(rawIds) || rawIds.some((id) => typeof id !== "number" || !Number.isFinite(id))) {
     return { ok: false, reason: "invalid_evidence" };
   }
@@ -773,16 +784,18 @@ function resolveEvidence(
     return { ok: false, reason: "invalid_evidence" };
   }
   const evidence: CoachInsightEvidence[] = [];
+  const segments: CoachContextSegment[] = [];
   for (const segmentId of uniqueIds) {
     const segment = segmentById.get(segmentId);
     if (!segment) return { ok: false, reason: "invalid_evidence" };
+    segments.push(segment);
     evidence.push({
       segmentId,
       startTime: segment.startTime,
       endTime: segment.endTime,
     });
   }
-  return { ok: true, value: evidence };
+  return { ok: true, value: evidence, segments };
 }
 
 function toCoachInsight(
@@ -859,17 +872,26 @@ function isDuplicate(candidate: string, previousContents: string[]): boolean {
 
 const BASE_COMMITMENT_ACTION = String.raw`(?:complete|deliver|follow\s+up|provide|send|share|submit)`;
 const FUTURE_COMMITMENT_ACTION = String.raw`(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)`;
-const COMMITMENT_FORM_PATTERN = new RegExp(
-  String.raw`\b(?:will\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:plans?|intends?|expects?)\s+to\s+${BASE_COMMITMENT_ACTION}|committed|agreed|promised)\b`,
-  "gi",
+const COMMITMENT_FORM_SOURCE = String.raw`\b(?:will\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:plans?|intends?|expects?)\s+to\s+${BASE_COMMITMENT_ACTION}|(?:am|is|are)\s+going\s+to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|committed|agreed|promised)\b`;
+const COMMITMENT_CLAUSE_PATTERN = /[^.!?;\n]+(?:[.!?;]+|\n+|$)/g;
+const QUESTION_CLAUSE_PATTERN = /\?[.!?]*$/;
+const LOCAL_SCOPE_BOUNDARY_PATTERN = /\b(?:although|because|but|however|nevertheless|since|so|therefore|though|thus|whereas|yet)\b\s*[:,]?\s*/gi;
+const INQUIRY_CUE = String.raw`(?:whether|if|when|how|what|why|who|where)`;
+const QUALIFIED_INQUIRY_PATTERN = new RegExp(
+  String.raw`^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b${INQUIRY_CUE}\b`,
+  "i",
 );
-const QUALIFIED_INQUIRY_PATTERN = /^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b(?:whether|if)\b/i;
-const NEGATED_PREFIX_PATTERN = /\b(?:not|never|no)\b(?:\s+[\p{L}\p{N}'-]+){0,6}\s*$/iu;
-const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t\b(?:\s+[\p{L}\p{N}'-]+){0,6}\s*$/iu;
+const EMBEDDED_INQUIRY_PATTERN = new RegExp(
+  String.raw`^(?:and\s+|or\s+)?${INQUIRY_CUE}\b`,
+  "i",
+);
+const DIRECT_NEGATION_PATTERN = /\b(?:not|never)(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/i;
+const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$/iu;
+const ANTI_ASSUMPTION_PATTERN = /^(?:please\s+)?(?:do\s+not|don['\u2019]t|never)\s+(?:assume|infer|presume|claim|state|treat)\b/i;
 
 function looksLikeUnsupportedCommitment(content: string): boolean {
   return commitmentClauses(content).some((clause) => {
-    for (const match of clause.matchAll(COMMITMENT_FORM_PATTERN)) {
+    for (const match of clause.matchAll(new RegExp(COMMITMENT_FORM_SOURCE, "gi"))) {
       const matchIndex = match.index ?? 0;
       if (
         !isQualifiedInquiry(clause, matchIndex)
@@ -883,20 +905,55 @@ function looksLikeUnsupportedCommitment(content: string): boolean {
 }
 
 function commitmentClauses(content: string): string[] {
-  return (content.match(/[^.!?;:\n]+(?:[.!?;:]+|\n+|$)/g) ?? [])
+  return (content.match(COMMITMENT_CLAUSE_PATTERN) ?? [])
     .map((clause) => clause.trim())
     .filter(Boolean);
 }
 
 function isQualifiedInquiry(clause: string, matchIndex: number): boolean {
-  return QUALIFIED_INQUIRY_PATTERN.test(clause.slice(0, matchIndex));
+  if (QUESTION_CLAUSE_PATTERN.test(clause)) return true;
+  const prefix = predicateQualifierPrefix(clause, matchIndex);
+  return QUALIFIED_INQUIRY_PATTERN.test(prefix) || EMBEDDED_INQUIRY_PATTERN.test(prefix);
 }
 
 function isNegatedCommitment(clause: string, matchIndex: number): boolean {
-  const prefix = clause.slice(0, matchIndex);
-  const negation = prefix.match(NEGATED_PREFIX_PATTERN)?.[0].trim() ?? "";
-  if (/^(?:not\s+only|no\s+(?:doubt|question))\b/i.test(negation)) return false;
-  return Boolean(negation || NEGATED_CONTRACTION_PATTERN.test(prefix));
+  const prefix = predicateQualifierPrefix(clause, matchIndex);
+  return ANTI_ASSUMPTION_PATTERN.test(prefix)
+    || DIRECT_NEGATION_PATTERN.test(prefix)
+    || NEGATED_CONTRACTION_PATTERN.test(prefix);
+}
+
+function predicateQualifierPrefix(clause: string, matchIndex: number): string {
+  const localPrefix = clause.slice(0, matchIndex).split(LOCAL_SCOPE_BOUNDARY_PATTERN).at(-1) ?? "";
+  return localPrefix.slice(localPrefix.lastIndexOf(",") + 1).trim();
+}
+
+function hasGroundedCommitmentSupport(
+  candidateContent: string,
+  segments: CoachContextSegment[],
+): boolean {
+  return segments.some(
+    (segment) => looksLikeUnsupportedCommitment(segment.text)
+      && hasTextualGrounding(candidateContent, segment.text),
+  );
+}
+
+function hasTextualGrounding(candidateContent: string, evidenceText: string): boolean {
+  const normalizedCandidate = normalizedExactText(candidateContent);
+  const normalizedEvidence = normalizedExactText(evidenceText);
+  if (normalizedCandidate && normalizedEvidence.includes(normalizedCandidate)) return true;
+
+  const candidateTokens = normalizedGroundingTokens(candidateContent);
+  const evidenceTokens = normalizedGroundingTokens(evidenceText);
+  return [...candidateTokens].some((token) => evidenceTokens.has(token));
+}
+
+function normalizedGroundingTokens(value: string): Set<string> {
+  return new Set(
+    normalizedWords(value)
+      .map(stemWord)
+      .filter((word) => !GROUNDING_IGNORED_TOKENS.has(word)),
+  );
 }
 
 function normalizedExactText(value: string): string {
@@ -953,6 +1010,117 @@ const DUPLICATE_STOP_WORDS = new Set([
   "what",
   "with",
 ]);
+
+const GROUNDING_IGNORED_TOKENS = new Set(
+  [
+    ...DUPLICATE_STOP_WORDS,
+    "am",
+    "account",
+    "actor",
+    "agree",
+    "agreed",
+    "agreement",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "being",
+    "but",
+    "by",
+    "can",
+    "client",
+    "company",
+    "commit",
+    "committed",
+    "commitment",
+    "complete",
+    "completing",
+    "could",
+    "customer",
+    "day",
+    "date",
+    "deadline",
+    "deliver",
+    "delivering",
+    "did",
+    "do",
+    "does",
+    "expect",
+    "expects",
+    "follow",
+    "following",
+    "future",
+    "going",
+    "had",
+    "has",
+    "have",
+    "he",
+    "her",
+    "his",
+    "i",
+    "if",
+    "intend",
+    "intends",
+    "it",
+    "later",
+    "may",
+    "might",
+    "month",
+    "must",
+    "next",
+    "owner",
+    "organization",
+    "partner",
+    "party",
+    "person",
+    "plan",
+    "plans",
+    "promise",
+    "promised",
+    "provide",
+    "providing",
+    "representative",
+    "send",
+    "sending",
+    "share",
+    "sharing",
+    "she",
+    "soon",
+    "speaker",
+    "stakeholder",
+    "submit",
+    "submitting",
+    "team",
+    "them",
+    "then",
+    "there",
+    "these",
+    "those",
+    "timing",
+    "tonight",
+    "today",
+    "tomorrow",
+    "up",
+    "us",
+    "user",
+    "vendor",
+    "was",
+    "week",
+    "were",
+    "when",
+    "where",
+    "whether",
+    "which",
+    "who",
+    "why",
+    "will",
+    "would",
+    "year",
+    "yesterday",
+    "you",
+  ].map(stemWord),
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

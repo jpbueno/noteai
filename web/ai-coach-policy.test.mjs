@@ -18,6 +18,10 @@ const unsupportedCommitmentCases = [
   "Customer will be delivering tomorrow.",
   "Team will deliver results tomorrow.",
   "Speaker promised to share benchmarks.",
+  "Customer is going to deliver tomorrow.",
+  "Ask for logs and customer will deliver tomorrow.",
+  "Ask whether logs are available, but customer will deliver tomorrow.",
+  "Do not speculate about timing because customer will deliver tomorrow.",
 ];
 
 const qualifiedCommitmentRecommendationCases = [
@@ -27,6 +31,9 @@ const qualifiedCommitmentRecommendationCases = [
   "The customer has not agreed to deliver tomorrow.",
   "How will the team deliver these results?",
   "Confirm whether the team plans to deliver tomorrow.",
+  "Ask whether: customer will deliver tomorrow.",
+  "Customer will deliver tomorrow?",
+  "Ask when the customer will deliver results.",
 ];
 
 function segment(id, text = `Transcript segment ${id}`) {
@@ -457,6 +464,32 @@ test("commitment conformance allows qualified non-transcript recommendations", (
   }
 });
 
+test("commitment conformance rejects future domain claims but allows present capabilities", () => {
+  const futureClaim = coachPolicy.admit(
+    JSON.stringify([candidate("Customer will deliver results tomorrow.", {
+      type: "technical_answer",
+      basis: "domain_knowledge",
+    })]),
+    buildContext(),
+    fixedAdapters,
+  );
+  const presentCapability = coachPolicy.admit(
+    JSON.stringify([candidate("Dynamo provides cache-aware routing.", {
+      type: "technical_answer",
+      basis: "domain_knowledge",
+    })]),
+    buildContext(),
+    fixedAdapters,
+  );
+
+  assert.equal(futureClaim.status, "rejected");
+  assert.deepEqual(futureClaim.rejections.map((item) => item.reason), [
+    "unsupported_commitment",
+  ]);
+  assert.equal(presentCapability.status, "insights");
+  assert.equal(presentCapability.insights[0].content, "Dynamo provides cache-aware routing.");
+});
+
 test("commitment conformance allows transcript-grounded equivalents with evidence", () => {
   const cases = [
     ...unsupportedCommitmentCases.map((content) => ({ content, type: "key_insight" })),
@@ -483,6 +516,38 @@ test("commitment conformance allows transcript-grounded equivalents with evidenc
       startTime: (index + 20) * 10,
       endTime: (index + 20) * 10 + 8,
     }]);
+  }
+});
+
+test("transcript commitment grounding rejects noncommittal, unrelated, and inquiry evidence", () => {
+  const evidenceCases = [
+    "No commitment was discussed.",
+    "Partner will deliver logs tomorrow.",
+    "Will the customer deliver results tomorrow?",
+  ];
+
+  for (const [index, evidenceText] of evidenceCases.entries()) {
+    for (const type of ["key_insight", "action_item"]) {
+      const segmentID = index + 40;
+      const result = coachPolicy.admit(
+        JSON.stringify([
+          candidate("Customer will deliver results tomorrow.", {
+            type,
+            basis: "transcript",
+            source_segment_ids: [segmentID],
+          }),
+        ]),
+        buildContext({ segments: [segment(segmentID, evidenceText)] }),
+        fixedAdapters,
+      );
+
+      assert.equal(result.status, "rejected", `${type}: ${evidenceText}`);
+      assert.deepEqual(
+        result.rejections.map((item) => item.reason),
+        ["invalid_evidence"],
+        `${type}: ${evidenceText}`,
+      );
+    }
   }
 });
 

@@ -307,18 +307,17 @@ struct CoachAdmissionPolicy: Sendable {
         guard let commitmentRange = firstCommitmentRange(in: scope) else { return false }
 
         let prefix = String(scope[..<commitmentRange.lowerBound])
-        guard let cueRange = prefix.range(
-            of: #"(?i)\b(?:whether|if|when|how|what|why|who|where)\b"#,
-            options: .regularExpression
-        ) else { return false }
-
-        let beforeCue = prefix[..<cueRange.lowerBound]
+        let localPrefix = (prefix.split(separator: ",", omittingEmptySubsequences: false).last
+            .map(String.init) ?? prefix)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if beforeCue.isEmpty { return true }
-        return beforeCue.range(
-            of: #"(?i)^\s*(?:ask|check|clarify|confirm|determine|probe|verify|recommend\s+asking)\b"#,
+        let inquiryCue = #"(?:whether|if|when|how|what|why|who|where)"#
+        let qualifiedInquiry = #"(?i)^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b"#
+            + inquiryCue + #"\b"#
+        let embeddedInquiry = #"(?i)^(?:and\s+|or\s+)?"# + inquiryCue + #"\b"#
+        return localPrefix.range(
+            of: qualifiedInquiry,
             options: .regularExpression
-        ) != nil
+        ) != nil || localPrefix.range(of: embeddedInquiry, options: .regularExpression) != nil
     }
 
     private func firstCommitmentRange(in scope: String) -> Range<String.Index>? {

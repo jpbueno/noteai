@@ -1288,12 +1288,26 @@ function commitmentActorIdentity(prefix: string, predicateText: string): string 
 
 function nearestActorAnchor(value: string): string | null {
   const words = normalizedWords(value);
-  for (let index = words.length - 1; index >= 0; index -= 1) {
-    const word = words[index];
-    if (!word || ACTOR_PREFIX_IGNORED_WORDS.has(word)) continue;
-    return canonicalActorAnchor(word);
+  let index = words.length - 1;
+  while (index >= 0 && ACTOR_PREFIX_IGNORED_WORDS.has(words[index] ?? "")) {
+    index -= 1;
   }
-  return null;
+  if (index < 0) return null;
+
+  const actorWords = [canonicalActorAnchor(words[index] ?? "")];
+  for (index -= 1; index >= 0; index -= 1) {
+    const word = words[index];
+    if (!word) continue;
+    if (ACTOR_PHRASE_CONNECTORS.has(word)) {
+      const precedingWord = words[index - 1];
+      if (!precedingWord || ACTOR_PREFIX_IGNORED_WORDS.has(precedingWord)) break;
+      actorWords.unshift(word);
+      continue;
+    }
+    if (ACTOR_PREFIX_IGNORED_WORDS.has(word)) break;
+    actorWords.unshift(canonicalActorAnchor(word));
+  }
+  return actorWords.join(" ");
 }
 
 function canonicalActorAnchor(value: string): string {
@@ -1696,6 +1710,8 @@ const ACTOR_PREFIX_IGNORED_WORDS = new Set([
   "with",
   "would",
 ]);
+
+const ACTOR_PHRASE_CONNECTORS = new Set(["and", "or"]);
 
 const GROUNDING_IGNORED_TOKENS = new Set(
   [

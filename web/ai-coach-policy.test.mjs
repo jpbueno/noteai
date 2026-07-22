@@ -589,6 +589,9 @@ test("transcript commitment grounding rejects noncommittal, unrelated, and inqui
     { candidate: "Customer will deliver results tomorrow.", evidence: "Partner will deliver logs tomorrow." },
     { candidate: "Customer will deliver results tomorrow.", evidence: "Will the customer deliver results tomorrow?" },
     { candidate: "Customer will deliver results tomorrow.", evidence: "Partner will deliver results tomorrow." },
+    { candidate: "Sales and Development will deliver results tomorrow.", evidence: "Research and Development will deliver results tomorrow." },
+    { candidate: "Acme Sales will deliver results tomorrow.", evidence: "Contoso Sales will deliver results tomorrow." },
+    { candidate: "Northwind security team will deliver results tomorrow.", evidence: "Contoso security team will deliver results tomorrow." },
     { candidate: "Customer will deliver results tomorrow.", evidence: "Customer will deliver results next quarter." },
     { candidate: "Customer will deliver benchmark results tomorrow.", evidence: "Customer will deliver benchmark documentation tomorrow." },
     { candidate: "Customer: We will deliver results tomorrow.", evidence: "Partner: We will deliver results tomorrow." },
@@ -689,6 +692,21 @@ test("transcript grounding accepts compatible actors and actorless action wordin
     {
       candidate: "Acme will deliver results tomorrow.",
       evidence: "Acme will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Sales and Development will deliver results tomorrow.",
+      evidence: "Sales and Development will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Acme Sales will deliver results tomorrow.",
+      evidence: "Acme Sales will deliver results tomorrow.",
+      type: "key_insight",
+    },
+    {
+      candidate: "Northwind security team will deliver results tomorrow.",
+      evidence: "Northwind security team will deliver results tomorrow.",
       type: "key_insight",
     },
     {

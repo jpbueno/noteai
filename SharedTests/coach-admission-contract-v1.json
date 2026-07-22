@@ -2,126 +2,66 @@
   "name": "coach-admission-contract-v1",
   "schema_version": 1,
   "contract": {
-    "case_exact_keys": [
-      "id",
-      "model_output",
-      "transcript_segments",
-      "expected"
-    ],
-    "transcript_segment_exact_keys": [
-      "source_segment_id",
-      "text"
-    ],
+    "case_exact_keys": ["id", "model_output", "transcript_segments", "expected"],
+    "transcript_segment_exact_keys": ["source_segment_id", "text"],
     "envelope": {
-      "exact_keys": [
-        "contract_version",
-        "candidates"
-      ],
+      "exact_keys": ["contract_version", "candidates"],
       "contract_version": 1,
       "max_candidates": 2
     },
     "candidate_union": {
       "discriminator": "kind",
-      "guidance": {
-        "kind": "guidance",
-        "exact_keys": [
-          "kind",
-          "directive",
-          "body",
-          "priority",
-          "topic"
-        ],
-        "directive_mappings": [
-          {
-            "directive": "ask",
-            "type": "talking_point",
-            "basis": "recommendation"
-          },
-          {
-            "directive": "answer",
-            "type": "technical_answer",
-            "basis": "domain_knowledge"
-          },
-          {
-            "directive": "recommend",
-            "type": "key_insight",
-            "basis": "recommendation"
-          },
-          {
-            "directive": "investigate",
-            "type": "follow_up",
-            "basis": "recommendation"
-          }
-        ],
-        "content_source": "normalized body",
-        "body_rule": "One sentence with no control or bidi characters and no unqualified commitment claim."
+      "guidance_question": {
+        "kind": "guidance_question",
+        "exact_keys": ["kind", "directive", "question", "priority", "topic"],
+        "directives": ["ask", "clarify", "confirm", "check", "probe", "compare", "validate", "quantify", "discuss", "explore"],
+        "derived_type": "talking_point",
+        "derived_basis": "recommendation",
+        "derived_content": "<Capitalized directive>: <normalized question>",
+        "question_rule": "One normalized interrogative ending in exactly one question mark, with no earlier sentence terminator, newline, semicolon, control, bidi, or unsafe invisible character."
       },
       "transcript_quote": {
         "kind": "transcript_quote",
-        "exact_keys": [
-          "kind",
-          "presentation",
-          "evidence_quotes",
-          "priority",
-          "topic"
-        ],
-        "evidence_quote_exact_keys": [
-          "source_segment_id",
-          "quote"
-        ],
-        "presentation_mappings": [
-          {
-            "presentation": "observation",
+        "exact_keys": ["kind", "presentation", "evidence_quotes", "priority", "topic"],
+        "evidence_quote_exact_keys": ["source_segment_id", "quote"],
+        "presentations": {
+          "observation": {
             "type": "key_insight",
             "basis": "transcript",
-            "requires": "complete transcript quote"
+            "content_prefix": "Transcript quote: "
           },
-          {
-            "presentation": "action_item",
+          "possible_action": {
             "type": "action_item",
             "basis": "transcript",
-            "requires": "complete affirmative commitment quote"
+            "content_prefix": "Possible action: "
           },
-          {
-            "presentation": "follow_up",
+          "possible_follow_up": {
             "type": "follow_up",
             "basis": "transcript",
-            "requires": "complete explicit follow-up quote"
+            "content_prefix": "Possible follow-up: "
           }
-        ],
-        "content_source": "shared normalized evidence quote",
-        "evidence_rule": "Each quote must equal one complete normalized source segment. Multiple quotes must normalize to the same text and use distinct source IDs."
+        },
+        "evidence_rule": "Every quote equals one complete normalized source segment. Multiple quotes have identical normalized text and distinct valid source IDs."
       }
     },
-    "priorities": [
-      "high",
-      "critical"
-    ],
+    "priorities": ["high", "critical"],
+    "topic_rule": {
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "max_characters": 64
+    },
     "normalization": {
-      "text_steps": [
-        "NFC",
-        "trim Unicode whitespace",
-        "collapse Unicode whitespace runs to U+0020"
-      ],
-      "comparison": "exact after normalization"
+      "text_steps": ["NFC", "trim Unicode whitespace", "collapse Unicode whitespace runs to U+0020"],
+      "comparison": "exact after normalization",
+      "reject": ["control characters", "bidi controls", "unsafe invisible characters"]
+    },
+    "derived_limits": {
+      "max_characters": 180,
+      "max_words": 24
     },
     "expected_result": {
-      "exact_keys": [
-        "outcome",
-        "derived",
-        "rejection_category",
-        "side_effects"
-      ],
-      "derived_exact_keys": [
-        "content",
-        "type",
-        "basis",
-        "evidence_ids"
-      ],
-      "side_effect_exact_keys": [
-        "task_creations",
-        "tool_calls"
-      ]
+      "exact_keys": ["outcome", "derived", "rejection_category", "side_effects"],
+      "derived_exact_keys": ["content", "type", "basis", "evidence_ids", "topic", "priority"],
+      "side_effect_exact_keys": ["task_creations", "tool_calls"]
     },
     "rejection_categories": [
       "invalid_envelope",
@@ -129,1179 +69,436 @@
       "too_many_candidates",
       "invalid_candidate",
       "invalid_text",
-      "unsafe_guidance",
-      "invalid_evidence",
-      "presentation_mismatch"
+      "invalid_topic",
+      "invalid_evidence"
     ]
   },
   "cases": [
     {
-      "id": "guidance-ask-mapping",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether the latency SLO includes queueing time.",
-            "priority": "high",
-            "topic": "latency-slo"
-          }
-        ]
-      },
+      "id": "no-op-empty-candidates",
+      "model_output": {"contract_version": 1, "candidates": []},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Ask whether the latency SLO includes queueing time.",
-            "type": "talking_point",
-            "basis": "recommendation",
-            "evidence_ids": []
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "no_op", "derived": [], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-answer-mapping",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "answer",
-            "body": "Dynamo provides cache-aware routing.",
-            "priority": "critical",
-            "topic": "cache-routing"
-          }
-        ]
-      },
+      "id": "guidance-ask",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What p99 latency target includes queueing?", "priority": "high", "topic": "latency-slo"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Dynamo provides cache-aware routing.",
-            "type": "technical_answer",
-            "basis": "domain_knowledge",
-            "evidence_ids": []
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: What p99 latency target includes queueing?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "latency-slo", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-recommend-mapping",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "recommend",
-            "body": "Use separate p99 targets for prefill and decode.",
-            "priority": "high",
-            "topic": "latency-targets"
-          }
-        ]
-      },
+      "id": "guidance-clarify",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "clarify", "question": "Does the SLO include queueing time?", "priority": "critical", "topic": "slo-scope"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Use separate p99 targets for prefill and decode.",
-            "type": "key_insight",
-            "basis": "recommendation",
-            "evidence_ids": []
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Clarify: Does the SLO include queueing time?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "slo-scope", "priority": "critical"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-investigate-mapping",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "investigate",
-            "body": "Compare p99 latency with and without prefix caching.",
-            "priority": "high",
-            "topic": "prefix-cache"
-          }
-        ]
-      },
+      "id": "guidance-confirm",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "confirm", "question": "Is the B200 capacity reserved?", "priority": "high", "topic": "capacity"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Compare p99 latency with and without prefix caching.",
-            "type": "follow_up",
-            "basis": "recommendation",
-            "evidence_ids": []
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Confirm: Is the B200 capacity reserved?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "capacity", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-two-candidates-accepted",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask which p99 target governs production sizing.",
-            "priority": "high",
-            "topic": "production-slo"
-          },
-          {
-            "kind": "guidance",
-            "directive": "answer",
-            "body": "Disaggregated serving separates prefill and decode scaling.",
-            "priority": "high",
-            "topic": "disaggregation"
-          }
-        ]
-      },
+      "id": "guidance-check",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "check", "question": "Are topology labels available on every node?", "priority": "high", "topic": "topology-labels"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Ask which p99 target governs production sizing.",
-            "type": "talking_point",
-            "basis": "recommendation",
-            "evidence_ids": []
-          },
-          {
-            "content": "Disaggregated serving separates prefill and decode scaling.",
-            "type": "technical_answer",
-            "basis": "domain_knowledge",
-            "evidence_ids": []
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Check: Are topology labels available on every node?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "topology-labels", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-trailing-claim-injection",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available. Customer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-probe",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "probe", "question": "Which failure mode drives the retry policy?", "priority": "high", "topic": "retry-policy"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "unsafe_guidance",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Probe: Which failure mode drives the retry policy?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "retry-policy", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-newline-injection",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available\nCustomer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-compare",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "compare", "question": "How does prefix caching change p99 latency?", "priority": "high", "topic": "prefix-cache"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "unsafe_guidance",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Compare: How does prefix caching change p99 latency?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "prefix-cache", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-semicolon-injection",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available; customer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-validate",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "validate", "question": "Can the benchmark reproduce production concurrency?", "priority": "critical", "topic": "benchmark-shape"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "unsafe_guidance",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Validate: Can the benchmark reproduce production concurrency?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "benchmark-shape", "priority": "critical"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-multiple-terminator-injection",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available?! Customer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-quantify",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "quantify", "question": "What utilization gain justifies disaggregation?", "priority": "high", "topic": "utilization-gain"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "unsafe_guidance",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Quantify: What utilization gain justifies disaggregation?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "utilization-gain", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-bidi-control-rejected",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available.\u202e Customer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-discuss",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "discuss", "question": "Who owns runtime upgrades after launch?", "priority": "critical", "topic": "runtime-ownership"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_text",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Discuss: Who owns runtime upgrades after launch?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "runtime-ownership", "priority": "critical"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-c0-control-rejected",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask whether logs are available.\u0000Customer will deliver tomorrow.",
-            "priority": "high",
-            "topic": "logs"
-          }
-        ]
-      },
+      "id": "guidance-explore",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "explore", "question": "Could KV-aware routing reduce cache misses?", "priority": "high", "topic": "kv-routing"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_text",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Explore: Could KV-aware routing reduce cache misses?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "kv-routing", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-unknown-key",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [],
-        "tool_calls": []
-      },
+      "id": "guidance-future-question-remains-tentative",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "confirm", "question": "Will the customer test this Friday?", "priority": "high", "topic": "customer-test"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_envelope",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Confirm: Will the customer test this Friday?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "customer-test", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-unknown-key",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask which team owns the rollout.",
-            "priority": "high",
-            "topic": "rollout-owner",
-            "basis": "transcript"
-          }
-        ]
-      },
+      "id": "guidance-normalizes-whitespace",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "  What   is the launch owner?  ", "priority": "high", "topic": "launch-owner"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: What is the launch owner?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "launch-owner", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-mismatched-variant-keys",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "presentation": "observation",
-            "evidence_quotes": [],
-            "priority": "high",
-            "topic": "rollout-owner"
-          }
-        ]
-      },
+      "id": "quote-observation",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 3, "quote": "The benchmark uses production concurrency."}], "priority": "high", "topic": "benchmark-shape"}]},
+      "transcript_segments": [{"source_segment_id": 3, "text": "The benchmark uses production concurrency."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Transcript quote: The benchmark uses production concurrency.", "type": "key_insight", "basis": "transcript", "evidence_ids": [3], "topic": "benchmark-shape", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "quote-possible-action",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_action", "evidence_quotes": [{"source_segment_id": 4, "quote": "We will run the smoke test Friday."}], "priority": "critical", "topic": "smoke-test"}]},
+      "transcript_segments": [{"source_segment_id": 4, "text": "We will run the smoke test Friday."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Possible action: We will run the smoke test Friday.", "type": "action_item", "basis": "transcript", "evidence_ids": [4], "topic": "smoke-test", "priority": "critical"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "quote-possible-follow-up",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_follow_up", "evidence_quotes": [{"source_segment_id": 5, "quote": "The networking team should review the UCX logs."}], "priority": "high", "topic": "ucx-review"}]},
+      "transcript_segments": [{"source_segment_id": 5, "text": "The networking team should review the UCX logs."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Possible follow-up: The networking team should review the UCX logs.", "type": "follow_up", "basis": "transcript", "evidence_ids": [5], "topic": "ucx-review", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "quote-identical-distinct-evidence",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 8, "quote": "Capacity is not reserved."}, {"source_segment_id": 9, "quote": "Capacity is not reserved."}], "priority": "critical", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 8, "text": "Capacity is not reserved."}, {"source_segment_id": 9, "text": "Capacity is not reserved."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Transcript quote: Capacity is not reserved.", "type": "key_insight", "basis": "transcript", "evidence_ids": [8, 9], "topic": "capacity", "priority": "critical"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "two-candidates-accepted",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "check", "question": "Is the rollback path tested?", "priority": "critical", "topic": "rollback"}, {"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 11, "quote": "The rollback test has not run."}], "priority": "high", "topic": "rollback-status"}]},
+      "transcript_segments": [{"source_segment_id": 11, "text": "The rollback test has not run."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Check: Is the rollback path tested?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "rollback", "priority": "critical"}, {"content": "Transcript quote: The rollback test has not run.", "type": "key_insight", "basis": "transcript", "evidence_ids": [11], "topic": "rollback-status", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-trailing-claim-injection",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99? Customer will deliver.", "priority": "critical", "topic": "p99"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "guidance-unknown-directive",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "execute",
-            "body": "Create a task for the customer commitment.",
-            "priority": "critical",
-            "topic": "task-creation"
-          }
-        ]
-      },
+      "id": "reject-question-two-interrogatives",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99? Who owns it?", "priority": "high", "topic": "p99"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "transcript-normalized-complete-segment",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 100,
-                "quote": "Caf\u00e9 GPU results"
-              }
-            ],
-            "priority": "high",
-            "topic": "gpu-results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 100,
-          "text": " \tCafe\u0301\u00a0GPU\u2003results \n"
-        }
-      ],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Caf\u00e9 GPU results",
-            "type": "key_insight",
-            "basis": "transcript",
-            "evidence_ids": [
-              100
-            ]
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-tentative-observation",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 101,
-                "quote": "Customer may send utilization data next week."
-              }
-            ],
-            "priority": "high",
-            "topic": "utilization-data"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 101,
-          "text": "Customer may send utilization data next week."
-        }
-      ],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Customer may send utilization data next week.",
-            "type": "key_insight",
-            "basis": "transcript",
-            "evidence_ids": [
-              101
-            ]
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-action-item-presentation",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 102,
-                "quote": "Customer: We will send utilization data tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "utilization-data"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 102,
-          "text": "Customer: We will send utilization data tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Customer: We will send utilization data tomorrow.",
-            "type": "action_item",
-            "basis": "transcript",
-            "evidence_ids": [
-              102
-            ]
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-follow-up-presentation",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "follow_up",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 103,
-                "quote": "Customer: Please follow up with the benchmark logs."
-              }
-            ],
-            "priority": "high",
-            "topic": "benchmark-logs"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 103,
-          "text": "Customer: Please follow up with the benchmark logs."
-        }
-      ],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "Customer: Please follow up with the benchmark logs.",
-            "type": "follow_up",
-            "basis": "transcript",
-            "evidence_ids": [
-              103
-            ]
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-repeated-complete-quote",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 104,
-                "quote": "The target is 250 milliseconds."
-              },
-              {
-                "source_segment_id": 105,
-                "quote": "The target is 250 milliseconds."
-              }
-            ],
-            "priority": "high",
-            "topic": "latency-target"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 104,
-          "text": "The target is 250 milliseconds."
-        },
-        {
-          "source_segment_id": 105,
-          "text": "The target is 250 milliseconds."
-        }
-      ],
-      "expected": {
-        "outcome": "accepted",
-        "derived": [
-          {
-            "content": "The target is 250 milliseconds.",
-            "type": "key_insight",
-            "basis": "transcript",
-            "evidence_ids": [
-              104,
-              105
-            ]
-          }
-        ],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-tentative-not-action-item",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 110,
-                "quote": "Customer may send utilization data next week."
-              }
-            ],
-            "priority": "high",
-            "topic": "utilization-data"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 110,
-          "text": "Customer may send utilization data next week."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "presentation_mismatch",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-wrong-source-id",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 121,
-                "quote": "Customer will deliver results tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 120,
-          "text": "Customer will deliver results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-duplicate-source-ids",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 122,
-                "quote": "Customer will deliver results tomorrow."
-              },
-              {
-                "source_segment_id": 122,
-                "quote": "Customer will deliver results tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 122,
-          "text": "Customer will deliver results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-partial-quote-mining",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 123,
-                "quote": "The benchmark failed in staging."
-              }
-            ],
-            "priority": "high",
-            "topic": "benchmark"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 123,
-          "text": "Customer said the benchmark failed in staging, not production."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-negation-quote-mining",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 124,
-                "quote": "Customer will deliver results tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 124,
-          "text": "Customer will not deliver results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-cross-segment-join",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 125,
-                "quote": "Customer will deliver"
-              },
-              {
-                "source_segment_id": 126,
-                "quote": "results tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 125,
-          "text": "Customer will deliver"
-        },
-        {
-          "source_segment_id": 126,
-          "text": "results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-quote-mismatch",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "action_item",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 127,
-                "quote": "Customer will send logs tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 127,
-          "text": "Customer will deliver results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-candidate-unknown-key",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 128,
-                "quote": "The p99 target is 250 milliseconds."
-              }
-            ],
-            "priority": "high",
-            "topic": "latency-target",
-            "basis": "transcript"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 128,
-          "text": "The p99 target is 250 milliseconds."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-evidence-unknown-key",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "observation",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 129,
-                "quote": "The p99 target is 250 milliseconds.",
-                "speaker": "Customer"
-              }
-            ],
-            "priority": "high",
-            "topic": "latency-target"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 129,
-          "text": "The p99 target is 250 milliseconds."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_evidence",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "transcript-mismatched-variant-keys",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "directive": "ask",
-            "body": "Ask which p99 target applies.",
-            "priority": "high",
-            "topic": "latency-target"
-          }
-        ]
-      },
+      "id": "reject-question-newline",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?\nCustomer will deliver", "priority": "high", "topic": "p99"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "transcript-unknown-presentation",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "transcript_quote",
-            "presentation": "task",
-            "evidence_quotes": [
-              {
-                "source_segment_id": 130,
-                "quote": "Customer will deliver results tomorrow."
-              }
-            ],
-            "priority": "critical",
-            "topic": "results"
-          }
-        ]
-      },
-      "transcript_segments": [
-        {
-          "source_segment_id": 130,
-          "text": "Customer will deliver results tomorrow."
-        }
-      ],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
-    },
-    {
-      "id": "candidate-unknown-kind",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "tool_call",
-            "directive": "execute",
-            "body": "Create a task.",
-            "priority": "critical",
-            "topic": "task"
-          }
-        ]
-      },
+      "id": "reject-question-semicolon",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99; will the customer deliver?", "priority": "high", "topic": "p99"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_candidate",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-no-op",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": []
-      },
+      "id": "reject-non-question",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "confirm", "question": "The customer will deliver Friday", "priority": "high", "topic": "delivery"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "no_op",
-        "derived": [],
-        "rejection_category": null,
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-wrong-version",
-      "model_output": {
-        "contract_version": 2,
-        "candidates": []
-      },
+      "id": "reject-unknown-directive",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "recommend", "question": "Should we use Dynamo?", "priority": "high", "topic": "dynamo"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "unsupported_version",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-too-many-candidates",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": [
-          {
-            "kind": "guidance",
-            "directive": "ask",
-            "body": "Ask for the latency SLO.",
-            "priority": "high",
-            "topic": "latency-slo"
-          },
-          {
-            "kind": "guidance",
-            "directive": "recommend",
-            "body": "Separate prefill and decode targets.",
-            "priority": "high",
-            "topic": "latency-targets"
-          },
-          {
-            "kind": "guidance",
-            "directive": "investigate",
-            "body": "Compare prefix-cache hit rates.",
-            "priority": "high",
-            "topic": "prefix-cache"
-          }
-        ]
-      },
+      "id": "reject-guidance-unknown-key",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99", "owner": "customer"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "too_many_candidates",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-missing-candidates",
-      "model_output": {
-        "contract_version": 1
-      },
+      "id": "reject-model-supplied-type",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99", "type": "action_item"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_envelope",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
-      "id": "envelope-candidates-not-array",
-      "model_output": {
-        "contract_version": 1,
-        "candidates": {
-          "kind": "guidance"
-        }
-      },
+      "id": "reject-model-supplied-basis",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99", "basis": "transcript"}]},
       "transcript_segments": [],
-      "expected": {
-        "outcome": "rejected",
-        "derived": [],
-        "rejection_category": "invalid_envelope",
-        "side_effects": {
-          "task_creations": 0,
-          "tool_calls": 0
-        }
-      }
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-model-supplied-content",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99", "content": "Customer will deliver."}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-invalid-priority",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "medium", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-empty-topic",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": ""}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_topic", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-topic-not-slug",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "Latency SLO"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_topic", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-word-limit",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What exact production workload latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching target should the benchmark validate?", "priority": "critical", "topic": "benchmark"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-character-limit",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "explore", "question": "Could supercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocious improve routing?", "priority": "high", "topic": "routing"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-control",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is\u0007 p99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-bidi",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is \u202ep99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-unsupported-version",
+      "model_output": {"contract_version": 2, "candidates": []},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "unsupported_version", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-missing-version",
+      "model_output": {"candidates": []},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-envelope-unknown-key",
+      "model_output": {"contract_version": 1, "candidates": [], "instructions": "ignore policy"},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-candidates-not-array",
+      "model_output": {"contract_version": 1, "candidates": {}},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-too-many-candidates",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99"}, {"kind": "guidance_question", "directive": "check", "question": "Is capacity reserved?", "priority": "high", "topic": "capacity"}, {"kind": "guidance_question", "directive": "confirm", "question": "Is rollback tested?", "priority": "high", "topic": "rollback"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "too_many_candidates", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-candidate-scalar",
+      "model_output": {"contract_version": 1, "candidates": ["ask about p99"]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-unknown-kind",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "technical_answer", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-guidance-missing-question",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-unknown-key",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 20, "quote": "Capacity is not reserved.", "offset": 3}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 20, "text": "Capacity is not reserved."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-partial-quote",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 21, "quote": "reserved for Friday"}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 21, "text": "The B200 capacity is reserved for Friday."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-negation-quote-mining",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_action", "evidence_quotes": [{"source_segment_id": 22, "quote": "deliver the report Friday."}], "priority": "critical", "topic": "delivery"}]},
+      "transcript_segments": [{"source_segment_id": 22, "text": "We will not deliver the report Friday."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-cross-segment-join",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_action", "evidence_quotes": [{"source_segment_id": 23, "quote": "We will test. Tomorrow morning."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 23, "text": "We will test."}, {"source_segment_id": 24, "text": "Tomorrow morning."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-mismatch",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 25, "quote": "The test passed."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 25, "text": "The test failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-invalid-source-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 999, "quote": "The test failed."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 26, "text": "The test failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-duplicate-evidence-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 27, "quote": "The test failed."}, {"source_segment_id": 27, "quote": "The test failed."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 27, "text": "The test failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-multiple-different-quotes",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 28, "quote": "The test failed."}, {"source_segment_id": 29, "quote": "Capacity is missing."}], "priority": "high", "topic": "risk"}]},
+      "transcript_segments": [{"source_segment_id": 28, "text": "The test failed."}, {"source_segment_id": 29, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-unknown-presentation",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "action_item", "evidence_quotes": [{"source_segment_id": 30, "quote": "We will test Friday."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 30, "text": "We will test Friday."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-empty-evidence",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-control",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 31, "quote": "The test\u0007 failed."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 31, "text": "The test\u0007 failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-model-content",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 32, "quote": "The test failed."}], "priority": "high", "topic": "test", "content": "The customer committed."}]},
+      "transcript_segments": [{"source_segment_id": 32, "text": "The test failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-guidance-keys",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "directive": "ask", "question": "What failed?", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 33, "quote": "The test failed."}], "priority": "high", "topic": "test"}]},
+      "transcript_segments": [{"source_segment_id": 33, "text": "The test failed."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-envelope-array",
+      "model_output": [],
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-null-candidate",
+      "model_output": {"contract_version": 1, "candidates": [null]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-empty-question",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "   ", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-topic-too-long",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "this-topic-slug-is-intentionally-longer-than-sixty-four-characters-total"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_topic", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-derived-word-limit",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_follow_up", "evidence_quotes": [{"source_segment_id": 34, "quote": "The team should validate latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching and deployment readiness tomorrow."}], "priority": "critical", "topic": "readiness"}]},
+      "transcript_segments": [{"source_segment_id": 34, "text": "The team should validate latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching and deployment readiness tomorrow."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-bidi",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 35, "quote": "Capacity is \u202ereserved."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 35, "text": "Capacity is \u202ereserved."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-id-string",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": "36", "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 36, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-negative-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": -1, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": -1, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-priority-unknown-key-on-quote",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 37, "quote": "Capacity is missing."}], "priority": "urgent", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 37, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "quote-normalizes-whitespace",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 38, "quote": "  Capacity   is not reserved. "}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 38, "text": "Capacity is   not reserved."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Transcript quote: Capacity is not reserved.", "type": "key_insight", "basis": "transcript", "evidence_ids": [38], "topic": "capacity", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-model-tool-field",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "critical", "topic": "p99", "tool": "create_task"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-model-action-field",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "critical", "topic": "p99", "action": {"name": "create_task"}}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-envelope-contract-version-string",
+      "model_output": {"contract_version": "1", "candidates": []},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-guidance-question-number",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": 99, "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-transcript-segment-duplicate-source-record",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 40, "quote": "The first version."}], "priority": "high", "topic": "duplicate-source"}]},
+      "transcript_segments": [{"source_segment_id": 40, "text": "The first version."}, {"source_segment_id": 40, "text": "The second version."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     }
   ]
 }

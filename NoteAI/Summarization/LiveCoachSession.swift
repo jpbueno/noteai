@@ -112,12 +112,13 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
             guard requestIsCurrent else { return .staleSession }
 
             let completionDate = clock.currentDate()
-            context.completeAnalysis(segmentCount: transcript.count, at: completionDate)
 
             switch generated {
             case .malformed(let reason):
+                context.failAnalysis(at: completionDate)
                 return .malformed(reason)
             case .candidates(let candidates):
+                context.completeAnalysis(segmentCount: transcript.count, at: completionDate)
                 guard !candidates.isEmpty else { return .noOp }
                 let decision = admissionPolicy.evaluate(
                     candidates: candidates,
@@ -136,7 +137,7 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
             let requestIsCurrent = isActive && analysisRequestID == requestID
             clearAnalysisTask(requestID: requestID)
             guard requestIsCurrent else { return .staleSession }
-            context.completeAnalysis(segmentCount: transcript.count, at: clock.currentDate())
+            context.failAnalysis(at: clock.currentDate())
             return .failed(error.localizedDescription)
         }
     }

@@ -41,7 +41,8 @@ function candidate(content, overrides = {}) {
     content,
     priority: "high",
     basis: "recommendation",
-    evidenceSegmentIds: [],
+    source_segment_ids: [],
+    topic: content.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48),
     ...overrides,
   };
 }
@@ -154,7 +155,8 @@ test("admission preserves valid transcript evidence identifiers and timestamps",
     candidate("Track the customer's utilization-data commitment.", {
       type: "action_item",
       basis: "transcript",
-      evidenceSegmentIds: [12],
+      source_segment_ids: [12],
+      topic: "utilization-data",
     }),
   ]);
 
@@ -169,6 +171,8 @@ test("admission preserves valid transcript evidence identifiers and timestamps",
       content: "Track the customer's utilization-data commitment.",
       priority: "high",
       basis: "transcript",
+      topic: "utilization-data",
+      lifecycle: "active",
       evidence: [{ segmentId: 12, startTime: 120, endTime: 128 }],
     },
   ]);
@@ -187,7 +191,7 @@ test("admission rejects unsupported commitments and invalid transcript evidence"
     }),
     candidate("Their p99 target is fifty milliseconds.", {
       basis: "transcript",
-      evidenceSegmentIds: [999],
+      source_segment_ids: [999],
     }),
   ]);
 
@@ -238,7 +242,7 @@ test("admission rejects overlong, low-priority, exact, and near-duplicate insigh
   const output = JSON.stringify([
     candidate("Ask what p99 latency target they require."),
     candidate("Ask about their required p99 latency target."),
-    candidate("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen"),
+    candidate("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive"),
     candidate("Mention this only if there is extra time.", { priority: "low" }),
   ]);
 
@@ -251,6 +255,28 @@ test("admission rejects overlong, low-priority, exact, and near-duplicate insigh
     "too_long",
     "invalid_priority",
   ]);
+});
+
+test("admission prioritizes critical guidance and cools repeated topics", () => {
+  const priorAutoInsights = [autoInsight("Ask for the current p99 target.", {
+    topic: "latency-slo",
+    timestamp: "2026-07-22T15:59:00.000Z",
+  })];
+  const context = buildContext({ priorAutoInsights });
+  const output = JSON.stringify([
+    candidate("Repeat the p99 latency question.", { topic: "latency-slo" }),
+    candidate("Escalate the missing capacity owner now.", {
+      topic: "capacity-owner",
+      priority: "critical",
+    }),
+  ]);
+
+  const result = coachPolicy.admit(output, context, fixedAdapters);
+
+  assert.equal(result.status, "insights");
+  assert.equal(result.insights[0].priority, "critical");
+  assert.equal(result.insights[0].topic, "capacity-owner");
+  assert.deepEqual(result.rejections.map((item) => item.reason), ["topic_cooldown"]);
 });
 
 test("chat assembly includes the current question exactly once", () => {

@@ -7,6 +7,7 @@ final class AICoachContextTests: XCTestCase {
             minimumWordCount: 1,
             minimumNewSegments: 1,
             minimumAnalysisInterval: 0,
+            failureRetryInterval: 30,
             maxRecentSegments: 6,
             maxDeltaSegments: 3,
             maxRollingContextCharacters: 120,
@@ -47,6 +48,7 @@ final class AICoachContextTests: XCTestCase {
             minimumWordCount: 3,
             minimumNewSegments: 2,
             minimumAnalysisInterval: 300,
+            failureRetryInterval: 30,
             maxRecentSegments: 12,
             maxDeltaSegments: 6,
             maxRollingContextCharacters: 500,
@@ -77,6 +79,37 @@ final class AICoachContextTests: XCTestCase {
             transcript: initial + makeSegments(3...4),
             now: start.addingTimeInterval(300)
         ))
+    }
+
+    func testFailedAnalysisRetriesSoonWithoutDiscardingTranscriptDelta() {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 300,
+            failureRetryInterval: 30,
+            maxRecentSegments: 12,
+            maxDeltaSegments: 6,
+            maxRollingContextCharacters: 500,
+            maxChatMessages: 4
+        ))
+        let sessionID = UUID()
+        let transcript = makeSegments(1...2)
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertNotNil(context.prepareAnalysis(sessionID: sessionID, transcript: transcript, now: start))
+        context.failAnalysis(at: start)
+
+        XCTAssertNil(context.prepareAnalysis(
+            sessionID: sessionID,
+            transcript: transcript,
+            now: start.addingTimeInterval(29)
+        ))
+        let retry = context.prepareAnalysis(
+            sessionID: sessionID,
+            transcript: transcript,
+            now: start.addingTimeInterval(30)
+        )
+        XCTAssertEqual(retry?.transcriptDelta.map(\.id), [1, 2])
     }
 
     private func makeSegments(_ ids: ClosedRange<Int>) -> [TranscriptSegment] {
@@ -825,6 +858,7 @@ private extension CoachContextPolicy {
         minimumWordCount: 1,
         minimumNewSegments: 1,
         minimumAnalysisInterval: 0,
+        failureRetryInterval: 0,
         maxRecentSegments: 12,
         maxDeltaSegments: 6,
         maxRollingContextCharacters: 500,

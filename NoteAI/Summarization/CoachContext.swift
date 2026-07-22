@@ -4,6 +4,7 @@ struct CoachContextPolicy: Equatable, Sendable {
     let minimumWordCount: Int
     let minimumNewSegments: Int
     let minimumAnalysisInterval: TimeInterval
+    let failureRetryInterval: TimeInterval
     let maxRecentSegments: Int
     let maxDeltaSegments: Int
     let maxRollingContextCharacters: Int
@@ -13,6 +14,7 @@ struct CoachContextPolicy: Equatable, Sendable {
         minimumWordCount: 25,
         minimumNewSegments: 2,
         minimumAnalysisInterval: 300,
+        failureRetryInterval: 30,
         maxRecentSegments: 24,
         maxDeltaSegments: 12,
         maxRollingContextCharacters: 1_200,
@@ -90,6 +92,7 @@ struct CoachContext: Sendable {
     private var analyzedSegmentCount = 0
     private var rolledSegmentCount = 0
     private var lastAnalysisDate: Date?
+    private var lastFailureDate: Date?
     private var rollingContext = ""
 
     init(policy: CoachContextPolicy = .default) {
@@ -110,6 +113,10 @@ struct CoachContext: Sendable {
 
         if let lastAnalysisDate,
            now.timeIntervalSince(lastAnalysisDate) < policy.minimumAnalysisInterval {
+            return false
+        }
+        if let lastFailureDate,
+           now.timeIntervalSince(lastFailureDate) < policy.failureRetryInterval {
             return false
         }
         return true
@@ -142,6 +149,11 @@ struct CoachContext: Sendable {
     mutating func completeAnalysis(segmentCount: Int, at date: Date) {
         analyzedSegmentCount = max(analyzedSegmentCount, segmentCount)
         lastAnalysisDate = date
+        lastFailureDate = nil
+    }
+
+    mutating func failAnalysis(at date: Date) {
+        lastFailureDate = date
     }
 
     mutating func prepareQuestion(
@@ -168,6 +180,7 @@ struct CoachContext: Sendable {
         analyzedSegmentCount = 0
         rolledSegmentCount = 0
         lastAnalysisDate = nil
+        lastFailureDate = nil
         rollingContext = ""
     }
 

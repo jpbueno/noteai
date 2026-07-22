@@ -433,7 +433,7 @@ final class AICoachEngineTests: XCTestCase {
         )
         let cases = try XCTUnwrap(fixture["cases"] as? [[String: Any]])
 
-        XCTAssertEqual(cases.count, 91)
+        XCTAssertEqual(cases.count, 93)
 
         for contractCase in cases {
             let caseID = try XCTUnwrap(contractCase["id"] as? String)
@@ -448,7 +448,7 @@ final class AICoachEngineTests: XCTestCase {
             )
             let transcriptContext = try transcriptRecords.map { record in
                 CoachTranscriptExcerpt(
-                    id: try XCTUnwrap(record["source_segment_id"] as? NSNumber).intValue,
+                    id: try fixtureTranscriptID(record["source_segment_id"], caseID: caseID),
                     text: try XCTUnwrap(record["text"] as? String),
                     startTime: 0,
                     endTime: 0,
@@ -528,6 +528,17 @@ final class AICoachEngineTests: XCTestCase {
             ]
             XCTAssertEqual(observedSideEffects, expectedSideEffectCounts, caseID)
         }
+    }
+
+    private func fixtureTranscriptID(_ value: Any?, caseID: String) throws -> Int {
+        // Preserve lookup compatibility so the production Module must reject the model ID's JSON domain.
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return try XCTUnwrap(
+            (value as? String).flatMap(Int.init),
+            "Unsupported transcript fixture ID for \(caseID)"
+        )
     }
 
     func testAnalysisPromptRequestsOnlyStrictContractV1Envelope() {

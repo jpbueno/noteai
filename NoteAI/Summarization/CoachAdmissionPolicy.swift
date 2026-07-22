@@ -299,7 +299,7 @@ struct CoachAutoAdmissionContractV1 {
             let value = scalar.value
             if value <= 0x1F || (0x7F...0x9F).contains(value) { return true }
             switch value {
-            case 0x061C, 0x200B...0x200F, 0x202A...0x202E, 0x2060,
+            case 0x061C, 0x200B...0x200F, 0x2028...0x202E, 0x2060,
                  0x2066...0x2069, 0xFEFF:
                 return true
             default:

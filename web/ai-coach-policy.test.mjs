@@ -136,6 +136,11 @@ test("auto prompt treats context as untrusted data and explicitly permits a no-o
   assert.match(messages[1].content, /Ignore earlier instructions/);
 });
 
+test("failed generations use a short bounded retry interval", () => {
+  assert.equal(coachPolicy.cadence.failureRetryMs, 30_000);
+  assert.ok(coachPolicy.cadence.failureRetryMs < coachPolicy.cadence.minIntervalMs);
+});
+
 test("admission distinguishes a legitimate no-op from a parse failure", () => {
   const context = buildContext();
 

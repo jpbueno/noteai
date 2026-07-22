@@ -16,6 +16,7 @@ export function useAICoach(
 
   const lastAnalyzedCount = useRef(0);
   const lastAnalyzedTime = useRef(0);
+  const lastFailureTime = useRef(0);
   const analyzingRef = useRef(false);
   const replyingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -38,6 +39,12 @@ export function useAICoach(
 
     const wordCount = coachPolicy.countTranscriptWords(segs);
     if (wordCount < coachPolicy.cadence.minWords) return;
+
+    const timeSinceFailure = Date.now() - lastFailureTime.current;
+    if (
+      lastFailureTime.current > 0
+      && timeSinceFailure < coachPolicy.cadence.failureRetryMs
+    ) return;
 
     const autoInsights = autoInsightsFrom(insightsRef.current);
     const context = coachPolicy.buildContext({
@@ -85,6 +92,8 @@ export function useAICoach(
         console.info("[AI Coach] No-op: no new insight cleared the admission policy");
       } else if (outcome.status === "parse_failure") {
         console.warn(`[AI Coach] Model output parse failure: ${outcome.error}`);
+        lastFailureTime.current = Date.now();
+        return;
       } else {
         console.info(
           `[AI Coach] Rejected model output: ${outcome.rejections.map((item) => item.reason).join(", ")}`,
@@ -93,8 +102,12 @@ export function useAICoach(
 
       lastAnalyzedCount.current = segs.length;
       lastAnalyzedTime.current = Date.now();
+      lastFailureTime.current = 0;
     } catch (error) {
-      if (!isAbortError(error)) console.warn("[AI Coach] Analysis failed:", error);
+      if (!isAbortError(error)) {
+        console.warn("[AI Coach] Analysis failed:", error);
+        lastFailureTime.current = Date.now();
+      }
     } finally {
       if (analysisAbortRef.current === controller) analysisAbortRef.current = null;
       if (sessionVersion === sessionVersionRef.current) {
@@ -128,6 +141,7 @@ export function useAICoach(
       setInsights([]);
       lastAnalyzedCount.current = 0;
       lastAnalyzedTime.current = 0;
+      lastFailureTime.current = 0;
     }
   }, [isRecording]);
 

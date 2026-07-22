@@ -110,6 +110,7 @@ const CADENCE = Object.freeze({
   minWords: 25,
   minNewSegments: 2,
   minIntervalMs: 300_000,
+  failureRetryMs: 30_000,
   sparseUpdateIntervalMs: 300_000,
   checkIntervalMs: 8_000,
   topicCooldownMs: 300_000,

@@ -210,11 +210,52 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private struct CommitmentFact {
-        let text: String
         let actorAnchors: Set<String>
+        let actionAnchor: String?
         let objectAnchors: Set<String>
         let timingAnchors: Set<String>
         let isAffirmative: Bool
+        let isSynthetic: Bool
+    }
+
+    private struct CommitmentPredicateMatch {
+        let range: Range<String.Index>
+        let text: String
+        let sharedAuxiliaryBoundaryRange: Range<String.Index>?
+
+        var sharesAuxiliary: Bool {
+            sharedAuxiliaryBoundaryRange != nil
+        }
+    }
+
+    private struct CommitmentQualifierState {
+        let isInquiry: Bool
+        let isAntiAssumptionAdvice: Bool
+        let isEpistemicallyAbsent: Bool
+        let isPrefixNegated: Bool
+
+        var isQualified: Bool {
+            isInquiry || isAntiAssumptionAdvice || isEpistemicallyAbsent || isPrefixNegated
+        }
+
+        func merging(_ other: CommitmentQualifierState) -> CommitmentQualifierState {
+            CommitmentQualifierState(
+                isInquiry: isInquiry || other.isInquiry,
+                isAntiAssumptionAdvice: isAntiAssumptionAdvice || other.isAntiAssumptionAdvice,
+                isEpistemicallyAbsent: isEpistemicallyAbsent || other.isEpistemicallyAbsent,
+                isPrefixNegated: isPrefixNegated || other.isPrefixNegated
+            )
+        }
+    }
+
+    private enum PredicateBoundaryKind {
+        case strong
+        case coordinating
+    }
+
+    private struct PredicateBoundary {
+        let range: Range<String.Index>
+        let kind: PredicateBoundaryKind
     }
 
     private func affirmativeCommitmentFacts(in content: String) -> [CommitmentFact] {
@@ -245,107 +286,312 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func commitmentFacts(inClause clause: String) -> [CommitmentFact] {
-        let predicateRanges = ranges(matching: commitmentPredicatePattern(), in: clause)
+        let predicates = commitmentPredicateMatches(in: clause)
+        let boundaries = predicates.enumerated().map { index, predicate in
+            predicateBoundary(
+                in: clause,
+                before: predicate,
+                after: index > 0 ? predicates[index - 1] : nil
+            )
+        }
+        var facts: [CommitmentFact] = []
         var priorActorAnchors: Set<String> = []
+        var priorQualifierState: CommitmentQualifierState?
+        var priorPredicateWasNegated = false
 
-        return predicateRanges.enumerated().map { index, predicateRange in
-            let boundary = localBoundary(in: clause, before: predicateRange.lowerBound)
-            let localStart = boundary?.upperBound ?? clause.startIndex
+        for (index, predicate) in predicates.enumerated() {
+            let boundary = boundaries[index]
+            let localStart = boundary?.range.upperBound ?? clause.startIndex
             let localEnd: String.Index
-            if index + 1 < predicateRanges.count {
-                let nextRange = predicateRanges[index + 1]
-                if let nextBoundary = localBoundary(in: clause, before: nextRange.lowerBound),
-                   nextBoundary.lowerBound >= predicateRange.upperBound {
-                    localEnd = nextBoundary.lowerBound
-                } else {
-                    localEnd = nextRange.lowerBound
-                }
+            if index + 1 < predicates.count {
+                localEnd = boundaries[index + 1]?.range.lowerBound ?? predicates[index + 1].range.lowerBound
             } else {
                 localEnd = clause.endIndex
             }
 
-            let localPrefix = String(clause[localStart..<predicateRange.lowerBound])
+            let localPrefix = String(clause[localStart..<predicate.range.lowerBound])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let predicateText = String(clause[predicateRange])
-            let localText = String(clause[localStart..<localEnd])
+            let predicateSuffix = String(clause[predicate.range.upperBound..<localEnd])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            var actors = actorAnchors(in: localPrefix, predicateText: predicateText)
-            if actors.isEmpty { actors = priorActorAnchors }
-            if !actors.isEmpty { priorActorAnchors = actors }
-            let timing = timingAnchors(in: localText)
-            let object = distinctiveGroundingTokens(localText)
-                .subtracting(actors)
-                .subtracting(timing.map(stem))
-
-            return CommitmentFact(
-                text: localText,
-                actorAnchors: actors,
-                objectAnchors: object,
-                timingAnchors: timing,
-                isAffirmative: isAffirmativeCommitment(
-                    clause: clause,
-                    localPrefix: localPrefix,
-                    predicateText: predicateText
-                )
+            let explicitActors = actorAnchors(in: localPrefix, predicateText: predicate.text)
+            let isCoordinatedContinuation = boundary?.kind == .coordinating && explicitActors.isEmpty
+            let actors = isCoordinatedContinuation ? priorActorAnchors : explicitActors
+            priorActorAnchors = actors
+            let localQualifierState = qualifierState(
+                in: localPrefix,
+                isQuestion: isPredicateQuestion(in: clause, predicateRange: predicate.range)
             )
+            let qualifierState = isCoordinatedContinuation
+                ? priorQualifierState?.merging(localQualifierState) ?? localQualifierState
+                : localQualifierState
+            priorQualifierState = qualifierState
+            let factText = predicate.text + " " + predicateSuffix
+            var factTimingAnchors = timingAnchors(in: factText)
+            if factTimingAnchors.isEmpty {
+                factTimingAnchors = sharedAuxiliaryTimingAnchors(
+                    in: clause,
+                    after: index,
+                    predicates: predicates,
+                    boundaries: boundaries
+                )
+            }
+            let predicateIsNegated = isPredicateNegated(predicate.text) ||
+                (predicate.sharesAuxiliary && isCoordinatedContinuation && priorPredicateWasNegated)
+            priorPredicateWasNegated = predicateIsNegated
+
+            facts.append(CommitmentFact(
+                actorAnchors: actors,
+                actionAnchor: actionAnchor(in: factText),
+                objectAnchors: distinctiveGroundingTokens(predicateSuffix),
+                timingAnchors: factTimingAnchors,
+                isAffirmative: !qualifierState.isQualified && !predicateIsNegated,
+                isSynthetic: false
+            ))
+        }
+
+        return facts
+    }
+
+    private func commitmentPredicateMatches(in clause: String) -> [CommitmentPredicateMatch] {
+        let primaryMatches = ranges(matching: commitmentPredicatePattern(), in: clause).map {
+            CommitmentPredicateMatch(
+                range: $0,
+                text: String(clause[$0]),
+                sharedAuxiliaryBoundaryRange: nil
+            )
+        }
+        let modifier = #"(?:[\p{L}]+ly|also|even|just|still)\s+"#
+        let sharedActionPattern = #"(?i)(?:,\s*)?\b(?:and|or)\b[\s,:]*((?:(?:not|never)\s+)?(?:"#
+            + modifier + #")*"# + commitmentActionPattern() + #")\b"#
+        let sharedMatches = capturedRanges(
+            matching: sharedActionPattern,
+            captureGroup: 1,
+            in: clause
+        ).map { match in
+            CommitmentPredicateMatch(
+                range: match.capture,
+                text: String(clause[match.capture]),
+                sharedAuxiliaryBoundaryRange: match.full.lowerBound..<match.capture.lowerBound
+            )
+        }
+        let candidates = (primaryMatches + sharedMatches).sorted {
+            if $0.range.lowerBound == $1.range.lowerBound {
+                return $0.range.upperBound < $1.range.upperBound
+            }
+            return $0.range.lowerBound < $1.range.lowerBound
+        }
+        var accepted: [CommitmentPredicateMatch] = []
+
+        for candidate in candidates {
+            if let boundaryRange = candidate.sharedAuxiliaryBoundaryRange {
+                guard let previous = accepted.last,
+                      previous.range.upperBound <= boundaryRange.lowerBound,
+                      !containsStrongPredicateBoundary(
+                          String(clause[previous.range.upperBound..<boundaryRange.lowerBound])
+                      ) else {
+                    continue
+                }
+            }
+            accepted.append(candidate)
+        }
+        return accepted
+    }
+
+    private func containsStrongPredicateBoundary(_ text: String) -> Bool {
+        text.range(
+            of: #"(?i)\b(?:but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func sharedAuxiliaryTimingAnchors(
+        in clause: String,
+        after predicateIndex: Int,
+        predicates: [CommitmentPredicateMatch],
+        boundaries: [PredicateBoundary?]
+    ) -> Set<String> {
+        var nextIndex = predicateIndex + 1
+        var sharedEnd: String.Index?
+
+        while nextIndex < predicates.count,
+              predicates[nextIndex].sharesAuxiliary,
+              boundaries[nextIndex]?.kind == .coordinating {
+            if nextIndex + 1 < predicates.count {
+                sharedEnd = boundaries[nextIndex + 1]?.range.lowerBound ?? predicates[nextIndex + 1].range.lowerBound
+            } else {
+                sharedEnd = clause.endIndex
+            }
+            nextIndex += 1
+        }
+
+        guard let sharedEnd else { return [] }
+        return timingAnchors(in: String(clause[predicates[predicateIndex].range.upperBound..<sharedEnd]))
+    }
+
+    private func predicateBoundary(
+        in clause: String,
+        before predicate: CommitmentPredicateMatch,
+        after previousPredicate: CommitmentPredicateMatch?
+    ) -> PredicateBoundary? {
+        let searchStart = previousPredicate?.range.upperBound ?? clause.startIndex
+        let searchRange = searchStart..<predicate.range.lowerBound
+        var candidates: [PredicateBoundary] = []
+        let strongWord = #"(?i)\b(?:but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)\b[\s,:]*"#
+        if let range = lastRange(matching: strongWord, in: clause, within: searchRange) {
+            candidates.append(PredicateBoundary(range: range, kind: .strong))
+        }
+
+        let coordinating = #"(?i)(?:,\s*)?\b(?:and|or)\b[\s,:]*"#
+        let coordinatingRange: Range<String.Index>?
+        if previousPredicate != nil {
+            coordinatingRange = lastRange(matching: coordinating, in: clause, within: searchRange)
+        } else if let range = lastRange(matching: coordinating, in: clause, within: searchRange),
+                  prefixIntroducesPredicate(String(clause[searchStart..<range.lowerBound])) {
+            coordinatingRange = range
+        } else {
+            coordinatingRange = nil
+        }
+        if let coordinatingRange {
+            candidates.append(PredicateBoundary(range: coordinatingRange, kind: .coordinating))
+        }
+
+        if let commaRange = lastRange(matching: #","#, in: clause, within: searchRange),
+           !(coordinatingRange?.contains(commaRange.lowerBound) ?? false),
+           (previousPredicate != nil || commaIntroducesPredicate(
+               in: clause,
+               commaRange: commaRange,
+               before: predicate.range.lowerBound
+           )) {
+            candidates.append(PredicateBoundary(range: commaRange, kind: .strong))
+        }
+
+        return candidates.max { left, right in
+            if left.range.lowerBound == right.range.lowerBound {
+                return left.range.upperBound < right.range.upperBound
+            }
+            return left.range.lowerBound < right.range.lowerBound
         }
     }
 
-    private func localBoundary(
-        in clause: String,
-        before predicateStart: String.Index
+    private func lastRange(
+        matching pattern: String,
+        in text: String,
+        within searchRange: Range<String.Index>
     ) -> Range<String.Index>? {
-        let boundary = #"(?i)(?:,\s*|\b(?:and|or|but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)\b\s*[:,]?\s*)"#
-        let searchRange = NSRange(clause.startIndex..<predicateStart, in: clause)
-        guard let expression = try? NSRegularExpression(pattern: boundary) else { return nil }
-        return expression.matches(in: clause, range: searchRange)
-            .compactMap { Range($0.range, in: clause) }
-            .last
+        ranges(matching: pattern, in: text).last {
+            $0.lowerBound >= searchRange.lowerBound && $0.upperBound <= searchRange.upperBound
+        }
+    }
+
+    private func prefixIntroducesPredicate(_ prefix: String) -> Bool {
+        let words = normalizedGroundingWords(prefix)
+        if let linkerIndex = words.lastIndex(where: { Self.qualifierLinkWords.contains($0) }),
+           Set(words.dropFirst(linkerIndex + 1)).isDisjoint(with: Self.predicateSignalWords) {
+            return false
+        }
+        return !Set(words).isDisjoint(with: Self.predicateSignalWords)
+    }
+
+    private func commaIntroducesPredicate(
+        in clause: String,
+        commaRange: Range<String.Index>,
+        before predicateStart: String.Index
+    ) -> Bool {
+        let suffixWords = normalizedGroundingWords(String(clause[commaRange.upperBound..<predicateStart]))
+        guard let firstWord = suffixWords.first,
+              !Self.qualifierLinkWords.contains(firstWord) else {
+            return false
+        }
+        return prefixIntroducesPredicate(String(clause[..<commaRange.lowerBound]))
     }
 
     private func commitmentPredicatePattern() -> String {
         let action = commitmentActionPattern()
         let contractedActor = #"[\p{L}][\p{L}\p{N}_-]*['’]"#
+        let modifier = #"(?:[\p{L}]+ly|also|even|just|still)\s+"#
+        let modifiers = #"(?:"# + modifier + #")*"#
+        let willAction = modifiers
+            + #"(?:(?:not|never)\s+)?"#
+            + modifiers
+            + #"(?:be\s+"# + modifiers + #")?"#
+            + action
         return #"(?i)\b(?:"#
-            + #"will\s+(?:(?:not|never)\s+)?(?:be\s+)?"# + action
-            + #"|won['’]t\s+(?:be\s+)?"# + action
-            + #"|"# + contractedActor + #"ll\s+(?:(?:not|never)\s+)?(?:be\s+)?"# + action
-            + #"|(?:plans?|intends?|expects?)\s+(?:(?:not|never)\s+)?to\s+"# + action
+            + #"will\s+"# + willAction
+            + #"|won['’]t\s+(?:be\s+)?"# + modifiers + action
+            + #"|"# + contractedActor + #"ll\s+"# + willAction
+            + #"|(?:plans?|intends?|expects?)\s+(?:(?:not|never)\s+)?to\s+(?:be\s+)?"# + modifiers + action
             + #"|(?:am|is|are)\s+(?:(?:not|never)\s+)?going\s+to\s+(?:be\s+)?"# + action
+            + #"|(?:am|is|are)\s+(?:(?:not|never)\s+)?gonna\s+(?:be\s+)?"# + action
             + #"|(?:isn['’]t|aren['’]t)\s+going\s+to\s+(?:be\s+)?"# + action
+            + #"|(?:isn['’]t|aren['’]t)\s+gonna\s+(?:be\s+)?"# + action
             + #"|"# + contractedActor + #"(?:m|re|s)\s+(?:(?:not|never)\s+)?going\s+to\s+(?:be\s+)?"# + action
+            + #"|"# + contractedActor + #"(?:m|re|s)\s+(?:(?:not|never)\s+)?gonna\s+(?:be\s+)?"# + action
             + #"|committed|agreed|promised)\b"#
     }
 
     private func commitmentActionPattern() -> String {
-        #"(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)"#
+        #"(?:complete|completing|deliver|delivering|email|emailing|follow\s+up|following\s+up|provide|providing|review|reviewing|send|sending|share|sharing|submit|submitting|upload|uploading)"#
     }
 
-    private func isAffirmativeCommitment(
-        clause: String,
-        localPrefix: String,
-        predicateText: String
+    private func actionAnchor(in text: String) -> String? {
+        let actions = [
+            (#"(?i)\b(?:complete|completing)\b"#, "complete"),
+            (#"(?i)\b(?:deliver|delivering)\b"#, "deliver"),
+            (#"(?i)\b(?:email|emailing)\b"#, "email"),
+            (#"(?i)\b(?:follow\s+up|following\s+up)\b"#, "follow_up"),
+            (#"(?i)\b(?:provide|providing)\b"#, "provide"),
+            (#"(?i)\b(?:review|reviewing)\b"#, "review"),
+            (#"(?i)\b(?:send|sending)\b"#, "send"),
+            (#"(?i)\b(?:share|sharing)\b"#, "share"),
+            (#"(?i)\b(?:submit|submitting)\b"#, "submit"),
+            (#"(?i)\b(?:upload|uploading)\b"#, "upload"),
+        ]
+        return actions.compactMap { pattern, anchor -> (String.Index, String)? in
+            text.range(of: pattern, options: .regularExpression).map { ($0.lowerBound, anchor) }
+        }.min { $0.0 < $1.0 }?.1
+    }
+
+    private func isPredicateQuestion(
+        in clause: String,
+        predicateRange: Range<String.Index>
     ) -> Bool {
-        !isCommitmentInquiry(clause: clause, localPrefix: localPrefix) &&
-            !isAntiAssumptionAdvice(localPrefix) &&
-            !isEpistemicallyAbsent(localPrefix) &&
-            !isDirectlyNegated(localPrefix: localPrefix, predicateText: predicateText)
+        guard clause.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") else {
+            return false
+        }
+        let boundary = #"(?:and|or|but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then|while|nevertheless)"#
+        let interrogative = #"(?:will|won['’]t|can|could|should|would|do|does|did|is|are|am|how|when|what|why|who|where)"#
+        let mixedQuestion = #"(?i)(?:,\s*(?:"# + boundary + #"\b[\s,:]*)?|\b"#
+            + boundary + #"\b[\s,:]*)"# + interrogative + #"\b"#
+        let suffix = String(clause[predicateRange.upperBound...])
+        let tagQuestion = #"(?i),\s*(?:right|correct|ok(?:ay)?|"#
+            + #"(?:is|are|was|were|do|does|did|has|have|can|could|should|would|will|"#
+            + #"won['’]t|isn['’]t|aren['’]t|don['’]t|doesn['’]t|didn['’]t|hasn['’]t|haven['’]t)\b[^,;?.]*)\?[.!?]*\s*$"#
+        if suffix.range(of: tagQuestion, options: .regularExpression) != nil {
+            return false
+        }
+        return suffix.range(of: mixedQuestion, options: .regularExpression) == nil
     }
 
-    private func isCommitmentInquiry(clause: String, localPrefix: String) -> Bool {
-        if clause.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") { return true }
+    private func qualifierState(
+        in localPrefix: String,
+        isQuestion: Bool
+    ) -> CommitmentQualifierState {
+        CommitmentQualifierState(
+            isInquiry: isCommitmentInquiry(localPrefix, isQuestion: isQuestion),
+            isAntiAssumptionAdvice: isAntiAssumptionAdvice(localPrefix),
+            isEpistemicallyAbsent: isEpistemicallyAbsent(localPrefix),
+            isPrefixNegated: isPrefixNegated(localPrefix)
+        )
+    }
+
+    private func isCommitmentInquiry(_ localPrefix: String, isQuestion: Bool) -> Bool {
+        if isQuestion { return true }
         let inquiryCue = #"(?:whether|if|when|how|what|why|who|where)"#
-        let qualifiedInquiry = #"(?i)^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b"#
-            + inquiryCue + #"\b"#
+        let inquiryVerb = #"(?:ask(?:s|ed|ing)?|check(?:s|ed|ing)?|clarif(?:y|ies|ied|ying)|confirm(?:s|ed|ing)?|determin(?:e|es|ed|ing)|prob(?:e|es|ed|ing)|verif(?:y|ies|ied|ying)|wonder(?:s|ed|ing)?)"#
+        let qualifiedInquiry = #"(?i)\b"# + inquiryVerb + #"\b[\s\S]*\b"# + inquiryCue + #"\b"#
         let embeddedInquiry = #"(?i)^(?:and\s+|or\s+)?"# + inquiryCue + #"\b"#
-        let reportedInquiry = #"(?i)\b(?:asked|checked|clarified|confirmed|determined|probed|verified)\b[\s\S]*\b"#
-            + inquiryCue + #"\b"#
-        return localPrefix.range(
-            of: qualifiedInquiry,
-            options: .regularExpression
-        ) != nil ||
-            localPrefix.range(of: embeddedInquiry, options: .regularExpression) != nil ||
-            localPrefix.range(of: reportedInquiry, options: .regularExpression) != nil
+        return localPrefix.range(of: qualifiedInquiry, options: .regularExpression) != nil ||
+            localPrefix.range(of: embeddedInquiry, options: .regularExpression) != nil
     }
 
     private func isAntiAssumptionAdvice(_ localPrefix: String) -> Bool {
@@ -356,21 +602,33 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func isEpistemicallyAbsent(_ localPrefix: String) -> Bool {
-        localPrefix.range(
-            of: #"(?i)\b(?:no\s+(?:evidence|indication|confirmation)|not\s+confirmed|cannot\s+confirm|can['’]t\s+confirm|unconfirmed)\b"#,
+        let patterns = [
+            #"(?i)\b(?:no\s+(?:evidence|indication|confirmation|proof|guarantee)|insufficient\s+(?:evidence|indication|confirmation|proof)|(?:not|never)(?:\s+yet)?\s+confirm(?:ed|ing)?|cannot\s+confirm|can['’]t\s+confirm|unconfirmed)\b"#,
+            #"(?i)\b(?:(?:remain(?:s|ed|ing)?\s+)?(?:unclear|uncertain|unknown)|(?:do|does|did)\s+not\s+know|(?:don|doesn|didn)['’]t\s+know|cannot\s+know|can['’]t\s+know)\b"#,
+            #"(?i)\brequest(?:s|ed|ing)?\s+(?:(?:additional|explicit|further)\s+)?confirmation\b"#,
+            #"(?i)\b(?:(?:am|is|are|was|were)\s+(?:still\s+)?not\s+(?:entirely\s+)?sure|(?:isn|aren|wasn|weren)['’]t\s+(?:entirely\s+)?sure)\b"#,
+            #"(?i)\b(?:i|we|they|he|she|it|customer|partner|team|speaker)\s+doubt(?:s|ed|ing)?\b"#,
+        ]
+        return patterns.contains {
+            localPrefix.range(of: $0, options: .regularExpression) != nil
+        }
+    }
+
+    private func isPrefixNegated(_ localPrefix: String) -> Bool {
+        return localPrefix.range(
+            of: #"(?i)(?:\b(?:not|never)|n['’]t)(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$"#,
             options: .regularExpression
         ) != nil
     }
 
-    private func isDirectlyNegated(localPrefix: String, predicateText: String) -> Bool {
-        if predicateText.range(
-            of: #"(?i)(?:\b(?:not|never)\b|n['’]t\b)"#,
+    private func isPredicateNegated(_ predicateText: String) -> Bool {
+        let withoutNotOnly = predicateText.replacingOccurrences(
+            of: #"(?i)\bnot\s+only\b"#,
+            with: "",
             options: .regularExpression
-        ) != nil {
-            return true
-        }
-        return localPrefix.range(
-            of: #"(?i)(?:\b(?:not|never)|n['’]t)(?:\s+(?:actually|currently|ever|explicitly|formally|previously|yet))*\s*$"#,
+        )
+        return withoutNotOnly.range(
+            of: #"(?i)(?:\b(?:not|never)\b|n['’]t\b)"#,
             options: .regularExpression
         ) != nil
     }
@@ -380,13 +638,13 @@ struct CoachAdmissionPolicy: Sendable {
         let timing = timingAnchors(in: content)
         let object = distinctiveGroundingTokens(content)
             .subtracting(actors)
-            .subtracting(timing.map(stem))
         return CommitmentFact(
-            text: content,
             actorAnchors: actors,
+            actionAnchor: actionAnchor(in: content),
             objectAnchors: object,
             timingAnchors: timing,
-            isAffirmative: true
+            isAffirmative: true,
+            isSynthetic: true
         )
     }
 
@@ -400,8 +658,18 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func factsAreCompatible(candidate: CommitmentFact, evidence: CommitmentFact) -> Bool {
+        if candidate.isSynthetic,
+           candidate.actorAnchors.isEmpty,
+           candidate.objectAnchors.isEmpty,
+           candidate.timingAnchors.isEmpty {
+            return false
+        }
         if !candidate.actorAnchors.isEmpty,
            candidate.actorAnchors.isDisjoint(with: evidence.actorAnchors) {
+            return false
+        }
+        if let candidateAction = candidate.actionAnchor,
+           candidateAction != evidence.actionAnchor {
             return false
         }
         if !candidate.timingAnchors.isEmpty,
@@ -416,71 +684,114 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func actorAnchors(in localPrefix: String, predicateText: String) -> Set<String> {
-        if let speakerAnchors = speakerLabelActorAnchors(in: localPrefix) {
-            return speakerAnchors
-        }
+        let speakerAnchor = speakerLabelActorAnchor(in: localPrefix)
         if let contractedActor = firstCapture(
             matching: #"(?i)^([\p{L}][\p{L}\p{N}_-]*)['’](?:ll|m|re|s)\b"#,
             in: predicateText
-        ) {
-            return canonicalActorAnchors([stem(contractedActor.lowercased())])
+        ), let actorAnchor = canonicalActorPhrase([contractedActor.lowercased()]) {
+            if Self.firstPersonActorAnchors.contains(actorAnchor), let speakerAnchor {
+                return [speakerAnchor]
+            }
+            return [actorAnchor]
         }
 
-        var actorSource = localPrefix
-        if let colon = actorSource.lastIndex(of: ":") {
-            actorSource = String(actorSource[actorSource.index(after: colon)...])
+        let actorSource: String
+        if let colon = localPrefix.lastIndex(of: ":") {
+            actorSource = String(localPrefix[localPrefix.index(after: colon)...])
+        } else {
+            actorSource = localPrefix
         }
-        let inquiryCue = #"(?i)\b(?:whether|if|when|how|what|why|who|where)\b"#
-        if let cueRange = ranges(matching: inquiryCue, in: actorSource).last {
-            actorSource = String(actorSource[cueRange.upperBound...])
+        if let actorAnchor = grammaticalActorAnchor(in: actorSource) {
+            if Self.firstPersonActorAnchors.contains(actorAnchor), let speakerAnchor {
+                return [speakerAnchor]
+            }
+            return [actorAnchor]
         }
-        return actorAnchorSet(from: actorSource)
+        return speakerAnchor.map { [$0] } ?? []
     }
 
-    private func speakerLabelActorAnchors(in text: String) -> Set<String>? {
-        guard let colon = text.firstIndex(of: ":") else { return nil }
-        let label = String(text[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let words = normalizedGroundingWords(label)
-        guard !words.isEmpty,
-              words.count <= 4,
-              Set(words).isDisjoint(with: Self.speakerLabelDisqualifiers) else {
-            return nil
+    private func speakerLabelActorAnchor(in text: String) -> String? {
+        guard let colon = text.lastIndex(of: ":") else { return nil }
+        return grammaticalActorAnchor(in: String(text[..<colon]))
+    }
+
+    private func grammaticalActorAnchor(in text: String) -> String? {
+        var words = normalizedGroundingWords(text)
+        if let delimiterIndex = words.lastIndex(where: { Self.actorSubjectDelimiterWords.contains($0) }) {
+            words = Array(words.dropFirst(delimiterIndex + 1))
         }
-        let anchors = actorAnchorSet(from: label)
-        return anchors.isEmpty ? nil : anchors
+        while let last = words.last,
+              Self.actorTrailingScaffoldingWords.contains(last) || last.hasSuffix("ly") {
+            words.removeLast()
+        }
+        while let first = words.first, Self.actorLeadingScaffoldingWords.contains(first) {
+            words.removeFirst()
+        }
+        return canonicalActorPhrase(words)
     }
 
-    private func actorAnchorSet(from text: String) -> Set<String> {
-        let anchors = normalizedGroundingWords(text)
-            .filter { !Self.actorScaffoldingWords.contains($0) }
-            .suffix(3)
-            .map(stem)
-        return canonicalActorAnchors(anchors)
+    private func canonicalActorPhrase(_ words: [String]) -> String? {
+        let canonicalWords = words
+            .filter { !Self.actorPhraseIgnoredWords.contains($0) }
+            .map(canonicalActorWord)
+        let specificWords = canonicalWords.filter { !Self.genericActorRoleWords.contains($0) }
+        let chosenWords = specificWords.isEmpty ? canonicalWords : specificWords
+        let phrase = chosenWords.joined(separator: " ")
+        return phrase.isEmpty ? nil : phrase
     }
 
-    private func canonicalActorAnchors<S: Sequence>(_ anchors: S) -> Set<String>
-    where S.Element == String {
-        let allAnchors = Set(anchors)
-        let specificAnchors = allAnchors.subtracting(Self.genericActorRoleWords)
-        return specificAnchors.isEmpty ? allAnchors : specificAnchors
+    private func canonicalActorWord(_ word: String) -> String {
+        Self.canonicalActorWords[word] ?? word
     }
 
     private func syntheticActorAnchors(in text: String) -> Set<String> {
         var anchors = Set(normalizedGroundingWords(text).filter {
             Self.explicitActorWords.contains($0)
-        }.map(stem))
+        }.map(canonicalActorWord))
         anchors.formUnion(captures(
             matching: #"(?i)\b([\p{L}][\p{L}\p{N}_-]*)['’]s\b"#,
             in: text
-        ).map { stem($0.lowercased()) })
-        if let speakerAnchors = speakerLabelActorAnchors(in: text) {
-            anchors.formUnion(speakerAnchors)
+        ).map { canonicalActorWord($0.lowercased()) })
+        if let speakerAnchor = speakerLabelActorAnchor(in: text) {
+            anchors.insert(speakerAnchor)
         }
-        return canonicalActorAnchors(anchors)
+        return anchors
     }
 
     private func timingAnchors(in text: String) -> Set<String> {
-        Set(normalizedGroundingWords(text).filter { Self.timingAnchorWords.contains($0) })
+        let day = #"(?:monday|mon|tuesday|tues?|wednesday|wed|thursday|thurs?|fri(?:day)?|saturday|sat|sunday|sun)"#
+        let period = #"(?:day|week|month|quarter|year)"#
+        let month = #"(?:january|february|march|april|may|june|july|august|september|october|november|december)"#
+        let pattern = #"(?i)\b(?:(?:by\s+)?(?:the\s+)?end\s+of\s+(?:the\s+)?(?:business\s+)?"# + period
+            + #"|(?:next|this|last)\s+(?:"# + period + #"|"# + day + #")"#
+            + #"|(?:first|second|third|fourth)\s+quarter|q[1-4]"#
+            + #"|today|tomorrow|tonight|yesterday|soon|later|morning|afternoon|evening|"#
+            + day + #"|"# + month + #")\b"#
+        return Set(ranges(matching: pattern, in: text).map {
+            normalizedGroundingWords(String(text[$0]))
+                .filter { $0 != "by" && $0 != "the" }
+                .map { Self.canonicalTimingWords[$0] ?? $0 }
+                .joined(separator: " ")
+        })
+    }
+
+    private func capturedRanges(
+        matching pattern: String,
+        captureGroup: Int,
+        in text: String
+    ) -> [(full: Range<String.Index>, capture: Range<String.Index>)] {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+        return expression.matches(
+            in: text,
+            range: NSRange(text.startIndex..<text.endIndex, in: text)
+        ).compactMap { match in
+            guard match.numberOfRanges > captureGroup,
+                  let fullRange = Range(match.range, in: text),
+                  let captureRange = Range(match.range(at: captureGroup), in: text) else {
+                return nil
+            }
+            return (fullRange, captureRange)
+        }
     }
 
     private func ranges(matching pattern: String, in text: String) -> [Range<String.Index>] {
@@ -525,36 +836,83 @@ struct CoachAdmissionPolicy: Sendable {
             .map(String.init)
     }
 
-    private static let speakerLabelDisqualifiers: Set<String> = [
-        "ask", "asking", "check", "checking", "clarify", "clarifying", "confirm", "confirming",
-        "determine", "if", "how", "please", "probe", "recommend", "suggest", "verify", "what",
-        "when", "where", "whether", "who", "why",
+    private static let predicateSignalWords: Set<String> = [
+        "am", "are", "ask", "asked", "asking", "asks", "check", "checked", "checking", "checks",
+        "clarified", "confirmed", "determined", "doubt", "doubted", "doubting", "doubts", "had", "has", "have",
+        "is", "probed", "reported", "said",
+        "request", "requested", "requesting", "requests", "verified", "was", "were", "wonder", "wondered",
+        "wondering", "wonders",
     ]
 
-    private static let actorScaffoldingWords: Set<String> = [
-        "a", "about", "an", "and", "are", "ask", "asked", "asking", "assume", "at", "can",
-        "cannot", "check", "checked", "checking", "claim", "clarified", "clarify", "clarifying",
-        "confirm", "confirmation", "confirmed", "confirming", "determine", "determined", "did", "do",
-        "does", "evidence", "for", "from", "had", "has", "have", "how", "if", "in", "indication",
-        "infer", "is", "it", "its", "never", "no", "not", "of", "on", "please", "presume", "probe",
-        "probed", "recommend", "said", "say", "says", "state", "suggest", "that", "the", "there", "to",
-        "treat", "unconfirmed", "verify", "verified", "was", "were", "what", "when", "where", "whether",
-        "which", "who", "why", "with",
+    private static let qualifierLinkWords: Set<String> = [
+        "how", "if", "that", "what", "when", "where", "whether", "which", "who", "why",
+    ]
+
+    private static let firstPersonActorAnchors: Set<String> = ["i", "we"]
+
+    private static let actorSubjectDelimiterWords: Set<String> = [
+        "ask", "asked", "asking", "asks", "assume", "assumed", "assuming", "check", "checked", "checking",
+        "checks", "claim", "claimed", "claims", "clarified", "clarifies", "clarify", "clarifying", "confirm",
+        "confirmation", "confirmed", "confirming", "confirms", "determined", "determines", "determining",
+        "doubt", "doubted", "doubting", "doubts", "evidence", "how", "if", "indication", "infer", "inferred",
+        "infers", "know", "knew", "knows",
+        "presume", "presumed", "presumes", "probe", "probed", "probes", "report", "reported", "reports",
+        "requested", "requesting", "requests", "said", "say", "says", "state", "stated", "states", "suggest",
+        "suggested", "suggests", "that",
+        "told", "treat", "treated", "treats", "uncertain", "unclear", "unknown", "verified", "verifies",
+        "verify", "verifying", "what", "when", "where", "whether", "which", "who", "why", "wondered",
+        "wondering", "wonders",
+    ]
+
+    private static let actorTrailingScaffoldingWords: Set<String> = [
+        "actually", "also", "am", "are", "can", "cannot", "certainly", "currently", "definitely", "did",
+        "do", "does", "eventually", "explicitly", "formally", "had", "has", "have", "is", "likely", "never",
+        "not", "personally", "probably", "still", "t", "tentatively", "was", "were", "will", "won", "would",
+        "yet",
+    ]
+
+    private static let actorLeadingScaffoldingWords: Set<String> = [
+        "a", "an", "please", "the", "without",
+    ]
+
+    private static let actorPhraseIgnoredWords: Set<String> = [
+        "a", "an", "and", "or", "s", "t", "the",
     ]
 
     private static let genericActorRoleWords: Set<String> = [
         "company", "group", "organization", "rep", "representative", "team",
     ]
 
-    private static let explicitActorWords: Set<String> = [
-        "client", "customer", "i", "owner", "partner", "speaker", "team", "we",
+    private static let canonicalActorWords: [String: String] = [
+        "clients": "client",
+        "companies": "company",
+        "customers": "customer",
+        "groups": "group",
+        "organizations": "organization",
+        "partners": "partner",
+        "representatives": "representative",
+        "speakers": "speaker",
+        "teams": "team",
+        "users": "user",
+        "vendors": "vendor",
     ]
 
-    private static let timingAnchorWords: Set<String> = [
-        "afternoon", "april", "august", "day", "december", "evening", "february", "friday", "january",
-        "july", "june", "later", "march", "may", "monday", "month", "morning", "next", "november",
-        "october", "quarter", "saturday", "september", "soon", "sunday", "this", "thursday", "today",
-        "tomorrow", "tonight", "tuesday", "wednesday", "week", "year",
+    private static let explicitActorWords: Set<String> = [
+        "client", "clients", "customer", "customers", "i", "owner", "owners", "partner", "partners",
+        "speaker", "speakers", "team", "teams", "user", "users", "vendor", "vendors", "we",
+    ]
+
+    private static let canonicalTimingWords: [String: String] = [
+        "fri": "friday",
+        "mon": "monday",
+        "sat": "saturday",
+        "sun": "sunday",
+        "thu": "thursday",
+        "thur": "thursday",
+        "thurs": "thursday",
+        "tue": "tuesday",
+        "tues": "tuesday",
+        "wed": "wednesday",
     ]
 
     private static let genericGroundingWords: Set<String> = [
@@ -572,15 +930,23 @@ struct CoachAdmissionPolicy: Sendable {
         "expecting", "commit", "commits", "committed", "commitment", "commitments", "agree", "agrees",
         "agreed", "agreement", "promise", "promises", "promised",
         "complete", "completes", "completed", "completing", "deliver", "delivers", "delivered", "delivering",
+        "email", "emails", "emailed", "emailing",
         "follow", "follows", "followed", "following", "up", "provide", "provides", "provided", "providing",
+        "review", "reviews", "reviewed", "reviewing",
         "send", "sends", "sent", "sending", "share", "shares", "shared", "sharing", "submit", "submits",
-        "submitted", "submitting", "ask", "asks", "asked", "asking", "check", "checked", "checking", "clarified",
+        "submitted", "submitting", "upload", "uploads", "uploaded", "uploading",
+        "ask", "asks", "asked", "asking", "check", "checked", "checking", "clarified",
         "confirm", "confirmation", "confirmed", "clarify", "cannot", "determine", "determined", "do", "does", "did",
         "evidence", "indication", "never", "no", "not", "please", "probe", "probed", "recommend", "suggest",
-        "track", "unconfirmed", "verify", "verified", "discuss", "discussed", "discussion",
-        "today", "tomorrow", "tonight", "yesterday", "soon", "later", "next", "time", "timing", "day",
-        "week", "month", "quarter", "year", "morning", "afternoon", "evening", "date", "deadline",
-        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february",
+        "track", "unconfirmed", "uncertain", "unclear", "unknown", "know", "knows", "knew", "remains",
+        "verify", "verified", "discuss", "discussed", "discussion",
+        "actually", "also", "certainly", "definitely", "even", "eventually", "explicitly", "formally", "just",
+        "likely", "personally", "probably", "still", "tentatively",
+        "today", "tomorrow", "tonight", "yesterday", "soon", "later", "next", "time", "timing", "business", "day",
+        "week", "month", "quarter", "year", "morning", "afternoon", "evening", "date", "deadline", "end",
+        "first", "second", "third", "fourth", "last", "q1", "q2", "q3", "q4",
+        "mon", "monday", "tue", "tues", "tuesday", "wed", "wednesday", "thu", "thur", "thurs", "thursday",
+        "fri", "friday", "sat", "saturday", "sun", "sunday", "january", "february",
         "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
     ]
 

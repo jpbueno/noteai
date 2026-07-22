@@ -234,19 +234,33 @@ final class AICoachAdmissionTests: XCTestCase {
             "Customer will deliver results tomorrow.",
             "Customer is going to deliver tomorrow.",
             "Customer is going to be delivering results tomorrow.",
+            "Customer will definitely deliver results tomorrow.",
+            "Customer definitely will deliver results tomorrow.",
+            "Customer will upload logs tomorrow.",
+            "Customer will promptly upload logs tomorrow.",
+            "Customer will email results tomorrow.",
+            "Customer will review benchmarks tomorrow.",
+            "Customer will deliver results and follow up tomorrow.",
+            "Customer will send results and share benchmarks tomorrow.",
+            "Customer will deliver results tomorrow, won't they?",
+            "Customer will deliver results tomorrow, right?",
             "We'll send results tomorrow.",
             "We’ll send results tomorrow.",
             "We're going to deliver results tomorrow.",
             "We’re going to deliver results tomorrow.",
+            "We're gonna send results tomorrow.",
+            "We’re gonna send results tomorrow.",
             "Ask for logs; customer will deliver tomorrow.",
             "Ask for logs and customer will deliver tomorrow.",
             "Ask whether customer will deliver results, and partner will send logs tomorrow.",
             "Ask whether logs are available, but customer will deliver tomorrow.",
             "Please ask whether logs are available, but customer will deliver tomorrow.",
             "Do not speculate about timing because customer will deliver tomorrow.",
+            "I doubt the timing, and customer will deliver results tomorrow.",
             "Do not assume the customer agreed, but partner will deliver tomorrow.",
             "Do not assume customer agreed, and partner will send logs tomorrow.",
             "Do not assume customer agreed while partner will deliver results tomorrow.",
+            "Customer will deliver results tomorrow, but will partner send logs?",
             "Customer committed to deliver tomorrow. Is that confirmed?",
             "Acme will deliver tomorrow.",
             "I will send the results.",
@@ -267,6 +281,19 @@ final class AICoachAdmissionTests: XCTestCase {
             "Checking what Acme will deliver tomorrow.",
             "Clarifying who will provide results tomorrow.",
             "Confirming where Acme will deliver results tomorrow.",
+            "Ask whether the customer agreed or promised to deliver results tomorrow.",
+            "They asked whether the customer and partner agreed.",
+            "The customer has not agreed or promised to deliver results tomorrow.",
+            "It remains unclear whether customer will deliver results tomorrow.",
+            "We don't know whether customer will deliver results tomorrow.",
+            "They wondered whether the customer will deliver results tomorrow.",
+            "They requested confirmation that the customer will deliver results tomorrow.",
+            "They requested confirmation that the customer and partner will deliver results tomorrow.",
+            "There is insufficient evidence that the customer will deliver results tomorrow.",
+            "There is no guarantee that the customer will deliver results tomorrow.",
+            "It is uncertain whether the customer will deliver results tomorrow.",
+            "We are not sure whether the customer will deliver results tomorrow.",
+            "I doubt the customer will deliver results tomorrow.",
             "Do not assume the customer agreed.",
             "Do not infer the customer will deliver tomorrow.",
             "Please do not assume the customer will deliver results tomorrow.",
@@ -274,6 +301,7 @@ final class AICoachAdmissionTests: XCTestCase {
             "Don’t assume the customer will deliver results tomorrow.",
             "Please don't assume the customer will deliver results tomorrow.",
             "Please don’t assume the customer will deliver results tomorrow.",
+            "Do not assume, without confirmation, that customer will deliver results tomorrow.",
             "The customer has not agreed to deliver tomorrow.",
             "The customer will not deliver tomorrow.",
             "We won't send results tomorrow.",
@@ -281,6 +309,7 @@ final class AICoachAdmissionTests: XCTestCase {
             "The customer does not expect to provide results tomorrow.",
             "How will the team deliver these results?",
             "Customer will deliver tomorrow?",
+            "Will the customer deliver results, or will the partner send logs?",
             "Confirm whether the team plans to deliver tomorrow.",
         ]
         let nonTranscriptBases: [CoachInsightBasis] = [.recommendation, .domainKnowledge]
@@ -399,7 +428,47 @@ final class AICoachAdmissionTests: XCTestCase {
             ),
             (
                 candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer said Acme will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer: Acme will deliver results tomorrow."
+            ),
+            (
+                candidate: "Sales and Development will deliver results tomorrow.",
+                evidence: "Research and Development will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
                 evidence: "Customer will deliver results next quarter."
+            ),
+            (
+                candidate: "Customer will deliver results by end of day.",
+                evidence: "Customer will deliver results by end of week."
+            ),
+            (
+                candidate: "Customer will deliver results next Friday.",
+                evidence: "Customer will deliver results this Friday."
+            ),
+            (
+                candidate: "Customer will deliver results by end of business day.",
+                evidence: "Customer will deliver results by end of business week."
+            ),
+            (
+                candidate: "Customer will deliver results next Fri.",
+                evidence: "Customer will deliver results this Fri."
+            ),
+            (
+                candidate: "Customer will follow up tomorrow.",
+                evidence: "Customer will send tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results and follow up tomorrow.",
+                evidence: "Customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will send results and share benchmarks tomorrow.",
+                evidence: "Customer will send results tomorrow."
             ),
             (
                 candidate: "Customer will deliver benchmark results tomorrow.",
@@ -432,6 +501,50 @@ final class AICoachAdmissionTests: XCTestCase {
             (
                 candidate: "Customer will deliver results tomorrow.",
                 evidence: "It is unconfirmed that the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "It remains unclear whether customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "We don't know whether customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "They wondered whether the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "They requested confirmation that the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "There is insufficient evidence that the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "There is no guarantee that the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "It is uncertain whether the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "We are not sure whether the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "I doubt the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer agreed to deliver results tomorrow.",
+                evidence: "They asked whether the customer agreed or promised to deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer promised to deliver results tomorrow.",
+                evidence: "They asked whether the customer agreed or promised to deliver results tomorrow."
             ),
         ]
 
@@ -492,6 +605,10 @@ final class AICoachAdmissionTests: XCTestCase {
                 evidence: "Customer: We will deliver results tomorrow."
             ),
             (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "They asked for logs and customer will deliver results tomorrow."
+            ),
+            (
                 candidate: "Acme will deliver results tomorrow.",
                 evidence: "Acme will deliver results tomorrow."
             ),
@@ -502,6 +619,78 @@ final class AICoachAdmissionTests: XCTestCase {
             (
                 candidate: "We'll send results tomorrow.",
                 evidence: "We will send results tomorrow."
+            ),
+            (
+                candidate: "WE'LL SEND RESULTS TOMORROW.",
+                evidence: "we’ll send results tomorrow."
+            ),
+            (
+                candidate: "We're gonna send results tomorrow.",
+                evidence: "we’re gonna send results tomorrow."
+            ),
+            (
+                candidate: "Customer will follow up tomorrow.",
+                evidence: "Customer will be following up tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer will deliver results and follow up tomorrow."
+            ),
+            (
+                candidate: "Customer will follow up tomorrow.",
+                evidence: "Customer will deliver results and follow up tomorrow."
+            ),
+            (
+                candidate: "Customer will send results tomorrow.",
+                evidence: "Customer will send results and share benchmarks tomorrow."
+            ),
+            (
+                candidate: "Customer will share benchmarks tomorrow.",
+                evidence: "Customer will send results and share benchmarks tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results and follow up tomorrow.",
+                evidence: "Customer will deliver results and follow up tomorrow."
+            ),
+            (
+                candidate: "Customer will send results and share benchmarks tomorrow.",
+                evidence: "Customer will send results and share benchmarks tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results by end of day.",
+                evidence: "Customer will be delivering results by the end of day."
+            ),
+            (
+                candidate: "Customer will deliver results next Friday.",
+                evidence: "Customer will be delivering results next Friday."
+            ),
+            (
+                candidate: "Customer will deliver results by end of business day.",
+                evidence: "Customer will be delivering results by the end of the business day."
+            ),
+            (
+                candidate: "Customer will deliver results next Fri.",
+                evidence: "Customer will be delivering results next Fri."
+            ),
+            (
+                candidate: "Customer will deliver results next Friday.",
+                evidence: "Customer will be delivering results next Fri."
+            ),
+            (
+                candidate: "Research and Development will deliver results tomorrow.",
+                evidence: "Research and Development will be delivering results tomorrow."
+            ),
+            (
+                candidate: "Customer will upload logs tomorrow.",
+                evidence: "Customer will be uploading logs tomorrow."
+            ),
+            (
+                candidate: "Customer will email results tomorrow.",
+                evidence: "Customer will be emailing results tomorrow."
+            ),
+            (
+                candidate: "Customer will review benchmarks tomorrow.",
+                evidence: "Customer will be reviewing benchmarks tomorrow."
             ),
         ]
 
@@ -576,6 +765,38 @@ final class AICoachAdmissionTests: XCTestCase {
         XCTAssertEqual(namedActor.rejections.map(\.reason), [.unsupportedCommitment])
         XCTAssertEqual(actorless.accepted.map(\.type), [.actionItem])
         XCTAssertEqual(actorless.rejections, [])
+    }
+
+    func testAdmissionRejectsAnchorlessSyntheticActionItemsButAllowsMeaningfulActorlessTasks() {
+        let evidence = "The customer committed to sending utilization data tomorrow."
+        let transcript = [TranscriptSegment(id: 12, text: evidence, startTime: 120, endTime: 128)]
+        let anchorless = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .actionItem,
+                content: "Follow up.",
+                sourceSegmentIDs: [12]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+        let meaningful = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .actionItem,
+                content: "Send utilization data tomorrow.",
+                sourceSegmentIDs: [12]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(anchorless.accepted, [])
+        XCTAssertEqual(anchorless.rejections.map(\.reason), [.unsupportedCommitment])
+        XCTAssertEqual(meaningful.accepted.map(\.type), [.actionItem])
+        XCTAssertEqual(meaningful.rejections, [])
     }
 
     func testAdmissionPreservesPresentTenseDomainKnowledgeButRejectsFutureClaim() {

@@ -1,0 +1,253 @@
+import Foundation
+
+protocol AICoachGenerating: Sendable {
+    func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult
+    func answerQuestion(_ request: CoachQuestionRequest) async throws -> String
+}
+
+protocol CoachClock: Sendable {
+    func currentDate() -> Date
+}
+
+struct SystemCoachClock: CoachClock {
+    func currentDate() -> Date { Date() }
+}
+
+enum CoachAnalysisOutcome: Equatable, Sendable {
+    case notReady
+    case busy
+    case noOp
+    case admitted([CoachInsight])
+    case rejected([CoachCandidateRejection])
+    case malformed(String)
+    case staleSession
+    case failed(String)
+}
+
+enum CoachQuestionOutcome: Equatable, Sendable {
+    case ignored
+    case busy
+    case answered(CoachChatMessage)
+    case staleSession
+    case failed(String)
+}
+
+struct LiveCoachSnapshot: Equatable, Sendable {
+    let sessionID: UUID
+    let autoInsights: [CoachInsight]
+    let chatMessages: [CoachChatMessage]
+}
+
+enum CoachInsightLifecycleMutationOutcome: Equatable, Sendable {
+    case updated(CoachInsight)
+    case notFound
+    case activeBudgetExceeded
+    case staleSession
+}
+
+protocol CoachInsightLifecycleMutating: Sendable {
+    func setAutoInsightLifecycle(
+        id: UUID,
+        lifecycle: CoachInsightLifecycle
+    ) async -> CoachInsightLifecycleMutationOutcome
+}
+
+actor LiveCoachSession: CoachInsightLifecycleMutating {
+    nonisolated let id: UUID
+
+    private let generator: any AICoachGenerating
+    private let clock: any CoachClock
+    private let admissionPolicy: CoachAdmissionPolicy
+    private var context: CoachContext
+    private var isActive = true
+    private var autoInsights: [CoachInsight] = []
+    private var chatMessages: [CoachChatMessage] = []
+    private var analysisTask: Task<CoachGenerationResult, Error>?
+    private var analysisRequestID: UUID?
+    private var questionTask: Task<String, Error>?
+    private var questionRequestID: UUID?
+
+    init(
+        id: UUID = UUID(),
+        generator: any AICoachGenerating,
+        clock: any CoachClock = SystemCoachClock(),
+        contextPolicy: CoachContextPolicy = .default,
+        admissionPolicy: CoachAdmissionPolicy = .default
+    ) {
+        self.id = id
+        self.generator = generator
+        self.clock = clock
+        self.context = CoachContext(policy: contextPolicy)
+        self.admissionPolicy = admissionPolicy
+    }
+
+    func isAnalysisReady(transcript: [TranscriptSegment]) -> Bool {
+        guard isActive, analysisTask == nil else { return false }
+        return context.isAnalysisReady(transcript: transcript, now: clock.currentDate())
+    }
+
+    func analyze(transcript: [TranscriptSegment]) async -> CoachAnalysisOutcome {
+        guard isActive else { return .staleSession }
+        guard analysisTask == nil else { return .busy }
+
+        let requestDate = clock.currentDate()
+        guard let request = context.prepareAnalysis(
+            sessionID: id,
+            transcript: transcript,
+            priorInsights: autoInsights,
+            now: requestDate
+        ) else {
+            return .notReady
+        }
+
+        let requestID = UUID()
+        let task = Task { try await generator.generateInsights(for: request) }
+        analysisRequestID = requestID
+        analysisTask = task
+
+        do {
+            let generated = try await task.value
+            let requestIsCurrent = isActive && analysisRequestID == requestID
+            clearAnalysisTask(requestID: requestID)
+            guard requestIsCurrent else { return .staleSession }
+
+            let completionDate = clock.currentDate()
+            context.completeAnalysis(segmentCount: transcript.count, at: completionDate)
+
+            switch generated {
+            case .malformed(let reason):
+                return .malformed(reason)
+            case .candidates(let candidates):
+                guard !candidates.isEmpty else { return .noOp }
+                let decision = admissionPolicy.evaluate(
+                    candidates: candidates,
+                    transcript: transcript,
+                    existingInsights: autoInsights,
+                    sessionID: id,
+                    now: completionDate
+                )
+                autoInsights.append(contentsOf: decision.accepted)
+                if decision.accepted.isEmpty {
+                    return .rejected(decision.rejections)
+                }
+                return .admitted(decision.accepted)
+            }
+        } catch {
+            let requestIsCurrent = isActive && analysisRequestID == requestID
+            clearAnalysisTask(requestID: requestID)
+            guard requestIsCurrent else { return .staleSession }
+            context.completeAnalysis(segmentCount: transcript.count, at: clock.currentDate())
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    func ask(question: String, transcript: [TranscriptSegment]) async -> CoachQuestionOutcome {
+        guard isActive else { return .staleSession }
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .ignored }
+        guard questionTask == nil else { return .busy }
+
+        let request = context.prepareQuestion(
+            sessionID: id,
+            question: trimmed,
+            transcript: transcript,
+            priorInsights: autoInsights,
+            chatHistory: chatMessages
+        )
+        chatMessages.append(CoachChatMessage(
+            timestamp: clock.currentDate(),
+            sessionID: id,
+            role: .user,
+            content: trimmed
+        ))
+
+        let requestID = UUID()
+        let task = Task { try await generator.answerQuestion(request) }
+        questionRequestID = requestID
+        questionTask = task
+
+        do {
+            let response = try await task.value
+            let requestIsCurrent = isActive && questionRequestID == requestID
+            clearQuestionTask(requestID: requestID)
+            guard requestIsCurrent else { return .staleSession }
+
+            let cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { return .failed("The coach returned an empty reply.") }
+            let message = CoachChatMessage(
+                timestamp: clock.currentDate(),
+                sessionID: id,
+                role: .assistant,
+                content: cleaned
+            )
+            chatMessages.append(message)
+            return .answered(message)
+        } catch {
+            let requestIsCurrent = isActive && questionRequestID == requestID
+            clearQuestionTask(requestID: requestID)
+            guard requestIsCurrent else { return .staleSession }
+
+            let message = "Reply failed: \(error.localizedDescription)"
+            chatMessages.append(CoachChatMessage(
+                timestamp: clock.currentDate(),
+                sessionID: id,
+                role: .assistant,
+                content: message
+            ))
+            return .failed(message)
+        }
+    }
+
+    func snapshot() -> LiveCoachSnapshot {
+        LiveCoachSnapshot(
+            sessionID: id,
+            autoInsights: autoInsights,
+            chatMessages: chatMessages
+        )
+    }
+
+    func setAutoInsightLifecycle(
+        id: UUID,
+        lifecycle: CoachInsightLifecycle
+    ) -> CoachInsightLifecycleMutationOutcome {
+        guard isActive else { return .staleSession }
+        guard let index = autoInsights.firstIndex(where: { $0.id == id }) else { return .notFound }
+
+        if lifecycle == .active,
+           autoInsights[index].lifecycle != .active,
+           autoInsights.filter({ $0.lifecycle == .active }).count >= admissionPolicy.maxActiveInsights {
+            return .activeBudgetExceeded
+        }
+
+        autoInsights[index].lifecycle = lifecycle
+        return .updated(autoInsights[index])
+    }
+
+    func cancelPendingAnalysis() {
+        analysisRequestID = nil
+        analysisTask?.cancel()
+        analysisTask = nil
+    }
+
+    func cancel() {
+        isActive = false
+        analysisRequestID = nil
+        questionRequestID = nil
+        analysisTask?.cancel()
+        questionTask?.cancel()
+        analysisTask = nil
+        questionTask = nil
+    }
+
+    private func clearAnalysisTask(requestID: UUID) {
+        guard analysisRequestID == requestID else { return }
+        analysisRequestID = nil
+        analysisTask = nil
+    }
+
+    private func clearQuestionTask(requestID: UUID) {
+        guard questionRequestID == requestID else { return }
+        questionRequestID = nil
+        questionTask = nil
+    }
+}

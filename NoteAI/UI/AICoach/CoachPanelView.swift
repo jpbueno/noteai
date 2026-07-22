@@ -69,7 +69,7 @@ struct CoachPanelChatScrollState {
 
     @discardableResult
     mutating func chatMessagesChanged(to messages: [CoachInsight]) -> CoachPanelScrollRequest? {
-        guard let message = messages.last else { return nil }
+        guard isFollowingSubmittedExchange, let message = messages.last else { return nil }
 
         let scrollRequest = request(.message(message.id))
         if message.role == .assistant {

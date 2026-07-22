@@ -155,6 +155,20 @@ struct CoachAdmissionPolicy: Sendable {
                 rejections.append(.init(candidateIndex: index, reason: .missingTranscriptEvidence))
                 continue
             }
+            let commitmentClaims = unqualifiedCommitmentClaims(in: content)
+            if candidate.basis == .transcript &&
+                (candidate.type == .actionItem || !commitmentClaims.isEmpty) {
+                let claimsToGround = commitmentClaims.isEmpty ? [content] : commitmentClaims
+                let sourceSegments = uniqueSourceIDs.compactMap { transcriptByID[$0] }
+                guard claimsToGround.allSatisfy({ claim in
+                    sourceSegments.contains(where: {
+                        transcriptEvidence($0.text, supportsCommitment: claim)
+                    })
+                }) else {
+                    rejections.append(.init(candidateIndex: index, reason: .unsupportedCommitment))
+                    continue
+                }
+            }
 
             if let priorForTopic = comparisonInsights.last(where: {
                 normalizedTopic($0.topic ?? "") == topic &&
@@ -194,14 +208,18 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func looksLikeUnsupportedCommitment(_ content: String) -> Bool {
-        commitmentClauses(in: content).contains { clause in
-            containsCommitmentClaim(clause) &&
-                !isCommitmentInquiry(clause) &&
-                !isNegatedCommitmentAdvice(clause)
+        !unqualifiedCommitmentClaims(in: content).isEmpty
+    }
+
+    private func unqualifiedCommitmentClaims(in content: String) -> [String] {
+        commitmentScopes(in: content).filter { scope in
+            containsCommitmentClaim(scope) &&
+                !isCommitmentInquiry(scope) &&
+                !isNegatedCommitmentAdvice(scope)
         }
     }
 
-    private func commitmentClauses(in content: String) -> [String] {
+    private func commitmentScopes(in content: String) -> [String] {
         var clauses: [String] = []
         var currentClause = ""
         let terminators: Set<Character> = [";", ".", "!", "?", "\n"]
@@ -217,49 +235,161 @@ struct CoachAdmissionPolicy: Sendable {
 
         let trailingClause = currentClause.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trailingClause.isEmpty { clauses.append(trailingClause) }
-        return clauses
+        return clauses.flatMap(localCommitmentScopes)
     }
 
-    private func containsCommitmentClaim(_ clause: String) -> Bool {
-        let action = #"(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)"#
-        let futurePatterns = [
-            #"(?i)\bwill\s+(?:be\s+)?"# + action + #"\b"#,
-            #"(?i)\b(?:plans?|intends?)\s+to\s+"# + action + #"\b"#,
-            #"(?i)\b(?:am|is|are)\s+going\s+to\s+"# + action + #"\b"#,
-        ]
-        if futurePatterns.contains(where: {
-            clause.range(of: $0, options: .regularExpression) != nil
-        }) {
-            return true
+    private func localCommitmentScopes(in clause: String) -> [String] {
+        let boundary = #"(?:but|however|although|though|whereas|because|therefore|thus|hence|so|since|then)"#
+        let boundaryAfterComma = #"(?:but|however|yet|although|though|whereas|because|therefore|thus|hence|so|since|then)"#
+        let boundaryPattern = #"(?i)(?:,\s*"# + boundaryAfterComma + #"\b[\s,:]*|\s+"# + boundary + #"\b[\s,:]+)"#
+        guard let expression = try? NSRegularExpression(pattern: boundaryPattern) else {
+            return [clause]
         }
 
-        let negatedCommitmentPatterns = [
-            #"(?i)\b(?:(?:has|have|had|did|does|do|is|are|was|were)\s+)?(?:not|never)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
-            #"(?i)\b(?:hasn't|haven't|hadn't|didn't|doesn't|don't|isn't|aren't|wasn't|weren't)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
-        ]
-        let withoutNegatedCommitments = negatedCommitmentPatterns.reduce(clause) { result, pattern in
+        let matches = expression.matches(
+            in: clause,
+            range: NSRange(clause.startIndex..<clause.endIndex, in: clause)
+        )
+        var scopes: [String] = []
+        var start = clause.startIndex
+        for match in matches {
+            guard let range = Range(match.range, in: clause) else { continue }
+            let scope = clause[start..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !scope.isEmpty { scopes.append(scope) }
+            start = range.upperBound
+        }
+
+        let trailingScope = clause[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trailingScope.isEmpty { scopes.append(trailingScope) }
+        return scopes
+    }
+
+    private func containsCommitmentClaim(_ scope: String) -> Bool {
+        let sanitizedScope = directlyNegatedCommitmentPatterns().reduce(scope) { result, pattern in
             result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
         }
-        return withoutNegatedCommitments.range(
-            of: #"(?i)\b(?:committed|agreed|promised)\b"#,
-            options: .regularExpression
-        ) != nil
+        return affirmativeCommitmentPatterns().contains(where: {
+            sanitizedScope.range(of: $0, options: .regularExpression) != nil
+        })
     }
 
-    private func isCommitmentInquiry(_ clause: String) -> Bool {
-        if clause.hasSuffix("?") { return true }
-        return clause.range(
+    private func affirmativeCommitmentPatterns() -> [String] {
+        let action = commitmentActionPattern()
+        return [
+            #"(?i)\bwill\s+(?:be\s+)?"# + action + #"\b"#,
+            #"(?i)\b(?:plans?|intends?|expects?)\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:am|is|are)\s+going\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:committed|agreed|promised)\b"#,
+        ]
+    }
+
+    private func directlyNegatedCommitmentPatterns() -> [String] {
+        let action = commitmentActionPattern()
+        return [
+            #"(?i)\b(?:(?:has|have|had|did|does|do|is|are|was|were)\s+)?(?:not|never)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
+            #"(?i)\b(?:hasn't|haven't|hadn't|didn't|doesn't|don't|isn't|aren't|wasn't|weren't)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
+            #"(?i)\bwill\s+(?:not|never)\s+(?:be\s+)?"# + action + #"\b"#,
+            #"(?i)\bwon't\s+(?:be\s+)?"# + action + #"\b"#,
+            #"(?i)\b(?:do|does|did)\s+(?:not|never)\s+(?:plan|intend|expect)\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:don't|doesn't|didn't)\s+(?:plan|intend|expect)\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:plans?|intends?|expects?)\s+(?:not|never)\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:am|is|are)\s+(?:not|never)\s+going\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:isn't|aren't)\s+going\s+to\s+"# + action + #"\b"#,
+        ]
+    }
+
+    private func commitmentActionPattern() -> String {
+        #"(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)"#
+    }
+
+    private func isCommitmentInquiry(_ scope: String) -> Bool {
+        if scope.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") { return true }
+        guard let commitmentRange = firstCommitmentRange(in: scope) else { return false }
+
+        let prefix = String(scope[..<commitmentRange.lowerBound])
+        guard let cueRange = prefix.range(
+            of: #"(?i)\b(?:whether|if|when|how|what|why|who|where)\b"#,
+            options: .regularExpression
+        ) else { return false }
+
+        let beforeCue = prefix[..<cueRange.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if beforeCue.isEmpty { return true }
+        return beforeCue.range(
             of: #"(?i)^\s*(?:ask|check|clarify|confirm|determine|probe|verify|recommend\s+asking)\b"#,
             options: .regularExpression
         ) != nil
     }
 
-    private func isNegatedCommitmentAdvice(_ clause: String) -> Bool {
-        clause.range(
-            of: #"(?i)^\s*(?:(?:do\s+not|don't|never)\s+(?:assume|infer|presume|claim|state|treat)|(?:avoid|refrain\s+from)\s+(?:assuming|inferring|presuming|claiming|stating|treating))\b"#,
+    private func firstCommitmentRange(in scope: String) -> Range<String.Index>? {
+        affirmativeCommitmentPatterns()
+            .compactMap { scope.range(of: $0, options: .regularExpression) }
+            .min { $0.lowerBound < $1.lowerBound }
+    }
+
+    private func isNegatedCommitmentAdvice(_ scope: String) -> Bool {
+        scope.range(
+            of: #"(?i)^\s*(?:do\s+not|don't|never)\s+(?:assume|infer|presume|claim|state|treat)\b"#,
             options: .regularExpression
         ) != nil
     }
+
+    private func transcriptEvidence(_ evidence: String, supportsCommitment claim: String) -> Bool {
+        unqualifiedCommitmentClaims(in: evidence).contains { evidenceClaim in
+            isTextuallyGrounded(claim, in: evidenceClaim)
+        }
+    }
+
+    private func isTextuallyGrounded(_ candidate: String, in evidence: String) -> Bool {
+        let normalizedCandidate = normalizedGroundingWords(candidate).joined(separator: " ")
+        let normalizedEvidence = normalizedGroundingWords(evidence).joined(separator: " ")
+        if !normalizedCandidate.isEmpty && normalizedEvidence.contains(normalizedCandidate) {
+            return true
+        }
+
+        let candidateTokens = distinctiveGroundingTokens(candidate)
+        let evidenceTokens = distinctiveGroundingTokens(evidence)
+        return !candidateTokens.isDisjoint(with: evidenceTokens)
+    }
+
+    private func distinctiveGroundingTokens(_ text: String) -> Set<String> {
+        Set(normalizedGroundingWords(text)
+            .filter { !Self.genericGroundingWords.contains($0) }
+            .map(stem)
+            .filter { $0.count > 1 && !Self.genericGroundingWords.contains($0) })
+    }
+
+    private func normalizedGroundingWords(_ text: String) -> [String] {
+        text
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+    }
+
+    private static let genericGroundingWords: Set<String> = [
+        "a", "about", "after", "again", "all", "also", "an", "and", "any", "as", "at", "before",
+        "by", "for", "from", "has", "have", "if", "in", "into", "of", "on", "or", "that", "the",
+        "then", "there", "these", "this", "those", "to", "was", "were", "what", "when", "where",
+        "whether", "which", "who", "why", "with",
+        "customer", "client", "partner", "speaker", "team", "person", "people", "i", "me", "my", "mine",
+        "we", "us", "our", "ours", "you", "your", "yours", "they", "them", "their", "theirs", "he",
+        "him", "his", "she", "her", "hers", "it", "its",
+        "will", "be", "been", "being", "am", "is", "are", "go", "going", "plan", "plans", "planned",
+        "planning", "intend", "intends", "intended", "intending", "expect", "expects", "expected",
+        "expecting", "commit", "commits", "committed", "commitment", "commitments", "agree", "agrees",
+        "agreed", "agreement", "promise", "promises", "promised",
+        "complete", "completes", "completed", "completing", "deliver", "delivers", "delivered", "delivering",
+        "follow", "follows", "followed", "following", "up", "provide", "provides", "provided", "providing",
+        "send", "sends", "sent", "sending", "share", "shares", "shared", "sharing", "submit", "submits",
+        "submitted", "submitting", "ask", "asks", "asked", "asking", "check", "confirm", "clarify",
+        "determine", "probe", "verify", "recommend", "track", "discuss", "discussed", "discussion",
+        "today", "tomorrow", "tonight", "yesterday", "soon", "later", "next", "time", "timing", "day",
+        "week", "month", "quarter", "year", "morning", "afternoon", "evening", "date", "deadline",
+    ]
 
     private func normalizedTopic(_ topic: String) -> String {
         topic

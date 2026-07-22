@@ -232,20 +232,33 @@ final class AICoachAdmissionTests: XCTestCase {
     func testAdmissionCommitmentCorpusConformance() {
         let rejectedCases = [
             "Customer will deliver results tomorrow.",
+            "Customer is going to deliver tomorrow.",
             "Ask for logs; customer will deliver tomorrow.",
+            "Ask for logs and customer will deliver tomorrow.",
+            "Ask whether logs are available, but customer will deliver tomorrow.",
+            "Do not speculate about timing because customer will deliver tomorrow.",
+            "Do not assume the customer agreed, but partner will deliver tomorrow.",
             "Customer committed to deliver tomorrow. Is that confirmed?",
             "Acme will deliver tomorrow.",
             "I will send the results.",
             "Customer will be delivering tomorrow.",
+            "Customer intends to submit results tomorrow.",
+            "Customer expects to provide results tomorrow.",
             "Team will deliver results tomorrow.",
             "Speaker promised to share benchmarks.",
         ]
         let allowedCases = [
             "Ask whether the customer will deliver results tomorrow.",
+            "Ask whether: customer will deliver tomorrow.",
+            "Ask when the customer will deliver results.",
             "Recommend asking whether Acme will deliver tomorrow.",
             "Do not assume the customer agreed.",
+            "Do not infer the customer will deliver tomorrow.",
             "The customer has not agreed to deliver tomorrow.",
+            "The customer will not deliver tomorrow.",
+            "The customer does not expect to provide results tomorrow.",
             "How will the team deliver these results?",
+            "Customer will deliver tomorrow?",
             "Confirm whether the team plans to deliver tomorrow.",
         ]
         let nonTranscriptBases: [CoachInsightBasis] = [.recommendation, .domainKnowledge]
@@ -316,6 +329,86 @@ final class AICoachAdmissionTests: XCTestCase {
             XCTAssertEqual(decision.accepted.map(\.type), [type], type.rawValue)
             XCTAssertEqual(decision.rejections, [], type.rawValue)
         }
+    }
+
+    func testAdmissionRejectsCommitmentsWithoutTextuallyGroundedTranscriptSupport() {
+        let content = "Customer will deliver results tomorrow."
+        let unsupportedEvidence = [
+            "No commitment was discussed.",
+            "Partner will deliver logs tomorrow.",
+            "Will the customer deliver results tomorrow?",
+        ]
+
+        for (index, evidence) in unsupportedEvidence.enumerated() {
+            let segmentID = index + 1
+            let decision = CoachAdmissionPolicy.default.evaluate(
+                candidates: [candidate(
+                    type: .keyInsight,
+                    content: content,
+                    sourceSegmentIDs: [segmentID]
+                )],
+                transcript: [TranscriptSegment(id: segmentID, text: evidence)],
+                existingInsights: [],
+                sessionID: UUID(),
+                now: Date()
+            )
+
+            XCTAssertEqual(decision.accepted, [], evidence)
+            XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment], evidence)
+        }
+    }
+
+    func testAdmissionAllowsGroundedUtilizationDataActionItemParaphrase() {
+        let evidence = "The customer committed to sending utilization data."
+        let decision = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .actionItem,
+                content: "Track the customer's utilization-data commitment.",
+                sourceSegmentIDs: [12]
+            )],
+            transcript: [TranscriptSegment(id: 12, text: evidence, startTime: 120, endTime: 128)],
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(decision.accepted.map(\.type), [.actionItem])
+        XCTAssertEqual(decision.accepted.first?.evidence, [
+            CoachEvidenceReference(segmentID: 12, startTime: 120, endTime: 128),
+        ])
+        XCTAssertEqual(decision.rejections, [])
+    }
+
+    func testAdmissionPreservesPresentTenseDomainKnowledgeButRejectsFutureClaim() {
+        let presentTense = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .technicalAnswer,
+                content: "Dynamo provides cache-aware routing.",
+                basis: .domainKnowledge,
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+        let futureTense = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .technicalAnswer,
+                content: "Dynamo will deliver cache-aware routing.",
+                basis: .domainKnowledge,
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(presentTense.accepted.map(\.content), ["Dynamo provides cache-aware routing."])
+        XCTAssertEqual(presentTense.rejections, [])
+        XCTAssertEqual(futureTense.accepted, [])
+        XCTAssertEqual(futureTense.rejections.map(\.reason), [.unsupportedCommitment])
     }
 
     func testAdmissionRejectsResultCountAboveLimit() {

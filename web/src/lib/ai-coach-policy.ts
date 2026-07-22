@@ -115,6 +115,13 @@ export interface CoachAnalysisPublicationState extends CoachReplyPublicationStat
   requestCurrent: boolean;
 }
 
+export interface CoachAnalysisRequestOwnership {
+  begin: () => AbortController;
+  cancel: () => void;
+  isCurrent: (controller: AbortController) => boolean;
+  release: (controller: AbortController) => boolean;
+}
+
 const LIMITS = Object.freeze({
   maxTranscriptSegments: 24,
   maxTranscriptCharacters: 9_000,
@@ -232,6 +239,10 @@ export const coachPolicy = {
 
   createRecordingSessionScope(initialRecording = false): RecordingSessionScope {
     return createRecordingSessionScope(initialRecording);
+  },
+
+  createAnalysisRequestOwnership(): CoachAnalysisRequestOwnership {
+    return createAnalysisRequestOwnership();
   },
 
   combinePresentation({
@@ -491,6 +502,33 @@ function createRecordingSessionScope(initialRecording: boolean): RecordingSessio
 
     canPublish(token: number) {
       return active && token === sessionToken;
+    },
+  };
+}
+
+function createAnalysisRequestOwnership(): CoachAnalysisRequestOwnership {
+  let currentController: AbortController | null = null;
+
+  return {
+    begin() {
+      currentController?.abort();
+      currentController = new AbortController();
+      return currentController;
+    },
+
+    cancel() {
+      currentController?.abort();
+      currentController = null;
+    },
+
+    isCurrent(controller: AbortController) {
+      return currentController === controller;
+    },
+
+    release(controller: AbortController) {
+      if (currentController !== controller) return false;
+      currentController = null;
+      return true;
     },
   };
 }

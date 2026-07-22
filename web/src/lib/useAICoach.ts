@@ -20,16 +20,19 @@ export function useAICoach(
   const mountedRef = useRef(true);
   const recordingRef = useRef(isRecording);
   const enabledRef = useRef(enabled);
-  const analysisAbortRef = useRef<AbortController | null>(null);
   const replyAbortRef = useRef<AbortController | null>(null);
   const segmentsRef = useRef(segments);
   const autoInsightsRef = useRef(autoInsights);
   const chatMessagesRef = useRef(chatMessages);
   const cadenceRef = useRef<ReturnType<typeof coachPolicy.createCadenceTracker> | null>(null);
   const sessionScopeRef = useRef<ReturnType<typeof coachPolicy.createRecordingSessionScope> | null>(null);
+  const analysisOwnershipRef = useRef<ReturnType<typeof coachPolicy.createAnalysisRequestOwnership> | null>(null);
   if (!cadenceRef.current) cadenceRef.current = coachPolicy.createCadenceTracker();
   if (!sessionScopeRef.current) {
     sessionScopeRef.current = coachPolicy.createRecordingSessionScope(isRecording);
+  }
+  if (!analysisOwnershipRef.current) {
+    analysisOwnershipRef.current = coachPolicy.createAnalysisRequestOwnership();
   }
   recordingRef.current = isRecording;
   enabledRef.current = enabled;
@@ -58,9 +61,8 @@ export function useAICoach(
 
     const sessionToken = sessionScopeRef.current?.capture();
     if (sessionToken === null || sessionToken === undefined) return;
-    const controller = new AbortController();
-    analysisAbortRef.current?.abort();
-    analysisAbortRef.current = controller;
+    const controller = analysisOwnershipRef.current?.begin();
+    if (!controller) return;
     analyzingRef.current = true;
     setIsAnalyzing(true);
     const canPublishAnalysis = () => coachPolicy.canPublishAnalysis({
@@ -69,7 +71,7 @@ export function useAICoach(
       enabled: enabledRef.current,
       aborted: controller.signal.aborted,
       sessionCurrent: sessionScopeRef.current?.canPublish(sessionToken) ?? false,
-      requestCurrent: analysisAbortRef.current === controller,
+      requestCurrent: analysisOwnershipRef.current?.isCurrent(controller) ?? false,
     });
 
     try {
@@ -104,12 +106,9 @@ export function useAICoach(
       }
     } finally {
       const canFinalizeAnalysis = canPublishAnalysis();
-      if (analysisAbortRef.current === controller) {
-        analysisAbortRef.current = null;
-        if (canFinalizeAnalysis) {
-          analyzingRef.current = false;
-          if (mountedRef.current) setIsAnalyzing(false);
-        }
+      if (analysisOwnershipRef.current?.release(controller) && canFinalizeAnalysis) {
+        analyzingRef.current = false;
+        if (mountedRef.current) setIsAnalyzing(false);
       }
     }
   }, []);
@@ -119,7 +118,7 @@ export function useAICoach(
     return () => {
       mountedRef.current = false;
       sessionScopeRef.current?.sync(false);
-      analysisAbortRef.current?.abort();
+      analysisOwnershipRef.current?.cancel();
       replyAbortRef.current?.abort();
     };
   }, []);
@@ -127,9 +126,8 @@ export function useAICoach(
   useEffect(() => {
     sessionScopeRef.current?.sync(isRecording);
     cadenceRef.current?.reset();
-    analysisAbortRef.current?.abort();
+    analysisOwnershipRef.current?.cancel();
     replyAbortRef.current?.abort();
-    analysisAbortRef.current = null;
     replyAbortRef.current = null;
     analyzingRef.current = false;
     replyingRef.current = false;
@@ -144,9 +142,8 @@ export function useAICoach(
 
   useEffect(() => {
     if (enabled) return;
-    analysisAbortRef.current?.abort();
+    analysisOwnershipRef.current?.cancel();
     replyAbortRef.current?.abort();
-    analysisAbortRef.current = null;
     replyAbortRef.current = null;
     analyzingRef.current = false;
     replyingRef.current = false;

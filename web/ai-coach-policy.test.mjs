@@ -50,10 +50,12 @@ function candidate(content, overrides = {}) {
 
 function deferred() {
   let resolve;
-  const promise = new Promise((resolver) => {
+  let reject;
+  const promise = new Promise((resolver, rejecter) => {
     resolve = resolver;
+    reject = rejecter;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function sourceSection(source, startMarker, endMarker) {
@@ -267,60 +269,100 @@ test("an aborted reply stays unpublished after the coach is re-enabled", () => {
   );
 });
 
-test("an old analysis cannot publish or clear a newer request after re-enable", () => {
-  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
-  const analyze = sourceSection(
-    hookSource,
-    "  const analyze = useCallback(async () => {",
-    "  }, []);",
-  );
-  const requestGuard = sourceSection(
-    analyze,
-    "    const controller = new AbortController();",
-    "    try {",
-  );
-  const successGuard = sourceSection(
-    analyze,
-    "      const outcome = await analyzeTranscriptLive",
-    "      if (outcome.status === \"insights\") {",
-  );
-  const errorGuard = sourceSection(
-    analyze,
-    "    } catch (error) {",
-    "    } finally {",
-  );
-  const finalizationStart = analyze.indexOf("    } finally {");
-  assert.notEqual(finalizationStart, -1, "Missing analysis finalization block");
-  const finalizationGuard = analyze.slice(finalizationStart);
+test("deferred analysis A cannot publish or finalize over B after re-enable", async () => {
+  assert.equal(typeof coachPolicy.createAnalysisRequestOwnership, "function");
 
-  assert.match(requestGuard, /requestCurrent: analysisAbortRef\.current === controller/);
-  assert.match(successGuard, /!canPublishAnalysis\(\)/);
-  assert.match(errorGuard, /canPublishAnalysis\(\)/);
-  assert.match(finalizationGuard, /const canFinalizeAnalysis = canPublishAnalysis\(\);/);
-  assert.match(finalizationGuard, /if \(analysisAbortRef\.current === controller\)/);
-  assert.match(finalizationGuard, /if \(canFinalizeAnalysis\)/);
+  for (const staleSettlement of ["insight", "error"]) {
+    const ownership = coachPolicy.createAnalysisRequestOwnership();
+    const cadence = coachPolicy.createCadenceTracker({ now: () => 1_000 });
+    const segmentCount = 2;
+    const publishedInsights = [];
+    const publishedErrors = [];
+    const cadenceEvents = [];
+    const finalized = [];
+    let enabled = true;
+    let busy = false;
 
-  const activeAnalysis = {
-    mounted: true,
-    recording: true,
-    enabled: true,
-    aborted: false,
-    sessionCurrent: true,
-    requestCurrent: true,
-  };
-  assert.equal(coachPolicy.canPublishAnalysis(activeAnalysis), true);
-  assert.equal(
-    coachPolicy.canPublishAnalysis({
-      ...activeAnalysis,
-      aborted: true,
-      requestCurrent: false,
-    }),
-    false,
-  );
-  assert.equal(
-    coachPolicy.canPublishAnalysis({ ...activeAnalysis, requestCurrent: false }),
-    false,
-  );
+    const start = (name, pending) => {
+      const controller = ownership.begin();
+      busy = true;
+      const canPublish = () => coachPolicy.canPublishAnalysis({
+        mounted: true,
+        recording: true,
+        enabled,
+        aborted: controller.signal.aborted,
+        sessionCurrent: true,
+        requestCurrent: ownership.isCurrent(controller),
+      });
+      const completion = (async () => {
+        try {
+          const insight = await pending.promise;
+          if (!canPublish()) return;
+          publishedInsights.push(`${name}:${insight}`);
+          cadence.complete(segmentCount);
+          cadenceEvents.push(`complete:${name}`);
+        } catch (error) {
+          if (!canPublish()) return;
+          publishedErrors.push(`${name}:${error.message}`);
+          cadence.fail(segmentCount);
+          cadenceEvents.push(`fail:${name}`);
+        } finally {
+          const canFinalize = canPublish();
+          if (ownership.release(controller) && canFinalize) {
+            busy = false;
+            finalized.push(name);
+          }
+        }
+      })();
+      return { completion, controller };
+    };
+
+    const pendingA = deferred();
+    const requestA = start("A", pendingA);
+    assert.equal(busy, true);
+    assert.equal(ownership.isCurrent(requestA.controller), true);
+
+    enabled = false;
+    ownership.cancel();
+    busy = false;
+    assert.equal(requestA.controller.signal.aborted, true);
+    assert.equal(ownership.isCurrent(requestA.controller), false);
+    assert.equal(busy, false);
+
+    enabled = true;
+
+    const pendingB = deferred();
+    const requestB = start("B", pendingB);
+    assert.equal(busy, true);
+    assert.equal(ownership.isCurrent(requestB.controller), true);
+    if (staleSettlement === "insight") {
+      pendingA.resolve("stale insight");
+    } else {
+      pendingA.reject(new Error("stale error"));
+    }
+    await requestA.completion;
+
+    assert.deepEqual(publishedInsights, [], `${staleSettlement}: A published an insight`);
+    assert.deepEqual(publishedErrors, [], `${staleSettlement}: A published an error`);
+    assert.deepEqual(cadenceEvents, [], `${staleSettlement}: A changed cadence state`);
+    assert.equal(cadence.canAnalyze(segmentCount), true);
+    assert.deepEqual(finalized, [], `${staleSettlement}: A finalized`);
+    assert.equal(busy, true, `${staleSettlement}: A cleared B's busy state`);
+    assert.equal(ownership.isCurrent(requestA.controller), false);
+    assert.equal(ownership.isCurrent(requestB.controller), true);
+    assert.equal(requestB.controller.signal.aborted, false);
+
+    pendingB.resolve("fresh insight");
+    await requestB.completion;
+
+    assert.deepEqual(publishedInsights, ["B:fresh insight"]);
+    assert.deepEqual(publishedErrors, []);
+    assert.deepEqual(cadenceEvents, ["complete:B"]);
+    assert.equal(cadence.canAnalyze(segmentCount), false);
+    assert.deepEqual(finalized, ["B"]);
+    assert.equal(busy, false);
+    assert.equal(ownership.isCurrent(requestB.controller), false);
+  }
 });
 
 test("admission distinguishes a legitimate no-op from a parse failure", () => {

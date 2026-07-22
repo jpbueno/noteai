@@ -369,3 +369,45 @@ button:focus-visible,
 .tiptap-editor .resizable-image-wrapper.ProseMirror-selectednode {
   outline: none;
 }
+
+.coach-icon-button {
+  align-items: center;
+  border-radius: 4px;
+  color: var(--color-text-tertiary);
+  display: inline-flex;
+  flex: 0 0 24px;
+  height: 24px;
+  justify-content: center;
+  transition: background-color 120ms ease, color 120ms ease;
+  width: 24px;
+}
+
+.coach-icon-button:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+.coach-view-tab {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text-tertiary);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  height: 28px;
+  justify-content: center;
+  min-width: 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.coach-view-tab:hover {
+  background: var(--color-hover);
+  color: var(--color-text-secondary);
+}
+
+.coach-view-tab-active {
+  background: var(--color-hover);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}

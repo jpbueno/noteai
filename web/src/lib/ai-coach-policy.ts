@@ -107,15 +107,28 @@ export interface CoachReplyPublicationState {
   sessionCurrent: boolean;
 }
 
-export interface CoachAnalysisPublicationState extends CoachReplyPublicationState {
-  requestCurrent: boolean;
+export interface CoachAnalysisLifecycleEnvironment {
+  isMounted: () => boolean;
+  isRecording: () => boolean;
+  isEnabled: () => boolean;
+  isSessionCurrent: (sessionToken: number) => boolean;
 }
 
-export interface CoachAnalysisRequestOwnership {
-  begin: () => AbortController;
+export interface CoachAnalysisRequest {
+  signal: AbortSignal;
+  canPublish: () => boolean;
+  finish: () => boolean;
+}
+
+export interface CoachAnalysisLifecycle {
+  begin: (sessionToken: number) => CoachAnalysisRequest;
   cancel: () => void;
-  isCurrent: (controller: AbortController) => boolean;
-  release: (controller: AbortController) => boolean;
+}
+
+export interface CoachPresentationGroups {
+  activeAutoInsights: CoachInsight[];
+  history: CoachInsight[];
+  chatMessages: CoachInsight[];
 }
 
 const LIMITS = Object.freeze({
@@ -124,7 +137,7 @@ const LIMITS = Object.freeze({
   maxSpeakerCharacters: 80,
   maxIdentifierCharacters: 128,
   maxPriorAutoInsights: 10,
-  maxPriorEvidenceReferences: 4,
+  maxEvidenceReferences: 4,
   maxInsightsPerRound: 2,
   maxSessionInsights: 10,
   maxInsightWords: 24,
@@ -133,6 +146,10 @@ const LIMITS = Object.freeze({
   maxChatHistoryMessages: 12,
   maxModelOutputCharacters: 12_000,
   maxContextMessageCharacters: 11_500,
+});
+
+const DEDUPE = Object.freeze({
+  nearDuplicateThreshold: 0.82,
 });
 
 const CADENCE = Object.freeze({
@@ -242,7 +259,7 @@ STRICT V1 OUTPUT CONTRACT:
 - The default no-op is exactly {"contract_version":1,"candidates":[]}.
 - A guidance_question has exact keys kind,directive,question,priority,topic. directive is ask, clarify, confirm, check, probe, compare, validate, quantify, discuss, or explore. question must begin with what, why, how, when, where, which, who, whose, is, are, was, were, do, does, did, can, could, should, would, will, has, have, had, may, or might and end in exactly one ASCII question mark, with no earlier period, exclamation mark, or question mark and no newline, semicolon, control, bidi, or unsafe invisible character. Do not supply type, basis, content, prefix, action, tool, or any other key.
 - A transcript_quote has exact keys kind,presentation,evidence_quotes,priority,topic. presentation is observation, possible_action, or possible_follow_up. Each evidence quote has exact keys source_segment_id,quote.
-- For transcript_quote, copy the complete normalized transcript segment verbatim and its source_segment_id. A source_segment_id must be a positive safe integer. Never use a partial quote, combine segments, or remove negation. Multiple quotes are allowed only for identical normalized text from distinct source segment IDs.
+- For transcript_quote, copy the complete normalized transcript segment verbatim and its source_segment_id. A source_segment_id must be a positive safe integer. Never use a partial quote, combine segments, or remove negation. Use at most four evidence quotes. Multiple quotes are allowed only for identical normalized text from distinct source segment IDs.
 - Derived content must be at most 24 words and 180 Unicode scalar values after normalization and deterministic prefixing.
 - priority is high or critical. topic is a lowercase ASCII slug no longer than 64 characters.
 - Return only genuinely useful new candidates. Do not repeat or lightly rephrase a prior auto-insight.`;
@@ -286,6 +303,7 @@ const defaultAdmissionAdapters: CoachAdmissionAdapters = {
 export const coachPolicy = {
   limits: LIMITS,
   cadence: CADENCE,
+  dedupe: DEDUPE,
 
   createCadenceTracker(
     adapters: { now?: () => number } = {},
@@ -297,8 +315,10 @@ export const coachPolicy = {
     return createRecordingSessionScope(initialRecording);
   },
 
-  createAnalysisRequestOwnership(): CoachAnalysisRequestOwnership {
-    return createAnalysisRequestOwnership();
+  createAnalysisLifecycle(
+    environment: CoachAnalysisLifecycleEnvironment,
+  ): CoachAnalysisLifecycle {
+    return createAnalysisLifecycle(environment);
   },
 
   combinePresentation({
@@ -318,6 +338,19 @@ export const coachPolicy = {
       .map(({ entry }) => entry);
   },
 
+  partitionPresentation(entries: CoachInsight[]): CoachPresentationGroups {
+    const automaticInsights = entries.filter(isAutomaticInsight);
+    return {
+      activeAutoInsights: automaticInsights
+        .filter((entry) => (entry.lifecycle ?? "active") === "active")
+        .slice(-LIMITS.maxSessionInsights),
+      history: automaticInsights.filter(
+        (entry) => (entry.lifecycle ?? "active") !== "active",
+      ),
+      chatMessages: entries.filter(isChatMessage),
+    };
+  },
+
   countAutomaticInsights(entries: CoachInsight[]): number {
     return entries.filter(isAutomaticInsight).length;
   },
@@ -326,8 +359,8 @@ export const coachPolicy = {
     return canPublishRequest(state);
   },
 
-  canPublishAnalysis(state: CoachAnalysisPublicationState): boolean {
-    return state.requestCurrent && canPublishRequest(state);
+  contentSimilarity(left: string, right: string): number {
+    return contentSimilarity(left, right);
   },
 
   buildContext({ segments, priorAutoInsights }: BuildContextInput): CoachContext {
@@ -569,29 +602,38 @@ function createRecordingSessionScope(initialRecording: boolean): RecordingSessio
   };
 }
 
-function createAnalysisRequestOwnership(): CoachAnalysisRequestOwnership {
+function createAnalysisLifecycle(
+  environment: CoachAnalysisLifecycleEnvironment,
+): CoachAnalysisLifecycle {
   let currentController: AbortController | null = null;
 
   return {
-    begin() {
+    begin(sessionToken: number) {
       currentController?.abort();
-      currentController = new AbortController();
-      return currentController;
+      const controller = new AbortController();
+      currentController = controller;
+      const canPublish = () => currentController === controller
+        && environment.isMounted()
+        && environment.isRecording()
+        && environment.isEnabled()
+        && !controller.signal.aborted
+        && environment.isSessionCurrent(sessionToken);
+
+      return {
+        signal: controller.signal,
+        canPublish,
+        finish() {
+          if (currentController !== controller) return false;
+          const publishable = canPublish();
+          currentController = null;
+          return publishable;
+        },
+      };
     },
 
     cancel() {
       currentController?.abort();
       currentController = null;
-    },
-
-    isCurrent(controller: AbortController) {
-      return currentController === controller;
-    },
-
-    release(controller: AbortController) {
-      if (currentController !== controller) return false;
-      currentController = null;
-      return true;
     },
   };
 }
@@ -621,15 +663,16 @@ function boundTranscriptSegments(segments: TranscriptSegment[]): CoachContextSeg
 
     const segment = segments[index];
     if (!segment || typeof segment.text !== "string") continue;
-    let text = segment.text.trim();
-    if (!text || !Number.isFinite(segment.id)) continue;
+    const text = segment.text;
+    if (
+      text.length === 0
+      || !Number.isSafeInteger(segment.id)
+      || segment.id <= 0
+    ) continue;
 
     const remainingCharacters = LIMITS.maxTranscriptCharacters - characterCount;
     if (remainingCharacters <= 0) break;
-    if (text.length > remainingCharacters) {
-      if (bounded.length > 0) break;
-      text = text.slice(-remainingCharacters);
-    }
+    if (text.length > remainingCharacters) continue;
 
     bounded.unshift({
       id: segment.id,
@@ -674,7 +717,7 @@ function sanitizeContextEvidence(value: CoachInsightEvidence[] | undefined): Coa
         && typeof item.endTime === "number"
         && Number.isFinite(item.endTime),
     )
-    .slice(0, LIMITS.maxPriorEvidenceReferences)
+    .slice(0, LIMITS.maxEvidenceReferences)
     .map((item) => ({
       segmentId: item.segmentId,
       startTime: item.startTime,
@@ -716,14 +759,8 @@ function fitContextToMessageLimit(context: CoachContext): CoachContext {
       continue;
     }
 
-    const onlySegment = fitted.transcriptSegments[0];
-    if (onlySegment) {
-      const excess = serializeContext(fitted).length - jsonLimit;
-      if (onlySegment.text.length > excess) {
-        onlySegment.text = onlySegment.text.slice(excess);
-      } else {
-        fitted.transcriptSegments.shift();
-      }
+    if (fitted.transcriptSegments[0]) {
+      fitted.transcriptSegments.shift();
       continue;
     }
 
@@ -882,7 +919,11 @@ function validateTranscriptQuote(
   if (!isValidTopic(candidate.topic)) {
     return { ok: false, reason: "invalid_topic" };
   }
-  if (!Array.isArray(candidate.evidence_quotes) || candidate.evidence_quotes.length === 0) {
+  if (
+    !Array.isArray(candidate.evidence_quotes)
+    || candidate.evidence_quotes.length === 0
+    || candidate.evidence_quotes.length > LIMITS.maxEvidenceReferences
+  ) {
     return { ok: false, reason: "invalid_evidence" };
   }
 
@@ -1092,24 +1133,25 @@ function violatesTopicCooldown(
 function isDuplicate(candidate: string, previousContents: string[]): boolean {
   return previousContents.some((previous) => {
     if (normalizedExactText(candidate) === normalizedExactText(previous)) return true;
-
-    const candidateTokens = normalizedMeaningfulTokens(candidate);
-    const previousTokens = normalizedMeaningfulTokens(previous);
-    if (candidateTokens.size < 3 || previousTokens.size < 3) return false;
-
-    let intersection = 0;
-    candidateTokens.forEach((token) => {
-      if (previousTokens.has(token)) intersection += 1;
-    });
-    const union = candidateTokens.size + previousTokens.size - intersection;
-    const jaccard = union > 0 ? intersection / union : 0;
-    const containment = intersection / Math.min(candidateTokens.size, previousTokens.size);
-    return jaccard >= 0.72 || containment >= 0.85;
+    return contentSimilarity(candidate, previous) >= DEDUPE.nearDuplicateThreshold;
   });
 }
 
 function normalizedExactText(value: string): string {
-  return normalizedWords(value).join(" ");
+  return [...normalizedMeaningfulTokens(value)].sort().join(" ");
+}
+
+function contentSimilarity(left: string, right: string): number {
+  const leftTokens = normalizedMeaningfulTokens(left);
+  const rightTokens = normalizedMeaningfulTokens(right);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+
+  let intersection = 0;
+  leftTokens.forEach((token) => {
+    if (rightTokens.has(token)) intersection += 1;
+  });
+  const union = leftTokens.size + rightTokens.size - intersection;
+  return union === 0 ? 0 : intersection / union;
 }
 
 function normalizedMeaningfulTokens(value: string): Set<string> {
@@ -1122,45 +1164,29 @@ function normalizedMeaningfulTokens(value: string): Set<string> {
 
 function normalizedWords(value: string): string[] {
   return value
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
 function stemWord(word: string): string {
-  let stem = word;
-  if (stem.length > 5 && stem.endsWith("ing")) stem = stem.slice(0, -3);
-  else if (stem.length > 4 && stem.endsWith("ed")) stem = stem.slice(0, -2);
-  else if (stem.length > 4 && stem.endsWith("es")) stem = stem.slice(0, -2);
-  else if (stem.length > 3 && stem.endsWith("s")) stem = stem.slice(0, -1);
-  if (stem.length > 4 && stem.endsWith("e")) stem = stem.slice(0, -1);
-  return stem;
+  if (word.length > 5 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
+  return word;
 }
 
 const DUPLICATE_STOP_WORDS = new Set([
   "a",
-  "about",
   "an",
   "and",
-  "are",
+  "about",
+  "before",
   "for",
-  "from",
-  "in",
-  "is",
   "of",
-  "on",
   "or",
-  "should",
-  "that",
   "the",
   "their",
-  "they",
-  "this",
   "to",
-  "we",
-  "what",
-  "with",
+  "whether",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

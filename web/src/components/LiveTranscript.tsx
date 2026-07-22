@@ -47,6 +47,9 @@ export default function LiveTranscript({
   onCoachSendMessage,
 }: LiveTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptSegmentRefs = useRef(new Map<number, HTMLDivElement>());
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [highlightedSegmentID, setHighlightedSegmentID] = useState<number | null>(null);
   const [coachWidth, setCoachWidth] = useState(() => {
     if (typeof window === "undefined") return 300;
     const saved = localStorage.getItem(COACH_WIDTH_KEY);
@@ -56,7 +59,9 @@ export default function LiveTranscript({
   });
   const isDraggingRef = useRef(false);
   const warnings = recordingDiagnosticsWarnings(diagnostics);
-  const automaticInsightCount = coachPolicy.countAutomaticInsights(coachInsights);
+  const automaticInsightCount = coachPolicy
+    .partitionPresentation(coachInsights)
+    .activeAutoInsights.length;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -64,10 +69,26 @@ export default function LiveTranscript({
     }
   }, [segments]);
 
+  useEffect(() => () => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+  }, []);
+
   const coachWidthRef = useRef(coachWidth);
   useEffect(() => {
     coachWidthRef.current = coachWidth;
   }, [coachWidth]);
+
+  const selectCoachSource = (segmentID: number) => {
+    const source = transcriptSegmentRefs.current.get(segmentID);
+    if (!source) return;
+    source.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedSegmentID(segmentID);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedSegmentID((current) => current === segmentID ? null : current);
+      highlightTimerRef.current = null;
+    }, 2_500);
+  };
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -174,7 +195,19 @@ export default function LiveTranscript({
             ) : (
               <div className="space-y-3">
                 {segments.map((seg) => (
-                  <div key={seg.id} className="flex gap-3">
+                  <div
+                    key={seg.id}
+                    ref={(node) => {
+                      if (node) transcriptSegmentRefs.current.set(seg.id, node);
+                      else transcriptSegmentRefs.current.delete(seg.id);
+                    }}
+                    data-source-segment-id={seg.id}
+                    className={`flex gap-3 rounded-md px-2 py-1 -mx-2 transition-colors ${
+                      highlightedSegmentID === seg.id
+                        ? "bg-accent/15 ring-1 ring-accent/60"
+                        : ""
+                    }`}
+                  >
                     <span className="text-xs text-text-tertiary font-mono w-12 pt-0.5 flex-shrink-0 text-right">
                       {formatTimestamp(seg.startTime)}
                     </span>
@@ -223,6 +256,7 @@ export default function LiveTranscript({
                 isAnalyzing={coachAnalyzing}
                 isReplying={coachReplying}
                 onSendMessage={onCoachSendMessage}
+                onSelectSource={selectCoachSource}
               />
             </div>
           </>

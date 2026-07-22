@@ -27,6 +27,11 @@ import {
   type LocalCaptureStartResponse,
 } from "./local-helper";
 import type { RecordingSourceId } from "./recording-sources";
+import {
+  FIRST_TRANSCRIPT_SEGMENT_ID,
+  createPositiveSegmentIDSequence,
+  positiveTranscriptSegmentID,
+} from "./recording-segment-ids";
 
 // Expose a global refresh trigger so mutations can force immediate refresh.
 // No polling — data is fetched once on mount, then only when triggerRefresh() is called
@@ -114,7 +119,7 @@ export function useRecording() {
   const helperSessionRef = useRef<LocalCaptureStartResponse | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startingRef = useRef(false);
-  const segmentCounter = useRef(0);
+  const segmentIDsRef = useRef(createPositiveSegmentIDSequence());
   const interimRef = useRef("");
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
@@ -162,7 +167,7 @@ export function useRecording() {
       setCapturingTabAudio(false);
       setMicLevel(0);
       setRecordingDiagnostics(emptyRecordingDiagnostics);
-      segmentCounter.current = 0;
+      segmentIDsRef.current.reset();
       interimRef.current = "";
 
       if (source === "teams-desktop") {
@@ -190,7 +195,7 @@ export function useRecording() {
           setLiveTranscript((prev) => [
             ...prev,
             {
-              id: segmentCounter.current++,
+              id: segmentIDsRef.current.next(),
               text,
               startTime: Math.max(0, elapsed - 5),
               endTime: elapsed,
@@ -258,7 +263,7 @@ export function useRecording() {
           helperSessionRef.current = null;
           const recordedDuration = Math.max(duration, Math.round(response.duration || 0));
           const finalSegments: TranscriptSegment[] = withSpeakerPlaceholders(response.transcript.map((segment, index) => ({
-            id: segment.id ?? index,
+            id: positiveTranscriptSegmentID(segment.id, index + 1),
             text: segment.text,
             startTime: segment.startTime,
             endTime: segment.endTime,
@@ -274,7 +279,7 @@ export function useRecording() {
               title: meetingTitle,
               date: new Date().toISOString(),
               duration: recordedDuration,
-              transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
+              transcript: [{ id: FIRST_TRANSCRIPT_SEGMENT_ID, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
               summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
             };
             await db.meetings.add(meeting);
@@ -353,7 +358,7 @@ export function useRecording() {
           if (whisperText && whisperText.length >= liveTextLen) {
             finalText = whisperText;
             finalSegments = [{
-              id: 0,
+              id: FIRST_TRANSCRIPT_SEGMENT_ID,
               text: whisperText,
               startTime: 0,
               endTime: recordedDuration,
@@ -377,7 +382,7 @@ export function useRecording() {
           title: title || `Meeting ${new Date().toLocaleDateString()}`,
           date: new Date().toISOString(),
           duration: recordedDuration,
-          transcript: [{ id: 0, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
+          transcript: [{ id: FIRST_TRANSCRIPT_SEGMENT_ID, text: "[No speech detected during recording]", startTime: 0, endTime: 0, speaker: "System", confidence: 0 }],
           summary: { decisions: [], actionItems: [], topics: [], openQuestions: [], wasSummarized: false },
         };
         await db.meetings.add(meeting);

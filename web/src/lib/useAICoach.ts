@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TranscriptSegment, CoachInsight } from "./types";
+import type {
+  TranscriptSegment,
+  CoachInsight,
+  CoachInsightLifecycle,
+} from "./types";
 import { analyzeTranscriptLive, askAISA } from "./ai";
 import { coachPolicy } from "./ai-coach-policy";
 
@@ -26,13 +30,18 @@ export function useAICoach(
   const chatMessagesRef = useRef(chatMessages);
   const cadenceRef = useRef<ReturnType<typeof coachPolicy.createCadenceTracker> | null>(null);
   const sessionScopeRef = useRef<ReturnType<typeof coachPolicy.createRecordingSessionScope> | null>(null);
-  const analysisOwnershipRef = useRef<ReturnType<typeof coachPolicy.createAnalysisRequestOwnership> | null>(null);
+  const analysisLifecycleRef = useRef<ReturnType<typeof coachPolicy.createAnalysisLifecycle> | null>(null);
   if (!cadenceRef.current) cadenceRef.current = coachPolicy.createCadenceTracker();
   if (!sessionScopeRef.current) {
     sessionScopeRef.current = coachPolicy.createRecordingSessionScope(isRecording);
   }
-  if (!analysisOwnershipRef.current) {
-    analysisOwnershipRef.current = coachPolicy.createAnalysisRequestOwnership();
+  if (!analysisLifecycleRef.current) {
+    analysisLifecycleRef.current = coachPolicy.createAnalysisLifecycle({
+      isMounted: () => mountedRef.current,
+      isRecording: () => recordingRef.current,
+      isEnabled: () => enabledRef.current,
+      isSessionCurrent: (token) => sessionScopeRef.current?.canPublish(token) ?? false,
+    });
   }
   recordingRef.current = isRecording;
   enabledRef.current = enabled;
@@ -40,7 +49,21 @@ export function useAICoach(
   autoInsightsRef.current = autoInsights;
   chatMessagesRef.current = chatMessages;
 
-  const insights = coachPolicy.combinePresentation({ autoInsights, chatMessages });
+  const updateInsightLifecycle = useCallback((
+    insightID: string,
+    lifecycle: CoachInsightLifecycle,
+  ) => {
+    setAutoInsights((previous) => previous.map((insight) =>
+      insight.id === insightID ? { ...insight, lifecycle } : insight,
+    ));
+  }, []);
+  const insights = coachPolicy.combinePresentation({ autoInsights, chatMessages })
+    .map((insight) => insight.role ? insight : {
+      ...insight,
+      onLifecycleChange: (lifecycle: CoachInsightLifecycle) => {
+        updateInsightLifecycle(insight.id, lifecycle);
+      },
+    });
 
   const analyze = useCallback(async () => {
     const segs = segmentsRef.current;
@@ -61,25 +84,17 @@ export function useAICoach(
 
     const sessionToken = sessionScopeRef.current?.capture();
     if (sessionToken === null || sessionToken === undefined) return;
-    const controller = analysisOwnershipRef.current?.begin();
-    if (!controller) return;
+    const request = analysisLifecycleRef.current?.begin(sessionToken);
+    if (!request) return;
     analyzingRef.current = true;
     setIsAnalyzing(true);
-    const canPublishAnalysis = () => coachPolicy.canPublishAnalysis({
-      mounted: mountedRef.current,
-      recording: recordingRef.current,
-      enabled: enabledRef.current,
-      aborted: controller.signal.aborted,
-      sessionCurrent: sessionScopeRef.current?.canPublish(sessionToken) ?? false,
-      requestCurrent: analysisOwnershipRef.current?.isCurrent(controller) ?? false,
-    });
 
     try {
       console.log(
         `[AI Coach] Analyzing ${wordCount} words with ${context.transcriptSegments.length} recent segments and ${context.sessionInsightCount} prior auto-insights`,
       );
-      const outcome = await analyzeTranscriptLive(context, { signal: controller.signal });
-      if (!canPublishAnalysis()) return;
+      const outcome = await analyzeTranscriptLive(context, { signal: request.signal });
+      if (!request.canPublish()) return;
 
       if (outcome.status === "insights") {
         console.log(
@@ -100,13 +115,12 @@ export function useAICoach(
 
       cadenceRef.current?.complete(segmentCount);
     } catch (error) {
-      if (!isAbortError(error) && canPublishAnalysis()) {
+      if (!isAbortError(error) && request.canPublish()) {
         console.warn("[AI Coach] Analysis failed:", error);
         cadenceRef.current?.fail(segmentCount);
       }
     } finally {
-      const canFinalizeAnalysis = canPublishAnalysis();
-      if (analysisOwnershipRef.current?.release(controller) && canFinalizeAnalysis) {
+      if (request.finish()) {
         analyzingRef.current = false;
         if (mountedRef.current) setIsAnalyzing(false);
       }
@@ -118,7 +132,7 @@ export function useAICoach(
     return () => {
       mountedRef.current = false;
       sessionScopeRef.current?.sync(false);
-      analysisOwnershipRef.current?.cancel();
+      analysisLifecycleRef.current?.cancel();
       replyAbortRef.current?.abort();
     };
   }, []);
@@ -126,7 +140,7 @@ export function useAICoach(
   useEffect(() => {
     sessionScopeRef.current?.sync(isRecording);
     cadenceRef.current?.reset();
-    analysisOwnershipRef.current?.cancel();
+    analysisLifecycleRef.current?.cancel();
     replyAbortRef.current?.abort();
     replyAbortRef.current = null;
     analyzingRef.current = false;
@@ -142,7 +156,7 @@ export function useAICoach(
 
   useEffect(() => {
     if (enabled) return;
-    analysisOwnershipRef.current?.cancel();
+    analysisLifecycleRef.current?.cancel();
     replyAbortRef.current?.abort();
     replyAbortRef.current = null;
     analyzingRef.current = false;

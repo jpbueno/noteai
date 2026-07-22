@@ -122,6 +122,47 @@ test("buildContext keeps only bounded recent transcript and auto-insight context
   assert.equal(context.sessionInsightCount, 1);
 });
 
+for (const [label, rawText, quotedTail] of [
+  ["edge tab", "Capacity is reserved.\t", "Capacity is reserved."],
+  ["leading U+2028", "\u2028Capacity is reserved.", "Capacity is reserved."],
+]) {
+  test(`strict evidence preserves and rejects raw source text with ${label}`, () => {
+    const context = buildContext({ segments: [segment(61, rawText)] });
+
+    assert.equal(context.transcriptSegments[0]?.text, rawText);
+
+    const result = coachPolicy.admit(
+      strictEnvelope([
+        transcriptQuote("observation", 61, quotedTail, { topic: "capacity" }),
+      ]),
+      context,
+      fixedAdapters,
+    );
+
+    assert.equal(result.status, "rejected");
+    assert.deepEqual(result.insights, []);
+    assert.equal(result.rejections[0]?.reason, "invalid_evidence");
+  });
+}
+
+test("oversized source segments are omitted instead of tail-sliced into admissible evidence", () => {
+  const sourceText = `We cannot deploy.${" ".repeat(9_000)}We can deploy.`;
+  const context = buildContext({ segments: [segment(62, sourceText)] });
+
+  assert.deepEqual(context.transcriptSegments, []);
+
+  const result = coachPolicy.admit(
+    strictEnvelope([
+      transcriptQuote("observation", 62, "We can deploy.", { topic: "deployment" }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+
+  assert.equal(result.status, "rejected");
+  assert.equal(result.rejections[0]?.reason, "invalid_evidence");
+});
+
 test("buildContext bounds untrusted speaker and prior-output metadata", () => {
   const context = buildContext({
     segments: [segment(4, "Recent transcript context")],
@@ -146,7 +187,7 @@ test("buildContext bounds untrusted speaker and prior-output metadata", () => {
   assert.ok(rebuilt.transcriptSegments[0].speaker.length <= coachPolicy.limits.maxSpeakerCharacters);
   assert.ok(rebuilt.priorAutoInsights[0].id.length <= coachPolicy.limits.maxIdentifierCharacters);
   assert.ok(rebuilt.priorAutoInsights[0].content.length <= coachPolicy.limits.maxInsightCharacters);
-  assert.ok(rebuilt.priorAutoInsights[0].evidence.length <= coachPolicy.limits.maxPriorEvidenceReferences);
+  assert.ok(rebuilt.priorAutoInsights[0].evidence.length <= coachPolicy.limits.maxEvidenceReferences);
 });
 
 test("serialized context remains below the chat message size limit", () => {
@@ -312,71 +353,79 @@ test("an aborted reply stays unpublished after the coach is re-enabled", () => {
 });
 
 test("deferred analysis A cannot publish or finalize over B after re-enable", async () => {
-  assert.equal(typeof coachPolicy.createAnalysisRequestOwnership, "function");
+  assert.equal(typeof coachPolicy.createAnalysisLifecycle, "function");
+  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
+  assert.match(hookSource, /createAnalysisLifecycle/);
+  assert.match(hookSource, /request\.canPublish\(\)/);
+  assert.match(hookSource, /request\.finish\(\)/);
+  assert.doesNotMatch(hookSource, /createAnalysisRequestOwnership/);
 
   for (const staleSettlement of ["insight", "error"]) {
-    const ownership = coachPolicy.createAnalysisRequestOwnership();
+    const session = coachPolicy.createRecordingSessionScope(true);
     const cadence = coachPolicy.createCadenceTracker({ now: () => 1_000 });
     const segmentCount = 2;
     const publishedInsights = [];
     const publishedErrors = [];
     const cadenceEvents = [];
     const finalized = [];
+    let mounted = true;
+    let recording = true;
     let enabled = true;
     let busy = false;
+    const lifecycle = coachPolicy.createAnalysisLifecycle({
+      isMounted: () => mounted,
+      isRecording: () => recording,
+      isEnabled: () => enabled,
+      isSessionCurrent: (token) => session.canPublish(token),
+    });
 
-    const start = (name, pending) => {
-      const controller = ownership.begin();
+    const start = (name, pending, sessionToken) => {
+      const request = lifecycle.begin(sessionToken);
       busy = true;
-      const canPublish = () => coachPolicy.canPublishAnalysis({
-        mounted: true,
-        recording: true,
-        enabled,
-        aborted: controller.signal.aborted,
-        sessionCurrent: true,
-        requestCurrent: ownership.isCurrent(controller),
-      });
       const completion = (async () => {
         try {
           const insight = await pending.promise;
-          if (!canPublish()) return;
+          if (!request.canPublish()) return;
           publishedInsights.push(`${name}:${insight}`);
           cadence.complete(segmentCount);
           cadenceEvents.push(`complete:${name}`);
         } catch (error) {
-          if (!canPublish()) return;
+          if (!request.canPublish()) return;
           publishedErrors.push(`${name}:${error.message}`);
           cadence.fail(segmentCount);
           cadenceEvents.push(`fail:${name}`);
         } finally {
-          const canFinalize = canPublish();
-          if (ownership.release(controller) && canFinalize) {
+          if (request.finish()) {
             busy = false;
             finalized.push(name);
           }
         }
       })();
-      return { completion, controller };
+      return { completion, request };
     };
 
+    const firstSessionToken = session.capture();
+    assert.notEqual(firstSessionToken, null);
     const pendingA = deferred();
-    const requestA = start("A", pendingA);
+    const requestA = start("A", pendingA, firstSessionToken);
     assert.equal(busy, true);
-    assert.equal(ownership.isCurrent(requestA.controller), true);
+    assert.equal(requestA.request.canPublish(), true);
 
     enabled = false;
-    ownership.cancel();
+    lifecycle.cancel();
     busy = false;
-    assert.equal(requestA.controller.signal.aborted, true);
-    assert.equal(ownership.isCurrent(requestA.controller), false);
+    assert.equal(requestA.request.signal.aborted, true);
+    assert.equal(requestA.request.canPublish(), false);
     assert.equal(busy, false);
 
     enabled = true;
 
+    const secondSessionToken = session.capture();
+    assert.notEqual(secondSessionToken, null);
     const pendingB = deferred();
-    const requestB = start("B", pendingB);
+    const requestB = start("B", pendingB, secondSessionToken);
     assert.equal(busy, true);
-    assert.equal(ownership.isCurrent(requestB.controller), true);
+    assert.equal(requestB.request.canPublish(), true);
     if (staleSettlement === "insight") {
       pendingA.resolve("stale insight");
     } else {
@@ -390,9 +439,9 @@ test("deferred analysis A cannot publish or finalize over B after re-enable", as
     assert.equal(cadence.canAnalyze(segmentCount), true);
     assert.deepEqual(finalized, [], `${staleSettlement}: A finalized`);
     assert.equal(busy, true, `${staleSettlement}: A cleared B's busy state`);
-    assert.equal(ownership.isCurrent(requestA.controller), false);
-    assert.equal(ownership.isCurrent(requestB.controller), true);
-    assert.equal(requestB.controller.signal.aborted, false);
+    assert.equal(requestA.request.canPublish(), false);
+    assert.equal(requestB.request.canPublish(), true);
+    assert.equal(requestB.request.signal.aborted, false);
 
     pendingB.resolve("fresh insight");
     await requestB.completion;
@@ -403,7 +452,10 @@ test("deferred analysis A cannot publish or finalize over B after re-enable", as
     assert.equal(cadence.canAnalyze(segmentCount), false);
     assert.deepEqual(finalized, ["B"]);
     assert.equal(busy, false);
-    assert.equal(ownership.isCurrent(requestB.controller), false);
+    assert.equal(requestB.request.canPublish(), false);
+
+    mounted = false;
+    recording = false;
   }
 });
 
@@ -418,6 +470,48 @@ test("admission distinguishes a strict no-op envelope from a parse failure", () 
   assert.equal(parseFailure.status, "parse_failure");
   assert.deepEqual(parseFailure.insights, []);
   assert.match(parseFailure.error, /json/i);
+});
+
+test("raw JSON integer spellings follow numeric value semantics", () => {
+  const context = buildContext({ segments: [segment(1, "Capacity is reserved.")] });
+
+  for (const version of ["1.0", "1e0"]) {
+    const result = coachPolicy.admit(
+      `{"contract_version":${version},"candidates":[]}`,
+      context,
+      fixedAdapters,
+    );
+    assert.equal(result.status, "no_op", `contract_version ${version}`);
+  }
+
+  for (const sourceID of ["1.0", "1e0"]) {
+    const result = coachPolicy.admit(
+      `{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":${sourceID},"quote":"Capacity is reserved."}],"priority":"high","topic":"capacity"}]}`,
+      context,
+      fixedAdapters,
+    );
+    assert.equal(result.status, "insights", `source_segment_id ${sourceID}`);
+  }
+
+  for (const version of ["true", "1.5"]) {
+    const result = coachPolicy.admit(
+      `{"contract_version":${version},"candidates":[]}`,
+      context,
+      fixedAdapters,
+    );
+    assert.equal(result.status, "rejected", `contract_version ${version}`);
+    assert.equal(result.rejections[0]?.reason, "invalid_envelope");
+  }
+
+  for (const sourceID of ["true", "1.5"]) {
+    const result = coachPolicy.admit(
+      `{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":${sourceID},"quote":"Capacity is reserved."}],"priority":"high","topic":"capacity"}]}`,
+      context,
+      fixedAdapters,
+    );
+    assert.equal(result.status, "rejected", `source_segment_id ${sourceID}`);
+    assert.equal(result.rejections[0]?.reason, "invalid_evidence");
+  }
 });
 
 test("shared coach admission corpus metadata remains frozen at v1", () => {
@@ -482,6 +576,35 @@ for (const separator of ["\u2028", "\u2029"]) {
   });
 }
 
+test("transcript evidence accepts four references and rejects five", () => {
+  const quote = "Capacity is reserved.";
+  const segments = Array.from({ length: 5 }, (_, index) => segment(index + 71, quote));
+  const context = buildContext({ segments });
+  const candidateWith = (count) => transcriptQuote("observation", 71, quote, {
+    topic: "capacity",
+    evidence_quotes: segments.slice(0, count).map((item) => ({
+      source_segment_id: item.id,
+      quote,
+    })),
+  });
+
+  const four = coachPolicy.admit(
+    strictEnvelope([candidateWith(4)]),
+    context,
+    fixedAdapters,
+  );
+  const five = coachPolicy.admit(
+    strictEnvelope([candidateWith(5)]),
+    context,
+    fixedAdapters,
+  );
+
+  assert.equal(four.status, "insights");
+  assert.deepEqual(four.insights[0].evidence.map((item) => item.segmentId), [71, 72, 73, 74]);
+  assert.equal(five.status, "rejected");
+  assert.equal(five.rejections[0]?.reason, "invalid_evidence");
+});
+
 test("admission preserves exact transcript evidence identifiers and timestamps", () => {
   const quote = "We will send the utilization data Friday.";
   const context = buildContext({ segments: [segment(12, quote)] });
@@ -535,30 +658,57 @@ test("admission enforces the session budget", () => {
 });
 
 test("chat messages remain presentable without increasing automatic insight counts", () => {
-  const automatic = [autoInsight("Clarify the customer's latency SLO.")];
+  const automatic = Array.from({ length: 12 }, (_, index) =>
+    autoInsight(`Active automatic insight ${index}`),
+  );
+  const history = [
+    autoInsight("Dismissed automatic insight", { lifecycle: "dismissed" }),
+    autoInsight("Resolved automatic insight", { lifecycle: "resolved" }),
+  ];
   const chat = [
     autoInsight("Should we recommend Dynamo?", { role: "user" }),
     autoInsight("It depends on the workload shape.", { role: "assistant" }),
   ];
 
   const presentation = coachPolicy.combinePresentation({
-    autoInsights: automatic,
+    autoInsights: [...automatic, ...history],
     chatMessages: chat,
   });
+  const groups = coachPolicy.partitionPresentation(presentation);
   const context = buildContext({ priorAutoInsights: presentation });
 
-  assert.equal(presentation.length, 3);
-  assert.equal(coachPolicy.countAutomaticInsights(presentation), 1);
-  assert.equal(context.sessionInsightCount, 1);
+  assert.equal(presentation.length, 16);
+  assert.equal(coachPolicy.countAutomaticInsights(presentation), 14);
+  assert.equal(context.sessionInsightCount, 12);
+  assert.equal(groups.activeAutoInsights.length, coachPolicy.limits.maxSessionInsights);
+  assert.deepEqual(groups.history.map((item) => item.lifecycle), ["dismissed", "resolved"]);
+  assert.deepEqual(groups.chatMessages.map((item) => item.role), ["user", "assistant"]);
 
   const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
   const liveTranscriptSource = readFileSync(
     new URL("./src/components/LiveTranscript.tsx", import.meta.url),
     "utf8",
   );
+  const coachPanelSource = readFileSync(
+    new URL("./src/components/CoachPanel.tsx", import.meta.url),
+    "utf8",
+  );
   assert.match(hookSource, /const \[autoInsights, setAutoInsights\] = useState/);
   assert.match(hookSource, /const \[chatMessages, setChatMessages\] = useState/);
-  assert.match(liveTranscriptSource, /countAutomaticInsights\(coachInsights\)/);
+  assert.match(hookSource, /updateInsightLifecycle/);
+  assert.match(hookSource, /onLifecycleChange/);
+  assert.match(liveTranscriptSource, /scrollIntoView/);
+  assert.match(liveTranscriptSource, /highlightedSegmentID/);
+  assert.match(liveTranscriptSource, /data-source-segment-id/);
+  assert.match(coachPanelSource, /partitionPresentation/);
+  assert.match(coachPanelSource, />Active</);
+  assert.match(coachPanelSource, />History</);
+  assert.match(coachPanelSource, />Chat</);
+  assert.match(coachPanelSource, /aria-label="Pin insight"/);
+  assert.match(coachPanelSource, /aria-label="Dismiss insight"/);
+  assert.match(coachPanelSource, /aria-label="Resolve insight"/);
+  assert.match(coachPanelSource, /onSelectSource\?\./);
+  assert.match(coachPanelSource, /item\.onLifecycleChange\?\./);
 });
 
 test("admission rejects exact and near-duplicate derived guidance", () => {
@@ -580,6 +730,48 @@ test("admission rejects exact and near-duplicate derived guidance", () => {
     "duplicate",
     "duplicate",
   ]);
+});
+
+test("dedupe matches native Jaccard 0.82 tokenization without containment", () => {
+  const similarity = coachPolicy.contentSimilarity(
+    "Alpha bravo charlie delta echo",
+    "Alpha bravo charlie delta echo foxtrot",
+  );
+  assert.ok(Math.abs(similarity - (5 / 6)) < Number.EPSILON);
+  assert.ok(similarity >= 0.82);
+
+  const containmentOnlyContext = buildContext({
+    priorAutoInsights: [
+      autoInsight("Ask: What alpha bravo charlie delta echo foxtrot golf?"),
+    ],
+  });
+  const containmentOnly = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("What alpha bravo charlie delta?", {
+        topic: "containment-only",
+      }),
+    ]),
+    containmentOnlyContext,
+    fixedAdapters,
+  );
+  assert.equal(containmentOnly.status, "insights");
+
+  const nativeNearDuplicateContext = buildContext({
+    priorAutoInsights: [
+      autoInsight("Ask: What alpha bravo charlie delta echo?"),
+    ],
+  });
+  const nativeNearDuplicate = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("What alpha bravo charlie delta echo foxtrot?", {
+        topic: "native-jaccard",
+      }),
+    ]),
+    nativeNearDuplicateContext,
+    fixedAdapters,
+  );
+  assert.equal(nativeNearDuplicate.status, "rejected");
+  assert.equal(nativeNearDuplicate.rejections[0]?.reason, "duplicate");
 });
 
 test("admission prioritizes critical guidance and cools repeated topics", () => {
@@ -628,4 +820,121 @@ test("chat assembly includes the current question exactly once", () => {
   assert.deepEqual(messages.at(-1), { role: "user", content: question });
   assert.ok(messages.some((message) => /two clusters/.test(message.content)));
   assert.ok(messages.some((message) => /Clarify their cross-cluster latency budget/.test(message.content)));
+});
+
+test("deterministic 50-minute replay stays bounded, isolated, and deduplicated", () => {
+  const replayQuestions = [
+    "What latency percentile defines launch readiness?",
+    "Who owns reserved accelerator capacity approval?",
+    "How will failover routing preserve availability?",
+    "When does security review unblock production?",
+    "Which workload validates memory sizing assumptions?",
+    "Where are topology constraints documented?",
+    "Can observability detect queue saturation early?",
+    "Should deployment require rollback rehearsal?",
+    "Does cost modeling include idle replicas?",
+    "Will data residency limit regional placement?",
+  ];
+  const session = coachPolicy.createRecordingSessionScope(true);
+  let recording = true;
+  const lifecycle = coachPolicy.createAnalysisLifecycle({
+    isMounted: () => true,
+    isRecording: () => recording,
+    isEnabled: () => true,
+    isSessionCurrent: (token) => session.canPublish(token),
+  });
+  let sessionToken = session.capture();
+  assert.notEqual(sessionToken, null);
+
+  let autoInsights = [];
+  let chatHistory = [];
+  let maxVisibleAutoInsights = 0;
+  let duplicateUserQuestions = 0;
+  let staleCrossSessionResponses = 0;
+  let nearDuplicateClusters = 0;
+  let nextID = 0;
+
+  for (let minute = 0; minute < 50; minute += 1) {
+    if (minute === 25) {
+      const staleRequest = lifecycle.begin(sessionToken);
+      recording = false;
+      session.sync(false);
+      lifecycle.cancel();
+      autoInsights = [];
+      chatHistory = [];
+
+      recording = true;
+      session.sync(true);
+      sessionToken = session.capture();
+      assert.notEqual(sessionToken, null);
+      const freshRequest = lifecycle.begin(sessionToken);
+      if (staleRequest.canPublish() || staleRequest.finish()) {
+        staleCrossSessionResponses += 1;
+      }
+      assert.equal(freshRequest.canPublish(), true);
+      assert.equal(freshRequest.finish(), true);
+    }
+
+    const context = buildContext({
+      segments: [segment(minute + 1, `Replay minute ${minute} transcript context.`)],
+      priorAutoInsights: autoInsights,
+    });
+    const questionIndex = minute % replayQuestions.length;
+    const result = coachPolicy.admit(
+      strictEnvelope([
+        guidanceQuestion(replayQuestions[questionIndex], {
+          topic: `replay-${questionIndex}`,
+        }),
+      ]),
+      context,
+      {
+        createId: () => `replay-insight-${nextID += 1}`,
+        now: () => new Date(Date.UTC(2026, 6, 22, 16, minute)),
+      },
+    );
+    if (result.status === "insights") {
+      autoInsights = [...autoInsights, ...result.insights];
+    }
+
+    const groups = coachPolicy.partitionPresentation(autoInsights);
+    maxVisibleAutoInsights = Math.max(
+      maxVisibleAutoInsights,
+      groups.activeAutoInsights.length,
+    );
+    for (let left = 0; left < groups.activeAutoInsights.length; left += 1) {
+      for (let right = left + 1; right < groups.activeAutoInsights.length; right += 1) {
+        if (
+          coachPolicy.contentSimilarity(
+            groups.activeAutoInsights[left].content,
+            groups.activeAutoInsights[right].content,
+          ) >= 0.82
+        ) {
+          nearDuplicateClusters += 1;
+        }
+      }
+    }
+
+    if (minute % 5 === 0) {
+      const userQuestion = `How should we review replay minute ${minute}?`;
+      const messages = coachPolicy.buildChatMessages({
+        question: userQuestion,
+        context,
+        history: [...chatHistory, { role: "user", content: userQuestion }],
+      });
+      const occurrences = messages.filter(
+        (message) => message.role === "user" && message.content === userQuestion,
+      ).length;
+      duplicateUserQuestions += Math.max(0, occurrences - 1);
+      chatHistory = [
+        ...chatHistory,
+        { role: "user", content: userQuestion },
+        { role: "assistant", content: `Replay response ${minute}` },
+      ];
+    }
+  }
+
+  assert.ok(maxVisibleAutoInsights <= 10);
+  assert.equal(duplicateUserQuestions, 0);
+  assert.equal(staleCrossSessionResponses, 0);
+  assert.equal(nearDuplicateClusters, 0);
 });

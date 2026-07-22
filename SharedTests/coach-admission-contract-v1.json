@@ -18,7 +18,9 @@
         "derived_type": "talking_point",
         "derived_basis": "recommendation",
         "derived_content": "<Capitalized directive>: <normalized question>",
-        "question_rule": "One normalized interrogative ending in exactly one question mark, with no earlier sentence terminator, newline, semicolon, control, bidi, or unsafe invisible character."
+        "question_rule": "One normalized interrogative beginning with an allowed interrogative or auxiliary word, ending in exactly one ASCII question mark, with no earlier ASCII period, exclamation mark, or question mark, newline, semicolon, control, bidi, or unsafe invisible character.",
+        "allowed_first_words": ["what", "why", "how", "when", "where", "which", "who", "whose", "is", "are", "was", "were", "do", "does", "did", "can", "could", "should", "would", "will", "has", "have", "had", "may", "might"],
+        "technical_answer_rule": "No technical-answer candidate exists. Guidance is always rendered as a visibly prefixed question and is never admitted as fact."
       },
       "transcript_quote": {
         "kind": "transcript_quote",
@@ -41,7 +43,8 @@
             "content_prefix": "Possible follow-up: "
           }
         },
-        "evidence_rule": "Every quote equals one complete normalized source segment. Multiple quotes have identical normalized text and distinct valid source IDs."
+        "evidence_rule": "Every quote equals one complete normalized source segment. Multiple quotes have identical normalized text and distinct valid source IDs.",
+        "source_id_rule": "A source ID is a JSON number that is an integer in the inclusive range 1 through 9007199254740991. Every cited ID resolves to exactly one transcript record."
       }
     },
     "priorities": ["high", "critical"],
@@ -50,13 +53,18 @@
       "max_characters": 64
     },
     "normalization": {
-      "text_steps": ["NFC", "trim Unicode whitespace", "collapse Unicode whitespace runs to U+0020"],
+      "processing_order": ["reject unsafe code points", "normalize to NFC", "map allowed collapsible whitespace to U+0020", "trim and collapse U+0020 runs", "validate grammar and topic", "count derived output"],
+      "text_steps": ["NFC", "trim allowed collapsible whitespace", "collapse allowed whitespace runs to U+0020"],
       "comparison": "exact after normalization",
-      "reject": ["control characters", "bidi controls", "unsafe invisible characters"]
+      "collapsible_whitespace_code_points": ["U+0020", "U+00A0", "U+1680", "U+2000-U+200A", "U+202F", "U+205F", "U+3000"],
+      "reject_code_points": ["U+0000-U+001F", "U+007F-U+009F", "U+061C", "U+200B-U+200F", "U+202A-U+202E", "U+2060", "U+2066-U+2069", "U+FEFF"],
+      "unicode_version_rule": "Use each platform runtime's Unicode normalization tables; corpus NFC equivalence is the compatibility gate."
     },
     "derived_limits": {
       "max_characters": 180,
-      "max_words": 24
+      "character_unit": "Unicode scalar values after normalization",
+      "max_words": 24,
+      "word_unit": "Non-empty fields separated by normalized U+0020 after deterministic prefix derivation"
     },
     "expected_result": {
       "exact_keys": ["outcome", "derived", "rejection_category", "side_effects"],
@@ -262,13 +270,13 @@
     },
     {
       "id": "reject-question-word-limit",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What exact production workload latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching target should the benchmark validate?", "priority": "critical", "topic": "benchmark"}]},
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Can a b c d e f g h i j k l m n o p q r s t u v pass?", "priority": "critical", "topic": "benchmark"}]},
       "transcript_segments": [],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-question-character-limit",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "explore", "question": "Could supercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalifragilisticexpialidocious improve routing?", "priority": "high", "topic": "routing"}]},
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "priority": "high", "topic": "routing"}]},
       "transcript_segments": [],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
@@ -436,8 +444,8 @@
     },
     {
       "id": "reject-quote-derived-word-limit",
-      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_follow_up", "evidence_quotes": [{"source_segment_id": 34, "quote": "The team should validate latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching and deployment readiness tomorrow."}], "priority": "critical", "topic": "readiness"}]},
-      "transcript_segments": [{"source_segment_id": 34, "text": "The team should validate latency throughput availability ownership capacity topology networking storage scheduling observability rollback security privacy reliability scalability concurrency batching and deployment readiness tomorrow."}],
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "possible_follow_up", "evidence_quotes": [{"source_segment_id": 34, "quote": "We should test a b c d e f g h i j k l m n o p q r s t."}], "priority": "critical", "topic": "readiness"}]},
+      "transcript_segments": [{"source_segment_id": 34, "text": "We should test a b c d e f g h i j k l m n o p q r s t."}],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
@@ -493,6 +501,126 @@
       "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": 99, "priority": "high", "topic": "p99"}]},
       "transcript_segments": [],
       "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "guidance-nfc-normalization",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is Cafe\u0301 latency acceptable?", "priority": "high", "topic": "latency"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: Is Caf\u00e9 latency acceptable?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "latency", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "guidance-unicode-whitespace-normalization",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What\u00a0is\u2003p99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: What is p99?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "p99", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "accept-question-24-derived-words",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Can a b c d e f g h i j k l m n o p q r s t u pass?", "priority": "high", "topic": "word-boundary"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: Can a b c d e f g h i j k l m n o p q r s t u pass?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "word-boundary", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "accept-question-180-derived-scalars",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Is xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "priority": "high", "topic": "character-boundary"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Ask: Is xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?", "type": "talking_point", "basis": "recommendation", "evidence_ids": [], "topic": "character-boundary", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-zero-width-space",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is\u200bp99?", "priority": "high", "topic": "p99"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-earlier-period",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Latency is fixed. Who verified it?", "priority": "high", "topic": "latency"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-earlier-exclamation",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Capacity is ready! Who verified it?", "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-question-asserted-premise",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "Given that Dynamo halves p99, should we deploy it?", "priority": "critical", "topic": "dynamo"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-missing-candidates",
+      "model_output": {"contract_version": 1},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_envelope", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-mixed-valid-invalid-atomically",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "guidance_question", "directive": "ask", "question": "What is p99?", "priority": "high", "topic": "p99"}, {"kind": "guidance_question", "directive": "confirm", "question": "The customer will deliver Friday", "priority": "high", "topic": "delivery"}]},
+      "transcript_segments": [],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_text", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-missing-source-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 41, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-missing-text",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 42}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 42, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-wrong-text-type",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 43, "quote": 7}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 43, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-quotes-wrong-type",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": {}, "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 44, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-quote-missing-presentation",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "evidence_quotes": [{"source_segment_id": 45, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 45, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_candidate", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-zero-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 0, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 0, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-fractional-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 1.5, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 1, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-boolean-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": true, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 1, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "reject-evidence-unsafe-integer-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 9007199254740992, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 46, "text": "Capacity is missing."}],
+      "expected": {"outcome": "rejected", "derived": [], "rejection_category": "invalid_evidence", "side_effects": {"task_creations": 0, "tool_calls": 0}}
+    },
+    {
+      "id": "accept-evidence-max-safe-integer-id",
+      "model_output": {"contract_version": 1, "candidates": [{"kind": "transcript_quote", "presentation": "observation", "evidence_quotes": [{"source_segment_id": 9007199254740991, "quote": "Capacity is missing."}], "priority": "high", "topic": "capacity"}]},
+      "transcript_segments": [{"source_segment_id": 9007199254740991, "text": "Capacity is missing."}],
+      "expected": {"outcome": "accepted", "derived": [{"content": "Transcript quote: Capacity is missing.", "type": "key_insight", "basis": "transcript", "evidence_ids": [9007199254740991], "topic": "capacity", "priority": "high"}], "rejection_category": null, "side_effects": {"task_creations": 0, "tool_calls": 0}}
     },
     {
       "id": "reject-transcript-segment-duplicate-source-record",

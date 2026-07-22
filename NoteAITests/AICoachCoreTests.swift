@@ -118,7 +118,7 @@ final class AICoachContextTests: XCTestCase {
         XCTAssertEqual(retry?.transcriptDelta.map(\.id), [1, 2])
     }
 
-    func testAnalysisRequestBoundsTranscriptCharactersAndSpeakerMetadata() throws {
+    func testOversizedNegatedSegmentIsOmittedInsteadOfRelabeledWithPositiveTail() throws {
         var context = CoachContext(policy: CoachContextPolicy(
             minimumWordCount: 1,
             minimumNewSegments: 1,
@@ -131,12 +131,15 @@ final class AICoachContextTests: XCTestCase {
             maxRollingContextCharacters: 120,
             maxChatMessages: 4
         ))
+        let text = "The customer has not committed to deliver results."
+            + String(repeating: " ", count: 80)
+            + "Customer will deliver results tomorrow."
         let oversized = TranscriptSegment(
             id: 1,
-            text: String(repeating: "context ", count: 50),
+            text: text,
             startTime: 0,
             endTime: 1,
-            speaker: String(repeating: "speaker", count: 20)
+            speaker: "customer"
         )
 
         let request = try XCTUnwrap(context.prepareAnalysis(
@@ -145,9 +148,82 @@ final class AICoachContextTests: XCTestCase {
             now: Date()
         ))
 
-        XCTAssertLessThanOrEqual(request.recentTranscript.reduce(0) { $0 + $1.text.count }, 40)
-        XCTAssertLessThanOrEqual(request.transcriptDelta.reduce(0) { $0 + $1.text.count }, 40)
+        XCTAssertEqual(request.recentTranscript, [])
+        XCTAssertEqual(request.transcriptDelta, [])
+        XCTAssertFalse(request.recentTranscript.contains { $0.text.contains("Customer will deliver") })
+    }
+
+    func testEvidenceContextPreservesCompleteRawWhitespaceAndOmitsLeadingControl() throws {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 0,
+            failureRetryInterval: 0,
+            maxRecentSegments: 6,
+            maxDeltaSegments: 6,
+            maxTranscriptCharacters: 80,
+            maxSpeakerCharacters: 8,
+            maxRollingContextCharacters: 120,
+            maxChatMessages: 4
+        ))
+        let canonicalText = "  Capacity is constrained.  "
+        let transcript = [
+            TranscriptSegment(
+                id: 1,
+                text: canonicalText,
+                speaker: String(repeating: "speaker", count: 20)
+            ),
+            TranscriptSegment(id: 2, text: "\u{0001}Customer will deliver results tomorrow."),
+        ]
+
+        let request = try XCTUnwrap(context.prepareAnalysis(
+            sessionID: UUID(),
+            transcript: transcript,
+            now: Date()
+        ))
+
+        XCTAssertEqual(request.recentTranscript.map(\.id), [1])
+        XCTAssertEqual(request.recentTranscript.first?.text, canonicalText)
         XCTAssertEqual(request.recentTranscript.first?.speaker?.count, 8)
+        XCTAssertEqual(request.transcriptDelta.map(\.id), [1])
+    }
+
+    func testRollingContextKeepsOnlyCompleteSafeIDLabeledSegments() throws {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 0,
+            failureRetryInterval: 0,
+            maxRecentSegments: 1,
+            maxDeltaSegments: 1,
+            maxTranscriptCharacters: 80,
+            maxSpeakerCharacters: 8,
+            maxRollingContextCharacters: 80,
+            maxChatMessages: 4
+        ))
+        let transcript = [
+            TranscriptSegment(
+                id: 1,
+                text: "No commitment was discussed. "
+                    + String(repeating: "x", count: 90)
+                    + " Customer will deliver tomorrow."
+            ),
+            TranscriptSegment(id: 2, text: "Complete safe context."),
+            TranscriptSegment(id: 3, text: "\u{0001}Unsafe context."),
+            TranscriptSegment(id: 4, text: "Current complete evidence."),
+        ]
+
+        let request = try XCTUnwrap(context.prepareAnalysis(
+            sessionID: UUID(),
+            transcript: transcript,
+            now: Date()
+        ))
+
+        XCTAssertTrue(request.rollingContext.contains("[2 "))
+        XCTAssertTrue(request.rollingContext.contains("Complete safe context."))
+        XCTAssertFalse(request.rollingContext.contains("[1 "))
+        XCTAssertFalse(request.rollingContext.contains("Customer will deliver"))
+        XCTAssertFalse(request.rollingContext.contains("[3 "))
     }
 
     private func makeSegments(_ ids: ClosedRange<Int>) -> [TranscriptSegment] {
@@ -367,12 +443,74 @@ final class AICoachAdmissionTests: XCTestCase {
             sessionID: UUID(),
             now: Date()
         )
+        let maximumEvidence = policy.evaluate(
+            candidates: [candidate(
+                content: "Confirm the four canonical sources before approving rollout.",
+                topic: "four-source-evidence",
+                sourceSegmentIDs: [1, 2, 3, 4]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
 
         XCTAssertEqual(missingTopic.rejections.map(\.reason), [.invalidTopic])
         XCTAssertEqual(excessiveEvidence.rejections.map(\.reason), [.tooManyEvidenceReferences])
+        XCTAssertEqual(maximumEvidence.accepted.count, 1)
+        XCTAssertEqual(maximumEvidence.accepted[0].evidence.map(\.segmentID), [1, 2, 3, 4])
     }
 
-    func testDefaultAdmissionBudgetNeverExceedsTenInsightsAcrossFiftyMinuteReplay() {
+    func testCanonicalDedupeRejectsEquivalentQuestionsAcrossTopics() {
+        let policy = CoachAdmissionPolicy.default
+        let existing = CoachInsight(
+            timestamp: Date(timeIntervalSince1970: 100),
+            type: .talkingPoint,
+            content: "Ask: What is the p99?",
+            sessionID: UUID(),
+            basis: .recommendation,
+            topic: "latency-slo",
+            priority: .high
+        )
+
+        let exact = policy.evaluate(
+            candidates: [candidate(
+                content: "Ask: What is p99?",
+                basis: .recommendation,
+                topic: "performance-target",
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [existing],
+            sessionID: UUID(),
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        let near = policy.evaluate(
+            candidates: [candidate(
+                content: "Ask: What is the p99 latency target today?",
+                basis: .recommendation,
+                topic: "launch-gate",
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [CoachInsight(
+                timestamp: Date(timeIntervalSince1970: 100),
+                type: .talkingPoint,
+                content: "Ask: What is p99 latency target?",
+                sessionID: UUID(),
+                basis: .recommendation,
+                topic: "latency-slo",
+                priority: .high
+            )],
+            sessionID: UUID(),
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(exact.rejections.map(\.reason), [.exactDuplicate])
+        XCTAssertEqual(near.rejections.map(\.reason), [.nearDuplicate])
+    }
+
+    func testDefaultLifetimeBudgetNeverExceedsTenInsightsAcrossFiftyMinuteReplay() {
         let policy = CoachAdmissionPolicy.default
         let sessionID = UUID()
         let start = Date(timeIntervalSince1970: 10_000)
@@ -395,9 +533,13 @@ final class AICoachAdmissionTests: XCTestCase {
                 now: start.addingTimeInterval(TimeInterval(minute * 60))
             )
             accepted.append(contentsOf: decision.accepted)
+            if let lastIndex = accepted.indices.last {
+                accepted[lastIndex].lifecycle = minute.isMultiple(of: 10) ? .resolved : .dismissed
+            }
         }
 
         XCTAssertEqual(accepted.count, 10)
+        XCTAssertTrue(accepted.allSatisfy { $0.lifecycle != .active })
     }
 
     private func candidate(
@@ -530,6 +672,182 @@ final class AICoachEngineTests: XCTestCase {
         }
     }
 
+    func testStrictRawJSONRejectsDuplicateKeysAtEveryDepthAndTrailingCommas() {
+        let responses = [
+            #"{"contract_version":1,"contract_version":1,"candidates":[]}"#,
+            #"{"contract_version":1,"candidates":[{"kind":"guidance_question","kind":"guidance_question","directive":"ask","question":"What is p99?","priority":"high","topic":"p99"}]}"#,
+            #"{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":1,"source_segment_id":1,"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}"#,
+            #"{"contract_version":1,"candidates":[],}"#,
+            #"{"contract_version":1,"candidates":[{"kind":"guidance_question","directive":"ask","question":"What is p99?","priority":"high","topic":"p99",}]}"#,
+            #"{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":1,"quote":"Capacity is missing.",}],"priority":"high","topic":"capacity"}]}"#,
+        ]
+
+        for response in responses {
+            XCTAssertEqual(
+                AICoachEngine.parseAnalysisResponse(response, transcriptContext: []),
+                .malformed("invalid_envelope"),
+                response
+            )
+        }
+    }
+
+    func testRawJSONAcceptsMathematicallyIntegralVersionsAndSourceIDs() {
+        for version in ["1", "1.0", "1e0"] {
+            XCTAssertEqual(
+                AICoachEngine.parseAnalysisResponse(
+                    "{\"contract_version\":\(version),\"candidates\":[]}",
+                    transcriptContext: []
+                ),
+                .candidates([]),
+                version
+            )
+        }
+
+        let transcript = [CoachTranscriptExcerpt(
+            id: 1,
+            text: "Capacity is missing.",
+            startTime: 0,
+            endTime: 1,
+            speaker: nil
+        )]
+        for sourceID in ["1", "1.0", "1e0"] {
+            let response = """
+            {"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":\(sourceID),"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}
+            """
+            guard case .candidates(let candidates) = AICoachEngine.parseAnalysisResponse(
+                response,
+                transcriptContext: transcript
+            ) else {
+                XCTFail("Expected integral source ID \(sourceID) to be accepted")
+                continue
+            }
+            XCTAssertEqual(candidates.map(\.sourceSegmentIDs), [[1]], sourceID)
+        }
+    }
+
+    func testRawJSONRejectsInvalidSourceIDDomainsAndNonFiniteSyntax() {
+        let transcript = [CoachTranscriptExcerpt(
+            id: 1,
+            text: "Capacity is missing.",
+            startTime: 0,
+            endTime: 1,
+            speaker: nil
+        )]
+        for sourceID in ["true", "1.5", "9007199254740992", "1e9999"] {
+            let response = """
+            {"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":\(sourceID),"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}
+            """
+            let result = AICoachEngine.parseAnalysisResponse(response, transcriptContext: transcript)
+            XCTAssertEqual(result, .malformed("invalid_evidence"), sourceID)
+        }
+        XCTAssertEqual(
+            AICoachEngine.parseAnalysisResponse(
+                #"{"contract_version":NaN,"candidates":[]}"#,
+                transcriptContext: []
+            ),
+            .malformed("invalid_envelope")
+        )
+    }
+
+    func testQuestionHeadAndPunctuationValidationUsesWholeASCIIScalars() throws {
+        let rejected = [
+            "What2?",
+            "What's p99?",
+            "What/why?",
+            "What\u{0301} is p99?",
+            "What is p99?\u{0301} Customer will deliver?",
+        ]
+        for question in rejected {
+            XCTAssertEqual(
+                AICoachEngine.parseAnalysisResponse(
+                    try guidanceResponse(question: question),
+                    transcriptContext: []
+                ),
+                .malformed("invalid_text"),
+                question
+            )
+        }
+
+        for question in ["What is p99?", "Is p99 measured?", "Might p99 change?"] {
+            guard case .candidates(let candidates) = AICoachEngine.parseAnalysisResponse(
+                try guidanceResponse(question: question),
+                transcriptContext: []
+            ) else {
+                XCTFail("Expected valid question head: \(question)")
+                continue
+            }
+            XCTAssertEqual(candidates.first?.content, "Ask: \(question)")
+        }
+    }
+
+    func testUnsafeCanonicalTranscriptTextCannotGroundAQuote() {
+        let response = #"{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":1,"quote":"\u0001Capacity is missing."}],"priority":"high","topic":"capacity"}]}"#
+        let transcript = [CoachTranscriptExcerpt(
+            id: 1,
+            text: "\u{0001}Capacity is missing.",
+            startTime: 0,
+            endTime: 1,
+            speaker: nil
+        )]
+
+        XCTAssertEqual(
+            AICoachEngine.parseAnalysisResponse(response, transcriptContext: transcript),
+            .malformed("invalid_evidence")
+        )
+    }
+
+    func testPromptContextEncodingFailsClosedForNonFiniteTimestamps() {
+        let excerpt = CoachTranscriptExcerpt(
+            id: 1,
+            text: "Capacity is missing.",
+            startTime: .infinity,
+            endTime: 1,
+            speaker: nil
+        )
+        let analysis = CoachAnalysisRequest(
+            sessionID: UUID(),
+            transcriptDelta: [excerpt],
+            recentTranscript: [excerpt],
+            rollingContext: "",
+            priorInsights: []
+        )
+        let question = CoachQuestionRequest(
+            sessionID: UUID(),
+            question: "What is missing?",
+            recentTranscript: [excerpt],
+            rollingContext: "",
+            priorInsights: [],
+            chatHistory: []
+        )
+
+        XCTAssertThrowsError(try AICoachEngine.makeAnalysisMessages(request: analysis))
+        XCTAssertThrowsError(try AICoachEngine.makeInteractiveMessages(request: question))
+    }
+
+    func testAutoCoachCoreHasNoTaskPersistenceOrToolExecutionDependency() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let relativePaths = [
+            "NoteAI/Summarization/AICoachEngine.swift",
+            "NoteAI/Summarization/CoachAdmissionPolicy.swift",
+            "NoteAI/Summarization/LiveCoachSession.swift",
+        ]
+        let forbiddenSymbols = [
+            "MeetingStore", "TaskItem", "saveTask(", "createTask(", "ToolExecutor", "executeTool(",
+        ]
+
+        for relativePath in relativePaths {
+            let source = try String(
+                contentsOf: repositoryURL.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            for symbol in forbiddenSymbols {
+                XCTAssertFalse(source.contains(symbol), "\(relativePath) references \(symbol)")
+            }
+        }
+    }
+
     private func fixtureTranscriptID(_ value: Any?, caseID: String) throws -> Int {
         // Preserve lookup compatibility so the production Module must reject the model ID's JSON domain.
         if let number = value as? NSNumber {
@@ -541,7 +859,7 @@ final class AICoachEngineTests: XCTestCase {
         )
     }
 
-    func testAnalysisPromptRequestsOnlyStrictContractV1Envelope() {
+    func testAnalysisPromptRequestsOnlyStrictContractV1Envelope() throws {
         let request = CoachAnalysisRequest(
             sessionID: UUID(),
             transcriptDelta: [],
@@ -550,7 +868,7 @@ final class AICoachEngineTests: XCTestCase {
             priorInsights: []
         )
 
-        let systemPrompt = AICoachEngine.makeAnalysisMessages(request: request)[0].content
+        let systemPrompt = try AICoachEngine.makeAnalysisMessages(request: request)[0].content
 
         XCTAssertTrue(systemPrompt.contains(#"{"contract_version":1,"candidates":[]}"#))
         XCTAssertTrue(systemPrompt.contains("guidance_question"))
@@ -566,7 +884,7 @@ final class AICoachEngineTests: XCTestCase {
         XCTAssertFalse(systemPrompt.contains("domain_knowledge"))
     }
 
-    func testInteractivePromptRemainsSeparateFromAutoAdmissionContract() {
+    func testInteractivePromptRemainsSeparateFromAutoAdmissionContract() throws {
         let request = CoachQuestionRequest(
             sessionID: UUID(),
             question: "How does KV-aware routing work?",
@@ -576,14 +894,14 @@ final class AICoachEngineTests: XCTestCase {
             chatHistory: []
         )
 
-        let systemPrompt = AICoachEngine.makeInteractiveMessages(request: request)[0].content
+        let systemPrompt = try AICoachEngine.makeInteractiveMessages(request: request)[0].content
 
         XCTAssertFalse(systemPrompt.contains("contract_version"))
         XCTAssertTrue(systemPrompt.localizedCaseInsensitiveContains("technically substantive"))
         XCTAssertTrue(systemPrompt.localizedCaseInsensitiveContains("domain knowledge"))
     }
 
-    func testInteractiveMessagesSendCurrentQuestionExactlyOnceAndKeepTranscriptOutOfSystemRole() {
+    func testInteractiveMessagesSendCurrentQuestionExactlyOnceAndKeepTranscriptOutOfSystemRole() throws {
         let question = "CURRENT QUESTION 8492"
         let transcriptText = "UNTRUSTED TRANSCRIPT 4821"
         let request = CoachQuestionRequest(
@@ -604,7 +922,7 @@ final class AICoachEngineTests: XCTestCase {
             ]
         )
 
-        let messages = AICoachEngine.makeInteractiveMessages(request: request)
+        let messages = try AICoachEngine.makeInteractiveMessages(request: request)
 
         XCTAssertEqual(messages.filter { $0.content == question }.count, 1)
         XCTAssertEqual(messages.last?.role, "user")
@@ -644,7 +962,7 @@ final class AICoachEngineTests: XCTestCase {
             priorInsights: []
         )
 
-        let message = try XCTUnwrap(AICoachEngine.makeAnalysisMessages(request: request).last?.content)
+        let message = try XCTUnwrap(try AICoachEngine.makeAnalysisMessages(request: request).last?.content)
         let json = try XCTUnwrap(message.split(separator: "\n", maxSplits: 1).last)
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
@@ -655,6 +973,14 @@ final class AICoachEngineTests: XCTestCase {
         XCTAssertEqual(recent.compactMap { $0["id"] as? Int }, [1])
         XCTAssertEqual(delta.compactMap { $0["id"] as? Int }, [2])
     }
+
+    private func guidanceResponse(question: String) throws -> String {
+        let questionData = try JSONEncoder().encode(question)
+        let encodedQuestion = try XCTUnwrap(String(data: questionData, encoding: .utf8))
+        return """
+        {"contract_version":1,"candidates":[{"kind":"guidance_question","directive":"ask","question":\(encodedQuestion),"priority":"high","topic":"p99"}]}
+        """
+    }
 }
 
 final class AICoachSessionTests: XCTestCase {
@@ -664,6 +990,22 @@ final class AICoachSessionTests: XCTestCase {
 
         requireLifecycleInterface(LiveCoachSession.self)
         requireLifecycleInterface(MeetingManager.self)
+    }
+
+    func testMeetingManagerDisablePathCancelsAllCoachWorkAndGuardsReplyPublication() throws {
+        let repositoryURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryURL.appendingPathComponent("NoteAI/App/MeetingManager.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("session.cancelPendingWork()"))
+        XCTAssertNotNil(source.range(
+            of: #"guard let self,\s+self\.coachEnabled,\s+self\.liveCoachSession\?\.id == session\.id else \{ return \}"#,
+            options: .regularExpression
+        ))
     }
 
     func testSessionReadinessDoesNotStartGeneration() async {
@@ -794,59 +1136,54 @@ final class AICoachSessionTests: XCTestCase {
         XCTAssertEqual(staleMutation, .staleSession)
     }
 
-    func testReactivationCannotExceedActiveInsightBudget() async throws {
-        let generator = SequencedCoachGenerator(analysisResults: [
-            .candidates([CoachInsightCandidate(
-                type: .talkingPoint,
-                content: "Confirm who owns the production rollout.",
-                basis: .transcript,
-                sourceSegmentIDs: [1],
-                topic: "rollout-ownership",
-                priority: .high
-            )]),
-            .candidates([CoachInsightCandidate(
-                type: .talkingPoint,
-                content: "Ask which latency percentile gates production launch.",
-                basis: .transcript,
-                sourceSegmentIDs: [2],
-                topic: "latency-gate",
-                priority: .high
-            )]),
-        ])
+    func testSessionLifetimeBudgetAndPriorPromptBoundsSurviveDismissalsAcrossFiftyMinutes() async throws {
+        let generator = HistoryRecordingCoachGenerator()
         let session = LiveCoachSession(
             generator: generator,
             clock: FixedCoachClock(now: Date()),
-            contextPolicy: .testing,
-            admissionPolicy: CoachAdmissionPolicy(
-                maxCandidatesPerGeneration: 2,
-                maxActiveInsights: 1,
-                maxContentCharacters: 180,
-                maxContentWords: 24,
-                maxTopicCharacters: 64,
-                maxEvidenceReferences: 4,
-                minimumPriority: .high,
-                nearDuplicateThreshold: 0.82,
-                topicCooldown: 300
-            )
+            contextPolicy: .testing
         )
-        let firstTranscript = [TranscriptSegment(id: 1, text: "Production rollout ownership is undecided.")]
-        guard case .admitted(let firstInsights) = await session.analyze(transcript: firstTranscript),
-              let firstInsight = firstInsights.first else {
-            return XCTFail("Expected the first insight")
-        }
-        _ = await session.setAutoInsightLifecycle(id: firstInsight.id, lifecycle: .dismissed)
+        var transcript: [TranscriptSegment] = []
 
-        let secondTranscript = firstTranscript + [
-            TranscriptSegment(id: 2, text: "Production launch needs a latency percentile gate."),
-        ]
-        guard case .admitted = await session.analyze(transcript: secondTranscript) else {
-            return XCTFail("Expected the second insight after dismissing the first")
+        for minute in stride(from: 0, through: 50, by: 5) {
+            let id = minute / 5 + 1
+            transcript.append(TranscriptSegment(
+                id: id,
+                text: "Architecture evidence \(id) arrived at minute \(minute)."
+            ))
+            let outcome = await session.analyze(transcript: transcript)
+            if id <= 10 {
+                guard case .admitted(let insights) = outcome,
+                      let insight = insights.first else {
+                    return XCTFail("Expected insight \(id), got \(outcome)")
+                }
+                _ = await session.setAutoInsightLifecycle(id: insight.id, lifecycle: .dismissed)
+            } else {
+                guard case .rejected(let rejections) = outcome else {
+                    return XCTFail("Expected lifetime budget rejection, got \(outcome)")
+                }
+                XCTAssertEqual(rejections.map(\.reason), [.sessionBudgetExhausted])
+            }
         }
 
-        let reactivation = await session.setAutoInsightLifecycle(id: firstInsight.id, lifecycle: .active)
-        XCTAssertEqual(reactivation, .activeBudgetExceeded)
+        guard case .answered = await session.ask(
+            question: "What should we revisit?",
+            transcript: transcript
+        ) else {
+            return XCTFail("Expected a bounded-context answer")
+        }
         let snapshot = await session.snapshot()
-        XCTAssertEqual(snapshot.autoInsights.filter { $0.lifecycle == .active }.count, 1)
+        let questionRequests = await generator.recordedQuestionRequests()
+        let questionRequest = try XCTUnwrap(questionRequests.last)
+
+        XCTAssertEqual(snapshot.autoInsights.count, 10)
+        XCTAssertTrue(snapshot.autoInsights.allSatisfy { $0.lifecycle == .dismissed })
+        XCTAssertLessThanOrEqual(questionRequest.priorInsights.count, 8)
+        XCTAssertLessThanOrEqual(
+            questionRequest.priorInsights.reduce(0) { $0 + $1.content.unicodeScalars.count },
+            1_000
+        )
+        XCTAssertLessThan(questionRequest.priorInsights.count, snapshot.autoInsights.count)
     }
 
     func testSessionDistinguishesNoOpFromMalformedGeneration() async {
@@ -919,6 +1256,46 @@ final class AICoachSessionTests: XCTestCase {
         let snapshot = await session.snapshot()
 
         XCTAssertEqual(outcome, .staleSession)
+        XCTAssertEqual(snapshot.chatMessages.map(\.role), [.user])
+    }
+
+    func testDisablingPendingWorkInvalidatesAnalysisAndInteractiveReplies() async {
+        let generator = SuspendedDualCoachGenerator()
+        let session = LiveCoachSession(
+            generator: generator,
+            clock: FixedCoachClock(now: Date()),
+            contextPolicy: .testing
+        )
+        let transcript = [TranscriptSegment(
+            id: 1,
+            text: "This transcript has enough material for both coach paths."
+        )]
+
+        let analysisTask = Task { await session.analyze(transcript: transcript) }
+        let questionTask = Task {
+            await session.ask(question: "What is the launch risk?", transcript: transcript)
+        }
+        await generator.waitUntilBothRequestsStart()
+        await session.cancelPendingWork()
+        await generator.resumeAll(
+            analysis: .candidates([CoachInsightCandidate(
+                type: .talkingPoint,
+                content: "Ask: What is the launch risk?",
+                basis: .recommendation,
+                sourceSegmentIDs: [],
+                topic: "launch-risk",
+                priority: .high
+            )]),
+            answer: "This reply must not publish after disable."
+        )
+
+        let analysisOutcome = await analysisTask.value
+        let questionOutcome = await questionTask.value
+        let snapshot = await session.snapshot()
+
+        XCTAssertEqual(analysisOutcome, .staleSession)
+        XCTAssertEqual(questionOutcome, .staleSession)
+        XCTAssertEqual(snapshot.autoInsights, [])
         XCTAssertEqual(snapshot.chatMessages.map(\.role), [.user])
     }
 }
@@ -1139,6 +1516,32 @@ private actor RecordingCoachGenerator: AICoachGenerating {
     }
 }
 
+private actor HistoryRecordingCoachGenerator: AICoachGenerating {
+    private var questionRequests: [CoachQuestionRequest] = []
+
+    func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult {
+        guard let id = request.transcriptDelta.last?.id else { return .candidates([]) }
+        let padding = String(repeating: "x", count: 120)
+        return .candidates([CoachInsightCandidate(
+            type: .talkingPoint,
+            content: "Ask: What architecture issue \(id) needs review \(padding)?",
+            basis: .recommendation,
+            sourceSegmentIDs: [],
+            topic: "topic-\(id)",
+            priority: .high
+        )])
+    }
+
+    func answerQuestion(_ request: CoachQuestionRequest) async throws -> String {
+        questionRequests.append(request)
+        return "Review the bounded prior insight context."
+    }
+
+    func recordedQuestionRequests() -> [CoachQuestionRequest] {
+        questionRequests
+    }
+}
+
 private actor SuspendedCoachGenerator: AICoachGenerating {
     private var started = false
     private var continuation: CheckedContinuation<CoachGenerationResult, Never>?
@@ -1166,23 +1569,6 @@ private actor SuspendedCoachGenerator: AICoachGenerating {
     }
 }
 
-private actor SequencedCoachGenerator: AICoachGenerating {
-    private var analysisResults: [CoachGenerationResult]
-
-    init(analysisResults: [CoachGenerationResult]) {
-        self.analysisResults = analysisResults
-    }
-
-    func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult {
-        guard !analysisResults.isEmpty else { return .candidates([]) }
-        return analysisResults.removeFirst()
-    }
-
-    func answerQuestion(_ request: CoachQuestionRequest) async throws -> String {
-        ""
-    }
-}
-
 private actor SuspendedQuestionCoachGenerator: AICoachGenerating {
     private var questionStarted = false
     private var questionContinuation: CheckedContinuation<String, Never>?
@@ -1206,6 +1592,40 @@ private actor SuspendedQuestionCoachGenerator: AICoachGenerating {
 
     func resumeQuestion(with answer: String) {
         questionContinuation?.resume(returning: answer)
+        questionContinuation = nil
+    }
+}
+
+private actor SuspendedDualCoachGenerator: AICoachGenerating {
+    private var analysisStarted = false
+    private var questionStarted = false
+    private var analysisContinuation: CheckedContinuation<CoachGenerationResult, Never>?
+    private var questionContinuation: CheckedContinuation<String, Never>?
+
+    func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult {
+        analysisStarted = true
+        return await withCheckedContinuation { continuation in
+            analysisContinuation = continuation
+        }
+    }
+
+    func answerQuestion(_ request: CoachQuestionRequest) async throws -> String {
+        questionStarted = true
+        return await withCheckedContinuation { continuation in
+            questionContinuation = continuation
+        }
+    }
+
+    func waitUntilBothRequestsStart() async {
+        while !analysisStarted || !questionStarted {
+            await Task.yield()
+        }
+    }
+
+    func resumeAll(analysis: CoachGenerationResult, answer: String) {
+        analysisContinuation?.resume(returning: analysis)
+        questionContinuation?.resume(returning: answer)
+        analysisContinuation = nil
         questionContinuation = nil
     }
 }

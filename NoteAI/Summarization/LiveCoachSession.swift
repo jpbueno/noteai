@@ -55,6 +55,9 @@ protocol CoachInsightLifecycleMutating: Sendable {
 actor LiveCoachSession: CoachInsightLifecycleMutating {
     nonisolated let id: UUID
 
+    private static let maxPromptPriorInsightCount = 8
+    private static let maxPromptPriorInsightCharacters = 1_000
+
     private let generator: any AICoachGenerating
     private let clock: any CoachClock
     private let admissionPolicy: CoachAdmissionPolicy
@@ -94,7 +97,7 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
         guard let request = context.prepareAnalysis(
             sessionID: id,
             transcript: transcript,
-            priorInsights: autoInsights,
+            priorInsights: boundedPromptPriorInsights(),
             now: requestDate
         ) else {
             return .notReady
@@ -152,7 +155,7 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
             sessionID: id,
             question: trimmed,
             transcript: transcript,
-            priorInsights: autoInsights,
+            priorInsights: boundedPromptPriorInsights(),
             chatHistory: chatMessages
         )
         chatMessages.append(CoachChatMessage(
@@ -214,30 +217,22 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
         guard isActive else { return .staleSession }
         guard let index = autoInsights.firstIndex(where: { $0.id == id }) else { return .notFound }
 
-        if lifecycle == .active,
-           autoInsights[index].lifecycle != .active,
-           autoInsights.filter({ $0.lifecycle == .active }).count >= admissionPolicy.maxActiveInsights {
-            return .activeBudgetExceeded
-        }
-
         autoInsights[index].lifecycle = lifecycle
         return .updated(autoInsights[index])
     }
 
-    func cancelPendingAnalysis() {
-        analysisRequestID = nil
-        analysisTask?.cancel()
-        analysisTask = nil
-    }
-
-    func cancel() {
-        isActive = false
+    func cancelPendingWork() {
         analysisRequestID = nil
         questionRequestID = nil
         analysisTask?.cancel()
         questionTask?.cancel()
         analysisTask = nil
         questionTask = nil
+    }
+
+    func cancel() {
+        isActive = false
+        cancelPendingWork()
     }
 
     private func clearAnalysisTask(requestID: UUID) {
@@ -250,5 +245,22 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
         guard questionRequestID == requestID else { return }
         questionRequestID = nil
         questionTask = nil
+    }
+
+    private func boundedPromptPriorInsights() -> [CoachInsight] {
+        var result: [CoachInsight] = []
+        var characterCount = 0
+
+        for insight in autoInsights.reversed() {
+            guard result.count < Self.maxPromptPriorInsightCount else { break }
+            let insightCharacterCount = insight.content.unicodeScalars.count
+            guard insightCharacterCount <= Self.maxPromptPriorInsightCharacters,
+                  characterCount + insightCharacterCount <= Self.maxPromptPriorInsightCharacters else {
+                continue
+            }
+            result.insert(insight, at: 0)
+            characterCount += insightCharacterCount
+        }
+        return result
     }
 }

@@ -1241,17 +1241,21 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         coachTimer?.invalidate()
         coachTimer = nil
         coachAnalysisTask?.cancel()
+        coachQuestionTask?.cancel()
         coachAnalysisTask = nil
         coachAnalysisOperationID = nil
+        coachQuestionTask = nil
         coachAnalyzing = false
+        coachReplying = false
         if let session = liveCoachSession {
-            Task { await session.cancelPendingAnalysis() }
+            Task { await session.cancelPendingWork() }
         }
     }
 
     /// Send a chat message through the current recording-scoped coach session.
     func sendCoachMessage(_ question: String) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard coachEnabled else { return }
         guard !trimmed.isEmpty else { return }
         guard !coachReplying else { return }
         guard let session = liveCoachSession else { return }
@@ -1267,7 +1271,9 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
 
         coachQuestionTask = Task { [weak self] in
             let outcome = await session.ask(question: trimmed, transcript: transcript)
-            guard let self, self.liveCoachSession?.id == session.id else { return }
+            guard let self,
+                  self.coachEnabled,
+                  self.liveCoachSession?.id == session.id else { return }
             self.coachQuestionTask = nil
             self.coachReplying = false
 
@@ -1310,6 +1316,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         coachAnalysisTask = Task { [weak self] in
             let isReady = await session.isAnalysisReady(transcript: transcript)
             guard let self,
+                  self.coachEnabled,
                   self.liveCoachSession?.id == session.id,
                   self.state == .recording,
                   self.coachAnalysisOperationID == operationID else { return }
@@ -1321,7 +1328,8 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
 
             self.coachAnalyzing = true
             let outcome = await session.analyze(transcript: transcript)
-            guard self.liveCoachSession?.id == session.id,
+            guard self.coachEnabled,
+                  self.liveCoachSession?.id == session.id,
                   self.state == .recording,
                   self.coachAnalysisOperationID == operationID else { return }
             self.coachAnalysisTask = nil

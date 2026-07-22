@@ -33,6 +33,240 @@ enum CoachAutoAdmissionRejectionCategory: String, Equatable, Sendable {
     case invalidEvidence = "invalid_evidence"
 }
 
+private indirect enum StrictCoachJSONValue {
+    case object([String: StrictCoachJSONValue])
+    case array([StrictCoachJSONValue])
+    case string(String)
+    case number(String)
+    case boolean(Bool)
+    case null
+}
+
+/// Strict JSON grammar Module for untrusted automatic coach responses.
+private struct StrictCoachJSONParser {
+    private struct ParseFailure: Error {}
+
+    private let bytes: [UInt8]
+    private var index = 0
+
+    private init(_ text: String) {
+        bytes = Array(text.utf8)
+    }
+
+    static func parse(_ text: String) throws -> StrictCoachJSONValue {
+        var parser = StrictCoachJSONParser(text)
+        parser.skipWhitespace()
+        let value = try parser.parseValue()
+        parser.skipWhitespace()
+        guard parser.index == parser.bytes.count else { throw ParseFailure() }
+        return value
+    }
+
+    private mutating func parseValue() throws -> StrictCoachJSONValue {
+        guard let byte = currentByte else { throw ParseFailure() }
+        switch byte {
+        case 0x7B:
+            return try parseObject()
+        case 0x5B:
+            return try parseArray()
+        case 0x22:
+            return .string(try parseString())
+        case 0x2D, 0x30...0x39:
+            return .number(try parseNumber())
+        case 0x74:
+            try consumeLiteral("true")
+            return .boolean(true)
+        case 0x66:
+            try consumeLiteral("false")
+            return .boolean(false)
+        case 0x6E:
+            try consumeLiteral("null")
+            return .null
+        default:
+            throw ParseFailure()
+        }
+    }
+
+    private mutating func parseObject() throws -> StrictCoachJSONValue {
+        try consume(0x7B)
+        skipWhitespace()
+        if consumeIfPresent(0x7D) { return .object([:]) }
+
+        var object: [String: StrictCoachJSONValue] = [:]
+        while true {
+            guard currentByte == 0x22 else { throw ParseFailure() }
+            let key = try parseString()
+            guard object[key] == nil else { throw ParseFailure() }
+            skipWhitespace()
+            try consume(0x3A)
+            skipWhitespace()
+            object[key] = try parseValue()
+            skipWhitespace()
+            if consumeIfPresent(0x7D) { return .object(object) }
+            try consume(0x2C)
+            skipWhitespace()
+        }
+    }
+
+    private mutating func parseArray() throws -> StrictCoachJSONValue {
+        try consume(0x5B)
+        skipWhitespace()
+        if consumeIfPresent(0x5D) { return .array([]) }
+
+        var array: [StrictCoachJSONValue] = []
+        while true {
+            array.append(try parseValue())
+            skipWhitespace()
+            if consumeIfPresent(0x5D) { return .array(array) }
+            try consume(0x2C)
+            skipWhitespace()
+        }
+    }
+
+    private mutating func parseString() throws -> String {
+        let tokenStart = index
+        try consume(0x22)
+        while let current = currentByte {
+            switch current {
+            case 0x00...0x1F:
+                throw ParseFailure()
+            case 0x22:
+                index += 1
+                let token = Data(bytes[tokenStart..<index])
+                guard let decoded = try JSONSerialization.jsonObject(
+                    with: token,
+                    options: .fragmentsAllowed
+                ) as? String else {
+                    throw ParseFailure()
+                }
+                return decoded
+            case 0x5C:
+                index += 1
+                guard let escaped = currentByte else { throw ParseFailure() }
+                switch escaped {
+                case 0x22, 0x2F, 0x5C, 0x62, 0x66, 0x6E, 0x72, 0x74:
+                    index += 1
+                case 0x75:
+                    index += 1
+                    let codeUnit = try consumeHexCodeUnit()
+                    if (0xD800...0xDBFF).contains(codeUnit) {
+                        guard currentByte == 0x5C,
+                              byte(at: index + 1) == 0x75 else {
+                            throw ParseFailure()
+                        }
+                        index += 2
+                        let lowSurrogate = try consumeHexCodeUnit()
+                        guard (0xDC00...0xDFFF).contains(lowSurrogate) else {
+                            throw ParseFailure()
+                        }
+                    } else if (0xDC00...0xDFFF).contains(codeUnit) {
+                        throw ParseFailure()
+                    }
+                default:
+                    throw ParseFailure()
+                }
+            default:
+                index += 1
+            }
+        }
+        throw ParseFailure()
+    }
+
+    private mutating func parseNumber() throws -> String {
+        let start = index
+        _ = consumeIfPresent(0x2D)
+        guard let firstDigit = currentByte else { throw ParseFailure() }
+        if firstDigit == 0x30 {
+            index += 1
+            if let next = currentByte, (0x30...0x39).contains(next) { throw ParseFailure() }
+        } else {
+            guard (0x31...0x39).contains(firstDigit) else { throw ParseFailure() }
+            consumeDigits()
+        }
+
+        if consumeIfPresent(0x2E) {
+            guard let digit = currentByte, (0x30...0x39).contains(digit) else {
+                throw ParseFailure()
+            }
+            consumeDigits()
+        }
+        if currentByte == 0x65 || currentByte == 0x45 {
+            index += 1
+            if currentByte == 0x2B || currentByte == 0x2D { index += 1 }
+            guard let digit = currentByte, (0x30...0x39).contains(digit) else {
+                throw ParseFailure()
+            }
+            consumeDigits()
+        }
+
+        guard let number = String(bytes: bytes[start..<index], encoding: .utf8) else {
+            throw ParseFailure()
+        }
+        return number
+    }
+
+    private mutating func consumeHexCodeUnit() throws -> UInt16 {
+        guard index + 4 <= bytes.count else { throw ParseFailure() }
+        var value: UInt16 = 0
+        for _ in 0..<4 {
+            guard let byte = currentByte, let digit = hexValue(byte) else { throw ParseFailure() }
+            value = value * 16 + UInt16(digit)
+            index += 1
+        }
+        return value
+    }
+
+    private func hexValue(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x30...0x39: return byte - 0x30
+        case 0x41...0x46: return byte - 0x41 + 10
+        case 0x61...0x66: return byte - 0x61 + 10
+        default: return nil
+        }
+    }
+
+    private mutating func consumeDigits() {
+        while let byte = currentByte, (0x30...0x39).contains(byte) {
+            index += 1
+        }
+    }
+
+    private mutating func consumeLiteral(_ literal: String) throws {
+        let literalBytes = Array(literal.utf8)
+        guard index + literalBytes.count <= bytes.count,
+              Array(bytes[index..<(index + literalBytes.count)]) == literalBytes else {
+            throw ParseFailure()
+        }
+        index += literalBytes.count
+    }
+
+    private mutating func consume(_ byte: UInt8) throws {
+        guard consumeIfPresent(byte) else { throw ParseFailure() }
+    }
+
+    private mutating func consumeIfPresent(_ byte: UInt8) -> Bool {
+        guard currentByte == byte else { return false }
+        index += 1
+        return true
+    }
+
+    private mutating func skipWhitespace() {
+        while let byte = currentByte,
+              byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D {
+            index += 1
+        }
+    }
+
+    private var currentByte: UInt8? {
+        byte(at: index)
+    }
+
+    private func byte(at offset: Int) -> UInt8? {
+        guard bytes.indices.contains(offset) else { return nil }
+        return bytes[offset]
+    }
+}
+
 /// Strict v1 Module for untrusted automatic coach output.
 struct CoachAutoAdmissionContractV1 {
     private static let maximumSafeInteger = 9_007_199_254_740_991
@@ -79,15 +313,24 @@ struct CoachAutoAdmissionContractV1 {
         }
     }
 
+    static func isSafeTranscriptSourceText(_ text: String) -> Bool {
+        !containsUnsafeScalar(text)
+    }
+
     private static func decode(
         modelResponse: String,
         transcriptContext: [CoachTranscriptExcerpt]
     ) throws -> [CoachInsightCandidate] {
-        guard let data = modelResponse.data(using: .utf8),
-              let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let root: StrictCoachJSONValue
+        do {
+            root = try StrictCoachJSONParser.parse(modelResponse)
+        } catch {
+            throw ContractFailure(category: .invalidEnvelope)
+        }
+        guard case .object(let envelope) = root,
               hasExactKeys(envelope, envelopeKeys),
               let version = strictInteger(envelope["contract_version"]),
-              let candidates = envelope["candidates"] as? [Any] else {
+              case .array(let candidates)? = envelope["candidates"] else {
             throw ContractFailure(category: .invalidEnvelope)
         }
         guard version == 1 else {
@@ -99,8 +342,8 @@ struct CoachAutoAdmissionContractV1 {
 
         let transcript = try transcriptIndex(from: transcriptContext)
         return try candidates.map { rawCandidate in
-            guard let candidate = rawCandidate as? [String: Any],
-                  let kind = candidate["kind"] as? String else {
+            guard case .object(let candidate) = rawCandidate,
+                  case .string(let kind)? = candidate["kind"] else {
                 throw ContractFailure(category: .invalidCandidate)
             }
             switch kind {
@@ -115,11 +358,11 @@ struct CoachAutoAdmissionContractV1 {
     }
 
     private static func decodeGuidance(
-        _ candidate: [String: Any]
+        _ candidate: [String: StrictCoachJSONValue]
     ) throws -> CoachInsightCandidate {
         guard hasExactKeys(candidate, guidanceKeys),
-              let directive = candidate["directive"] as? String,
-              let question = candidate["question"] as? String,
+              case .string(let directive)? = candidate["directive"],
+              case .string(let question)? = candidate["question"],
               let priority = priority(from: candidate["priority"]) else {
             throw ContractFailure(category: .invalidCandidate)
         }
@@ -143,17 +386,17 @@ struct CoachAutoAdmissionContractV1 {
     }
 
     private static func decodeTranscriptQuote(
-        _ candidate: [String: Any],
+        _ candidate: [String: StrictCoachJSONValue],
         transcript: [Int: TranscriptSource]
     ) throws -> CoachInsightCandidate {
         guard hasExactKeys(candidate, quoteKeys),
-              let presentation = candidate["presentation"] as? String,
+              case .string(let presentation)? = candidate["presentation"],
               let priority = priority(from: candidate["priority"]) else {
             throw ContractFailure(category: .invalidCandidate)
         }
         let derivedPresentation = try presentationValues(for: presentation)
         let topic = try validatedTopic(candidate["topic"])
-        guard let evidence = candidate["evidence_quotes"] as? [Any] else {
+        guard case .array(let evidence)? = candidate["evidence_quotes"] else {
             throw ContractFailure(category: .invalidEvidence)
         }
         guard !evidence.isEmpty else {
@@ -163,11 +406,11 @@ struct CoachAutoAdmissionContractV1 {
         var evidenceIDs: [Int] = []
         var normalizedQuote: String?
         for rawEvidence in evidence {
-            guard let quoteRecord = rawEvidence as? [String: Any],
+            guard case .object(let quoteRecord) = rawEvidence,
                   hasExactKeys(quoteRecord, evidenceKeys),
                   let sourceID = strictInteger(quoteRecord["source_segment_id"]),
                   isPositiveSafeInteger(sourceID),
-                  let quote = quoteRecord["quote"] as? String,
+                  case .string(let quote)? = quoteRecord["quote"],
                   let source = transcript[sourceID],
                   !evidenceIDs.contains(sourceID) else {
                 throw ContractFailure(category: .invalidEvidence)
@@ -226,16 +469,16 @@ struct CoachAutoAdmissionContractV1 {
         }
     }
 
-    private static func priority(from value: Any?) -> CoachInsightPriority? {
-        guard let rawValue = value as? String,
+    private static func priority(from value: StrictCoachJSONValue?) -> CoachInsightPriority? {
+        guard case .string(let rawValue)? = value,
               rawValue == "high" || rawValue == "critical" else {
             return nil
         }
         return CoachInsightPriority(rawValue: rawValue)
     }
 
-    private static func validatedTopic(_ value: Any?) throws -> String {
-        guard let topic = value as? String else {
+    private static func validatedTopic(_ value: StrictCoachJSONValue?) throws -> String {
+        guard case .string(let topic)? = value else {
             throw ContractFailure(category: .invalidCandidate)
         }
         let pattern = #"^[a-z0-9]+(?:-[a-z0-9]+)*$"#
@@ -248,23 +491,45 @@ struct CoachAutoAdmissionContractV1 {
     }
 
     private static func normalizedQuestion(_ question: String) throws -> String {
-        guard !question.contains(";"),
-              !containsUnsafeScalar(question) else {
+        guard !containsUnsafeScalar(question), hasValidQuestionPunctuation(question) else {
             throw ContractFailure(category: .invalidText)
         }
         let normalized = collapseWhitespace(question.precomposedStringWithCanonicalMapping)
-        guard normalized.last == "?" else {
+        guard hasValidQuestionPunctuation(normalized) else {
             throw ContractFailure(category: .invalidText)
         }
-        let body = normalized.dropLast()
-        guard !body.isEmpty,
-              !body.contains(where: { $0 == "." || $0 == "!" || $0 == "?" }),
-              let firstWord = body.split(whereSeparator: { !$0.isLetter }).first,
-              body.hasPrefix(firstWord),
-              interrogativeHeads.contains(firstWord.lowercased()) else {
+        let bodyScalars = normalized.unicodeScalars.dropLast()
+        let firstSpace = bodyScalars.firstIndex(where: { $0.value == 0x20 }) ?? bodyScalars.endIndex
+        let headScalars = bodyScalars[..<firstSpace]
+        guard !headScalars.isEmpty,
+              headScalars.allSatisfy({
+                  (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
+              }),
+              interrogativeHeads.contains(String(headScalars).lowercased()) else {
             throw ContractFailure(category: .invalidText)
         }
         return normalized
+    }
+
+    private static func hasValidQuestionPunctuation(_ text: String) -> Bool {
+        let scalars = Array(text.unicodeScalars)
+        var lowerBound = 0
+        var upperBound = scalars.count
+        while lowerBound < upperBound, isCollapsibleWhitespace(scalars[lowerBound]) {
+            lowerBound += 1
+        }
+        while upperBound > lowerBound, isCollapsibleWhitespace(scalars[upperBound - 1]) {
+            upperBound -= 1
+        }
+        guard upperBound > lowerBound, scalars[upperBound - 1].value == 0x3F else { return false }
+        return scalars[lowerBound..<(upperBound - 1)].allSatisfy { scalar in
+            switch scalar.value {
+            case 0x21, 0x2E, 0x3B, 0x3F:
+                return false
+            default:
+                return true
+            }
+        }
     }
 
     private static func normalizedText(
@@ -324,15 +589,49 @@ struct CoachAutoAdmissionContractV1 {
         }
     }
 
-    private static func strictInteger(_ value: Any?) -> Int? {
-        guard let number = value as? NSNumber else { return nil }
-        let type = String(cString: number.objCType)
-        guard type != "c", type != "B", type != "f", type != "d" else { return nil }
-        let value = number.doubleValue
-        guard value.isFinite,
-              abs(value) <= Double(maximumSafeInteger),
-              let integer = Int(exactly: value) else { return nil }
-        return integer
+    private static func strictInteger(_ value: StrictCoachJSONValue?) -> Int? {
+        guard case .number(let rawValue)? = value else { return nil }
+        return exactInteger(from: rawValue)
+    }
+
+    private static func exactInteger(from rawValue: String) -> Int? {
+        var number = rawValue
+        let isNegative = number.first == "-"
+        if isNegative { number.removeFirst() }
+
+        let exponentIndex = number.firstIndex(where: { $0 == "e" || $0 == "E" })
+        let significand = exponentIndex.map { String(number[..<$0]) } ?? number
+        let exponentText = exponentIndex.map { String(number[number.index(after: $0)...]) } ?? "0"
+        let significandParts = significand.split(separator: ".", omittingEmptySubsequences: false)
+        guard significandParts.count <= 2 else { return nil }
+
+        let fractionalCount = significandParts.count == 2 ? significandParts[1].count : 0
+        var digits = significandParts.joined()
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
+        if digits.allSatisfy({ $0 == "0" }) { return 0 }
+
+        guard exponentText.count <= 7, let exponent = Int(exponentText) else { return nil }
+        let scale = exponent - fractionalCount
+        if scale >= 0 {
+            guard digits.count + scale <= String(maximumSafeInteger).count else { return nil }
+            digits.append(String(repeating: "0", count: scale))
+        } else {
+            let removedCount = -scale
+            guard removedCount <= digits.count,
+                  digits.suffix(removedCount).allSatisfy({ $0 == "0" }) else {
+                return nil
+            }
+            digits.removeLast(removedCount)
+        }
+
+        digits = String(digits.drop(while: { $0 == "0" }))
+        if digits.isEmpty { return 0 }
+        let maximum = String(maximumSafeInteger)
+        guard digits.count < maximum.count || (digits.count == maximum.count && digits <= maximum),
+              let magnitude = Int(digits) else {
+            return nil
+        }
+        return isNegative ? -magnitude : magnitude
     }
 
     private static func isPositiveSafeInteger(_ value: Int) -> Bool {
@@ -340,7 +639,7 @@ struct CoachAutoAdmissionContractV1 {
     }
 
     private static func hasExactKeys(
-        _ dictionary: [String: Any],
+        _ dictionary: [String: StrictCoachJSONValue],
         _ expectedKeys: Set<String>
     ) -> Bool {
         Set(dictionary.keys) == expectedKeys
@@ -375,7 +674,7 @@ struct CoachAdmissionDecision: Equatable, Sendable {
 
 struct CoachAdmissionPolicy: Sendable {
     let maxCandidatesPerGeneration: Int
-    let maxActiveInsights: Int
+    let maxSessionInsights: Int
     let maxContentCharacters: Int
     let maxContentWords: Int
     let maxTopicCharacters: Int
@@ -386,7 +685,7 @@ struct CoachAdmissionPolicy: Sendable {
 
     static let `default` = CoachAdmissionPolicy(
         maxCandidatesPerGeneration: 2,
-        maxActiveInsights: 10,
+        maxSessionInsights: 10,
         maxContentCharacters: 180,
         maxContentWords: 24,
         maxTopicCharacters: 64,
@@ -484,8 +783,7 @@ struct CoachAdmissionPolicy: Sendable {
                 continue
             }
 
-            let activeCount = comparisonInsights.filter { $0.lifecycle == .active }.count
-            guard activeCount < maxActiveInsights else {
+            guard comparisonInsights.count < maxSessionInsights else {
                 rejections.append(.init(candidateIndex: index, reason: .sessionBudgetExhausted))
                 continue
             }

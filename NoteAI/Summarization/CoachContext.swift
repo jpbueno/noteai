@@ -195,24 +195,21 @@ struct CoachContext: Sendable {
 
         var remainingCharacters = policy.maxRollingContextCharacters
         var contextLines: [String] = []
-        for segment in transcript[rolledSegmentCount..<upperBound].reversed() {
+        for segment in transcript[..<upperBound].reversed() {
             guard remainingCharacters > 0 else { break }
+            guard !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  CoachAutoAdmissionContractV1.isSafeTranscriptSourceText(segment.text) else {
+                continue
+            }
             let speaker = boundedSpeaker(segment.speaker).map { " \($0)" } ?? ""
             let prefix = "[\(segment.id) \(segment.formattedTimestamp)\(speaker)] "
-            let availableTextCharacters = max(0, remainingCharacters - prefix.count)
-            guard availableTextCharacters > 0 else { break }
-            let text = String(segment.text.suffix(availableTextCharacters))
-            let line = prefix + text
+            let line = prefix + segment.text
+            let lineCharacterCount = line.unicodeScalars.count + (contextLines.isEmpty ? 0 : 1)
+            guard lineCharacterCount <= remainingCharacters else { continue }
             contextLines.insert(line, at: 0)
-            remainingCharacters -= line.count + 1
+            remainingCharacters -= lineCharacterCount
         }
-        let additions = contextLines.joined(separator: "\n")
-        rollingContext = [rollingContext, additions]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        if rollingContext.count > policy.maxRollingContextCharacters {
-            rollingContext = String(rollingContext.suffix(policy.maxRollingContextCharacters))
-        }
+        rollingContext = contextLines.joined(separator: "\n")
         rolledSegmentCount = upperBound
     }
 
@@ -224,15 +221,16 @@ struct CoachContext: Sendable {
 
         for segment in transcript.reversed() {
             guard excerpts.count < policy.maxRecentSegments else { break }
-            var text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
+            let text = segment.text
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  CoachAutoAdmissionContractV1.isSafeTranscriptSourceText(text) else {
+                continue
+            }
 
             let remainingCharacters = policy.maxTranscriptCharacters - characterCount
             guard remainingCharacters > 0 else { break }
-            if text.count > remainingCharacters {
-                guard excerpts.isEmpty else { break }
-                text = String(text.suffix(remainingCharacters))
-            }
+            let textCharacterCount = text.unicodeScalars.count
+            guard textCharacterCount <= remainingCharacters else { continue }
 
             excerpts.insert(CoachTranscriptExcerpt(
                 id: segment.id,
@@ -241,7 +239,7 @@ struct CoachContext: Sendable {
                 endTime: segment.endTime,
                 speaker: boundedSpeaker(segment.speaker)
             ), at: 0)
-            characterCount += text.count
+            characterCount += textCharacterCount
         }
 
         return excerpts
@@ -249,7 +247,8 @@ struct CoachContext: Sendable {
 
     private func boundedSpeaker(_ speaker: String?) -> String? {
         guard let trimmed = speaker?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty else {
+              !trimmed.isEmpty,
+              CoachAutoAdmissionContractV1.isSafeTranscriptSourceText(trimmed) else {
             return nil
         }
         return String(trimmed.prefix(policy.maxSpeakerCharacters))

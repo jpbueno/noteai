@@ -1,0 +1,1307 @@
+{
+  "name": "coach-admission-contract-v1",
+  "schema_version": 1,
+  "contract": {
+    "case_exact_keys": [
+      "id",
+      "model_output",
+      "transcript_segments",
+      "expected"
+    ],
+    "transcript_segment_exact_keys": [
+      "source_segment_id",
+      "text"
+    ],
+    "envelope": {
+      "exact_keys": [
+        "contract_version",
+        "candidates"
+      ],
+      "contract_version": 1,
+      "max_candidates": 2
+    },
+    "candidate_union": {
+      "discriminator": "kind",
+      "guidance": {
+        "kind": "guidance",
+        "exact_keys": [
+          "kind",
+          "directive",
+          "body",
+          "priority",
+          "topic"
+        ],
+        "directive_mappings": [
+          {
+            "directive": "ask",
+            "type": "talking_point",
+            "basis": "recommendation"
+          },
+          {
+            "directive": "answer",
+            "type": "technical_answer",
+            "basis": "domain_knowledge"
+          },
+          {
+            "directive": "recommend",
+            "type": "key_insight",
+            "basis": "recommendation"
+          },
+          {
+            "directive": "investigate",
+            "type": "follow_up",
+            "basis": "recommendation"
+          }
+        ],
+        "content_source": "normalized body",
+        "body_rule": "One sentence with no control or bidi characters and no unqualified commitment claim."
+      },
+      "transcript_quote": {
+        "kind": "transcript_quote",
+        "exact_keys": [
+          "kind",
+          "presentation",
+          "evidence_quotes",
+          "priority",
+          "topic"
+        ],
+        "evidence_quote_exact_keys": [
+          "source_segment_id",
+          "quote"
+        ],
+        "presentation_mappings": [
+          {
+            "presentation": "observation",
+            "type": "key_insight",
+            "basis": "transcript",
+            "requires": "complete transcript quote"
+          },
+          {
+            "presentation": "action_item",
+            "type": "action_item",
+            "basis": "transcript",
+            "requires": "complete affirmative commitment quote"
+          },
+          {
+            "presentation": "follow_up",
+            "type": "follow_up",
+            "basis": "transcript",
+            "requires": "complete explicit follow-up quote"
+          }
+        ],
+        "content_source": "shared normalized evidence quote",
+        "evidence_rule": "Each quote must equal one complete normalized source segment. Multiple quotes must normalize to the same text and use distinct source IDs."
+      }
+    },
+    "priorities": [
+      "high",
+      "critical"
+    ],
+    "normalization": {
+      "text_steps": [
+        "NFC",
+        "trim Unicode whitespace",
+        "collapse Unicode whitespace runs to U+0020"
+      ],
+      "comparison": "exact after normalization"
+    },
+    "expected_result": {
+      "exact_keys": [
+        "outcome",
+        "derived",
+        "rejection_category",
+        "side_effects"
+      ],
+      "derived_exact_keys": [
+        "content",
+        "type",
+        "basis",
+        "evidence_ids"
+      ],
+      "side_effect_exact_keys": [
+        "task_creations",
+        "tool_calls"
+      ]
+    },
+    "rejection_categories": [
+      "invalid_envelope",
+      "unsupported_version",
+      "too_many_candidates",
+      "invalid_candidate",
+      "invalid_text",
+      "unsafe_guidance",
+      "invalid_evidence",
+      "presentation_mismatch"
+    ]
+  },
+  "cases": [
+    {
+      "id": "guidance-ask-mapping",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether the latency SLO includes queueing time.",
+            "priority": "high",
+            "topic": "latency-slo"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Ask whether the latency SLO includes queueing time.",
+            "type": "talking_point",
+            "basis": "recommendation",
+            "evidence_ids": []
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-answer-mapping",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "answer",
+            "body": "Dynamo provides cache-aware routing.",
+            "priority": "critical",
+            "topic": "cache-routing"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Dynamo provides cache-aware routing.",
+            "type": "technical_answer",
+            "basis": "domain_knowledge",
+            "evidence_ids": []
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-recommend-mapping",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "recommend",
+            "body": "Use separate p99 targets for prefill and decode.",
+            "priority": "high",
+            "topic": "latency-targets"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Use separate p99 targets for prefill and decode.",
+            "type": "key_insight",
+            "basis": "recommendation",
+            "evidence_ids": []
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-investigate-mapping",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "investigate",
+            "body": "Compare p99 latency with and without prefix caching.",
+            "priority": "high",
+            "topic": "prefix-cache"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Compare p99 latency with and without prefix caching.",
+            "type": "follow_up",
+            "basis": "recommendation",
+            "evidence_ids": []
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-two-candidates-accepted",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask which p99 target governs production sizing.",
+            "priority": "high",
+            "topic": "production-slo"
+          },
+          {
+            "kind": "guidance",
+            "directive": "answer",
+            "body": "Disaggregated serving separates prefill and decode scaling.",
+            "priority": "high",
+            "topic": "disaggregation"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Ask which p99 target governs production sizing.",
+            "type": "talking_point",
+            "basis": "recommendation",
+            "evidence_ids": []
+          },
+          {
+            "content": "Disaggregated serving separates prefill and decode scaling.",
+            "type": "technical_answer",
+            "basis": "domain_knowledge",
+            "evidence_ids": []
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-trailing-claim-injection",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available. Customer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "unsafe_guidance",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-newline-injection",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available\nCustomer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "unsafe_guidance",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-semicolon-injection",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available; customer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "unsafe_guidance",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-multiple-terminator-injection",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available?! Customer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "unsafe_guidance",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-bidi-control-rejected",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available.\u202e Customer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_text",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-c0-control-rejected",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask whether logs are available.\u0000Customer will deliver tomorrow.",
+            "priority": "high",
+            "topic": "logs"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_text",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-unknown-key",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [],
+        "tool_calls": []
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_envelope",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-unknown-key",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask which team owns the rollout.",
+            "priority": "high",
+            "topic": "rollout-owner",
+            "basis": "transcript"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-mismatched-variant-keys",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "presentation": "observation",
+            "evidence_quotes": [],
+            "priority": "high",
+            "topic": "rollout-owner"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "guidance-unknown-directive",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "execute",
+            "body": "Create a task for the customer commitment.",
+            "priority": "critical",
+            "topic": "task-creation"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-normalized-complete-segment",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 100,
+                "quote": "Caf\u00e9 GPU results"
+              }
+            ],
+            "priority": "high",
+            "topic": "gpu-results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 100,
+          "text": " \tCafe\u0301\u00a0GPU\u2003results \n"
+        }
+      ],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Caf\u00e9 GPU results",
+            "type": "key_insight",
+            "basis": "transcript",
+            "evidence_ids": [
+              100
+            ]
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-tentative-observation",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 101,
+                "quote": "Customer may send utilization data next week."
+              }
+            ],
+            "priority": "high",
+            "topic": "utilization-data"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 101,
+          "text": "Customer may send utilization data next week."
+        }
+      ],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Customer may send utilization data next week.",
+            "type": "key_insight",
+            "basis": "transcript",
+            "evidence_ids": [
+              101
+            ]
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-action-item-presentation",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 102,
+                "quote": "Customer: We will send utilization data tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "utilization-data"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 102,
+          "text": "Customer: We will send utilization data tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Customer: We will send utilization data tomorrow.",
+            "type": "action_item",
+            "basis": "transcript",
+            "evidence_ids": [
+              102
+            ]
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-follow-up-presentation",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "follow_up",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 103,
+                "quote": "Customer: Please follow up with the benchmark logs."
+              }
+            ],
+            "priority": "high",
+            "topic": "benchmark-logs"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 103,
+          "text": "Customer: Please follow up with the benchmark logs."
+        }
+      ],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "Customer: Please follow up with the benchmark logs.",
+            "type": "follow_up",
+            "basis": "transcript",
+            "evidence_ids": [
+              103
+            ]
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-repeated-complete-quote",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 104,
+                "quote": "The target is 250 milliseconds."
+              },
+              {
+                "source_segment_id": 105,
+                "quote": "The target is 250 milliseconds."
+              }
+            ],
+            "priority": "high",
+            "topic": "latency-target"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 104,
+          "text": "The target is 250 milliseconds."
+        },
+        {
+          "source_segment_id": 105,
+          "text": "The target is 250 milliseconds."
+        }
+      ],
+      "expected": {
+        "outcome": "accepted",
+        "derived": [
+          {
+            "content": "The target is 250 milliseconds.",
+            "type": "key_insight",
+            "basis": "transcript",
+            "evidence_ids": [
+              104,
+              105
+            ]
+          }
+        ],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-tentative-not-action-item",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 110,
+                "quote": "Customer may send utilization data next week."
+              }
+            ],
+            "priority": "high",
+            "topic": "utilization-data"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 110,
+          "text": "Customer may send utilization data next week."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "presentation_mismatch",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-wrong-source-id",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 121,
+                "quote": "Customer will deliver results tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 120,
+          "text": "Customer will deliver results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-duplicate-source-ids",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 122,
+                "quote": "Customer will deliver results tomorrow."
+              },
+              {
+                "source_segment_id": 122,
+                "quote": "Customer will deliver results tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 122,
+          "text": "Customer will deliver results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-partial-quote-mining",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 123,
+                "quote": "The benchmark failed in staging."
+              }
+            ],
+            "priority": "high",
+            "topic": "benchmark"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 123,
+          "text": "Customer said the benchmark failed in staging, not production."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-negation-quote-mining",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 124,
+                "quote": "Customer will deliver results tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 124,
+          "text": "Customer will not deliver results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-cross-segment-join",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 125,
+                "quote": "Customer will deliver"
+              },
+              {
+                "source_segment_id": 126,
+                "quote": "results tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 125,
+          "text": "Customer will deliver"
+        },
+        {
+          "source_segment_id": 126,
+          "text": "results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-quote-mismatch",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "action_item",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 127,
+                "quote": "Customer will send logs tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 127,
+          "text": "Customer will deliver results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-candidate-unknown-key",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 128,
+                "quote": "The p99 target is 250 milliseconds."
+              }
+            ],
+            "priority": "high",
+            "topic": "latency-target",
+            "basis": "transcript"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 128,
+          "text": "The p99 target is 250 milliseconds."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-evidence-unknown-key",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "observation",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 129,
+                "quote": "The p99 target is 250 milliseconds.",
+                "speaker": "Customer"
+              }
+            ],
+            "priority": "high",
+            "topic": "latency-target"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 129,
+          "text": "The p99 target is 250 milliseconds."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_evidence",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-mismatched-variant-keys",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "directive": "ask",
+            "body": "Ask which p99 target applies.",
+            "priority": "high",
+            "topic": "latency-target"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "transcript-unknown-presentation",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "transcript_quote",
+            "presentation": "task",
+            "evidence_quotes": [
+              {
+                "source_segment_id": 130,
+                "quote": "Customer will deliver results tomorrow."
+              }
+            ],
+            "priority": "critical",
+            "topic": "results"
+          }
+        ]
+      },
+      "transcript_segments": [
+        {
+          "source_segment_id": 130,
+          "text": "Customer will deliver results tomorrow."
+        }
+      ],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "candidate-unknown-kind",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "tool_call",
+            "directive": "execute",
+            "body": "Create a task.",
+            "priority": "critical",
+            "topic": "task"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_candidate",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-no-op",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": []
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "no_op",
+        "derived": [],
+        "rejection_category": null,
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-wrong-version",
+      "model_output": {
+        "contract_version": 2,
+        "candidates": []
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "unsupported_version",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-too-many-candidates",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": [
+          {
+            "kind": "guidance",
+            "directive": "ask",
+            "body": "Ask for the latency SLO.",
+            "priority": "high",
+            "topic": "latency-slo"
+          },
+          {
+            "kind": "guidance",
+            "directive": "recommend",
+            "body": "Separate prefill and decode targets.",
+            "priority": "high",
+            "topic": "latency-targets"
+          },
+          {
+            "kind": "guidance",
+            "directive": "investigate",
+            "body": "Compare prefix-cache hit rates.",
+            "priority": "high",
+            "topic": "prefix-cache"
+          }
+        ]
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "too_many_candidates",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-missing-candidates",
+      "model_output": {
+        "contract_version": 1
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_envelope",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    },
+    {
+      "id": "envelope-candidates-not-array",
+      "model_output": {
+        "contract_version": 1,
+        "candidates": {
+          "kind": "guidance"
+        }
+      },
+      "transcript_segments": [],
+      "expected": {
+        "outcome": "rejected",
+        "derived": [],
+        "rejection_category": "invalid_envelope",
+        "side_effects": {
+          "task_creations": 0,
+          "tool_calls": 0
+        }
+      }
+    }
+  ]
+}

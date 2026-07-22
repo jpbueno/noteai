@@ -233,12 +233,20 @@ final class AICoachAdmissionTests: XCTestCase {
         let rejectedCases = [
             "Customer will deliver results tomorrow.",
             "Customer is going to deliver tomorrow.",
+            "Customer is going to be delivering results tomorrow.",
+            "We'll send results tomorrow.",
+            "We’ll send results tomorrow.",
+            "We're going to deliver results tomorrow.",
+            "We’re going to deliver results tomorrow.",
             "Ask for logs; customer will deliver tomorrow.",
             "Ask for logs and customer will deliver tomorrow.",
+            "Ask whether customer will deliver results, and partner will send logs tomorrow.",
             "Ask whether logs are available, but customer will deliver tomorrow.",
             "Please ask whether logs are available, but customer will deliver tomorrow.",
             "Do not speculate about timing because customer will deliver tomorrow.",
             "Do not assume the customer agreed, but partner will deliver tomorrow.",
+            "Do not assume customer agreed, and partner will send logs tomorrow.",
+            "Do not assume customer agreed while partner will deliver results tomorrow.",
             "Customer committed to deliver tomorrow. Is that confirmed?",
             "Acme will deliver tomorrow.",
             "I will send the results.",
@@ -261,8 +269,15 @@ final class AICoachAdmissionTests: XCTestCase {
             "Confirming where Acme will deliver results tomorrow.",
             "Do not assume the customer agreed.",
             "Do not infer the customer will deliver tomorrow.",
+            "Please do not assume the customer will deliver results tomorrow.",
+            "Don't assume the customer will deliver results tomorrow.",
+            "Don’t assume the customer will deliver results tomorrow.",
+            "Please don't assume the customer will deliver results tomorrow.",
+            "Please don’t assume the customer will deliver results tomorrow.",
             "The customer has not agreed to deliver tomorrow.",
             "The customer will not deliver tomorrow.",
+            "We won't send results tomorrow.",
+            "We won’t send results tomorrow.",
             "The customer does not expect to provide results tomorrow.",
             "How will the team deliver these results?",
             "Customer will deliver tomorrow?",
@@ -316,6 +331,32 @@ final class AICoachAdmissionTests: XCTestCase {
         }
     }
 
+    func testAdmissionScopesInquiryQualifiersToEachPredicateAcrossLocalBoundaries() {
+        let boundaries = [
+            "and", "or", "but", "however", "yet", "although", "though", "whereas", "because",
+            "therefore", "thus", "hence", "so", "since", "then", "while", "nevertheless",
+        ]
+
+        for boundary in boundaries {
+            let content = "Ask whether customer will deliver results \(boundary) partner will send logs tomorrow."
+            let decision = CoachAdmissionPolicy.default.evaluate(
+                candidates: [candidate(
+                    type: .talkingPoint,
+                    content: content,
+                    basis: .recommendation,
+                    sourceSegmentIDs: []
+                )],
+                transcript: [],
+                existingInsights: [],
+                sessionID: UUID(),
+                now: Date()
+            )
+
+            XCTAssertEqual(decision.accepted, [], boundary)
+            XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment], boundary)
+        }
+    }
+
     func testAdmissionAllowsGroundedCommitmentObservationsAcrossCandidateTypes() {
         let content = "Customer will deliver results tomorrow."
         let transcript = [TranscriptSegment(id: 1, text: content)]
@@ -339,15 +380,90 @@ final class AICoachAdmissionTests: XCTestCase {
     }
 
     func testAdmissionRejectsCommitmentsWithoutTextuallyGroundedTranscriptSupport() {
-        let content = "Customer will deliver results tomorrow."
-        let unsupportedEvidence = [
-            "No commitment was discussed.",
-            "Partner will deliver logs tomorrow.",
-            "Will the customer deliver results tomorrow?",
+        let unsupportedCases = [
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "No commitment was discussed."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Partner will deliver logs tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Will the customer deliver results tomorrow?"
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Partner will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer will deliver results next quarter."
+            ),
+            (
+                candidate: "Customer will deliver benchmark results tomorrow.",
+                evidence: "Customer will deliver benchmark documentation tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "They asked whether the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "There is no evidence the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "There is no indication the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "There is no confirmation the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer has not confirmed it will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "We cannot confirm the customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "It is unconfirmed that the customer will deliver results tomorrow."
+            ),
         ]
 
-        for (index, evidence) in unsupportedEvidence.enumerated() {
+        for (index, unsupportedCase) in unsupportedCases.enumerated() {
             let segmentID = index + 1
+            let decision = CoachAdmissionPolicy.default.evaluate(
+                candidates: [candidate(
+                    type: .keyInsight,
+                    content: unsupportedCase.candidate,
+                    sourceSegmentIDs: [segmentID]
+                )],
+                transcript: [TranscriptSegment(id: segmentID, text: unsupportedCase.evidence)],
+                existingInsights: [],
+                sessionID: UUID(),
+                now: Date()
+            )
+
+            let context = "\(unsupportedCase.candidate) <- \(unsupportedCase.evidence)"
+            XCTAssertEqual(decision.accepted, [], context)
+            XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment], context)
+        }
+    }
+
+    func testAdmissionDoesNotGroundReportedCommitmentInquiries() {
+        let reportingVerbs = [
+            "asked", "checked", "clarified", "confirmed", "determined", "probed", "verified",
+        ]
+        let content = "Customer will deliver results tomorrow."
+
+        for (index, verb) in reportingVerbs.enumerated() {
+            let segmentID = index + 1
+            let evidence = "They \(verb) whether the customer will deliver results tomorrow."
             let decision = CoachAdmissionPolicy.default.evaluate(
                 candidates: [candidate(
                     type: .keyInsight,
@@ -360,8 +476,52 @@ final class AICoachAdmissionTests: XCTestCase {
                 now: Date()
             )
 
-            XCTAssertEqual(decision.accepted, [], evidence)
-            XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment], evidence)
+            XCTAssertEqual(decision.accepted, [], verb)
+            XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment], verb)
+        }
+    }
+
+    func testAdmissionGroundsCommitmentsWithCompatibleActorObjectAndTimingAnchors() {
+        let groundedCases = [
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer will deliver results tomorrow."
+            ),
+            (
+                candidate: "Customer will deliver results tomorrow.",
+                evidence: "Customer: We will deliver results tomorrow."
+            ),
+            (
+                candidate: "Acme will deliver results tomorrow.",
+                evidence: "Acme will deliver results tomorrow."
+            ),
+            (
+                candidate: "I will send results tomorrow.",
+                evidence: "I will send results tomorrow."
+            ),
+            (
+                candidate: "We'll send results tomorrow.",
+                evidence: "We will send results tomorrow."
+            ),
+        ]
+
+        for (index, groundedCase) in groundedCases.enumerated() {
+            let segmentID = index + 1
+            let decision = CoachAdmissionPolicy.default.evaluate(
+                candidates: [candidate(
+                    type: .keyInsight,
+                    content: groundedCase.candidate,
+                    sourceSegmentIDs: [segmentID]
+                )],
+                transcript: [TranscriptSegment(id: segmentID, text: groundedCase.evidence)],
+                existingInsights: [],
+                sessionID: UUID(),
+                now: Date()
+            )
+
+            let context = "\(groundedCase.candidate) <- \(groundedCase.evidence)"
+            XCTAssertEqual(decision.accepted.map(\.content), [groundedCase.candidate], context)
+            XCTAssertEqual(decision.rejections, [], context)
         }
     }
 
@@ -384,6 +544,38 @@ final class AICoachAdmissionTests: XCTestCase {
             CoachEvidenceReference(segmentID: 12, startTime: 120, endTime: 128),
         ])
         XCTAssertEqual(decision.rejections, [])
+    }
+
+    func testAdmissionGroundsSyntheticActionItemsWithActorCompatibility() {
+        let evidence = "The partner committed to sending utilization data."
+        let transcript = [TranscriptSegment(id: 12, text: evidence, startTime: 120, endTime: 128)]
+        let namedActor = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .actionItem,
+                content: "Track the customer's utilization-data commitment.",
+                sourceSegmentIDs: [12]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+        let actorless = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .actionItem,
+                content: "Track the utilization-data commitment.",
+                sourceSegmentIDs: [12]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(namedActor.accepted, [])
+        XCTAssertEqual(namedActor.rejections.map(\.reason), [.unsupportedCommitment])
+        XCTAssertEqual(actorless.accepted.map(\.type), [.actionItem])
+        XCTAssertEqual(actorless.rejections, [])
     }
 
     func testAdmissionPreservesPresentTenseDomainKnowledgeButRejectsFutureClaim() {

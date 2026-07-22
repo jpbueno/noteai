@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { coachPolicy } from "./src/lib/ai-coach-policy.ts";
@@ -45,6 +46,22 @@ function candidate(content, overrides = {}) {
     topic: content.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48),
     ...overrides,
   };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
+function sourceSection(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
+  return source.slice(start, end);
 }
 
 test("buildContext keeps only bounded recent transcript and auto-insight context", () => {
@@ -141,6 +158,115 @@ test("failed generations use a short bounded retry interval", () => {
   assert.ok(coachPolicy.cadence.failureRetryMs < coachPolicy.cadence.minIntervalMs);
 });
 
+test("cadence requires two new segments and never regenerates completed unchanged transcript", () => {
+  let now = 1_000;
+  const cadence = coachPolicy.createCadenceTracker({ now: () => now });
+
+  assert.equal(cadence.canAnalyze(1), false);
+  assert.equal(cadence.canAnalyze(2), true);
+  cadence.complete(2);
+
+  now += coachPolicy.cadence.minIntervalMs;
+  assert.equal(cadence.canAnalyze(2), false);
+  assert.equal(cadence.canAnalyze(3), false);
+  assert.equal(cadence.canAnalyze(4), true);
+});
+
+test("cadence retries only a failed retained delta after thirty seconds", () => {
+  let now = 1_000;
+  const cadence = coachPolicy.createCadenceTracker({ now: () => now });
+
+  assert.equal(cadence.canAnalyze(2), true);
+  cadence.fail(2);
+
+  now += coachPolicy.cadence.failureRetryMs - 1;
+  assert.equal(cadence.canAnalyze(2), false);
+  now += 1;
+  assert.equal(cadence.canAnalyze(2), true);
+  cadence.complete(2);
+
+  now += coachPolicy.cadence.minIntervalMs;
+  assert.equal(cadence.canAnalyze(2), false);
+});
+
+test("deferred chat response cannot publish after recording end and restart", async () => {
+  const session = coachPolicy.createRecordingSessionScope(false);
+  session.sync(true);
+  const requestSession = session.capture();
+  const reply = deferred();
+  const published = [];
+  const publication = reply.promise.then((content) => {
+    if (requestSession !== null && session.canPublish(requestSession)) {
+      published.push(content);
+    }
+  });
+
+  session.sync(false);
+  session.sync(true);
+  reply.resolve("stale answer");
+  await publication;
+
+  assert.deepEqual(published, []);
+});
+
+test("disabled chat cannot publish a reply, error, or stale finalization", () => {
+  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
+  const disabledEffect = sourceSection(
+    hookSource,
+    "  useEffect(() => {\n    if (enabled) return;",
+    "  }, [enabled]);",
+  );
+  const sendMessage = sourceSection(
+    hookSource,
+    "  const sendMessage = useCallback(async (question: string) => {",
+    "  return {",
+  );
+  const successGuard = sourceSection(
+    sendMessage,
+    "      const reply = await askAISA",
+    "      const content = reply.trim();",
+  );
+  const errorGuard = sourceSection(
+    sendMessage,
+    "    } catch (error) {",
+    "          const errorMessage: CoachInsight = {",
+  );
+  const finalizationGuard = sourceSection(
+    sendMessage,
+    "    } finally {",
+    "  }, []);",
+  );
+
+  assert.match(disabledEffect, /replyAbortRef\.current\?\.abort\(\);/);
+  assert.match(disabledEffect, /replyAbortRef\.current = null;/);
+  assert.match(disabledEffect, /replyingRef\.current = false;/);
+  assert.match(disabledEffect, /setIsReplying\(false\);/);
+  assert.match(sendMessage, /enabled: enabledRef\.current/);
+  assert.match(sendMessage, /recording: recordingRef\.current/);
+  assert.match(sendMessage, /aborted: controller\.signal\.aborted/);
+  assert.match(sendMessage, /sessionCurrent: sessionScopeRef\.current\?\.canPublish\(sessionToken\)/);
+  assert.match(successGuard, /!canPublishReply\(\)/);
+  assert.match(errorGuard, /canPublishReply\(\)/);
+  assert.match(finalizationGuard, /canPublishReply\(\)/);
+});
+
+test("an aborted reply stays unpublished after the coach is re-enabled", () => {
+  const activeReply = {
+    mounted: true,
+    recording: true,
+    enabled: true,
+    aborted: false,
+    sessionCurrent: true,
+  };
+
+  assert.equal(coachPolicy.canPublishReply(activeReply), true);
+  assert.equal(coachPolicy.canPublishReply({ ...activeReply, enabled: false }), false);
+  assert.equal(
+    coachPolicy.canPublishReply({ ...activeReply, aborted: true, enabled: true }),
+    false,
+  );
+});
+
 test("admission distinguishes a legitimate no-op from a parse failure", () => {
   const context = buildContext();
 
@@ -185,7 +311,7 @@ test("admission preserves valid transcript evidence identifiers and timestamps",
 
 test("admission rejects unsupported commitments and invalid transcript evidence", () => {
   const context = buildContext({ segments: [segment(12)] });
-  const output = JSON.stringify([
+  const unsupportedOutput = JSON.stringify([
     candidate("Customer will deliver the benchmark tomorrow.", {
       type: "action_item",
       basis: "recommendation",
@@ -194,23 +320,30 @@ test("admission rejects unsupported commitments and invalid transcript evidence"
       type: "key_insight",
       basis: "recommendation",
     }),
+  ]);
+  const invalidEvidenceOutput = JSON.stringify([
     candidate("Their p99 target is fifty milliseconds.", {
       basis: "transcript",
       source_segment_ids: [999],
     }),
   ]);
 
-  const result = coachPolicy.admit(output, context, fixedAdapters);
+  const unsupportedResult = coachPolicy.admit(unsupportedOutput, context, fixedAdapters);
+  const invalidEvidenceResult = coachPolicy.admit(invalidEvidenceOutput, context, fixedAdapters);
 
-  assert.equal(result.status, "rejected");
-  assert.deepEqual(result.rejections.map((item) => item.reason), [
+  assert.equal(unsupportedResult.status, "rejected");
+  assert.equal(invalidEvidenceResult.status, "rejected");
+  assert.deepEqual([
+    ...unsupportedResult.rejections,
+    ...invalidEvidenceResult.rejections,
+  ].map((item) => item.reason), [
     "unsupported_commitment",
     "unsupported_commitment",
     "invalid_evidence",
   ]);
 });
 
-test("admission enforces per-round count and session budget", () => {
+test("admission fails closed when a generation returns more than two candidates", () => {
   const context = buildContext();
   const threeCandidates = JSON.stringify([
     candidate("Ask for the serving model size."),
@@ -220,9 +353,12 @@ test("admission enforces per-round count and session budget", () => {
 
   const roundLimited = coachPolicy.admit(threeCandidates, context, fixedAdapters);
 
-  assert.equal(roundLimited.insights.length, coachPolicy.limits.maxInsightsPerRound);
-  assert.equal(roundLimited.rejections.at(-1).reason, "round_limit");
+  assert.equal(roundLimited.status, "rejected");
+  assert.deepEqual(roundLimited.insights, []);
+  assert.deepEqual(roundLimited.rejections, [{ index: null, reason: "too_many_candidates" }]);
+});
 
+test("admission enforces the session budget", () => {
   const priorAutoInsights = Array.from(
     { length: coachPolicy.limits.maxSessionInsights - 1 },
     (_, index) => autoInsight(`Prior unique insight ${index}`),
@@ -241,20 +377,54 @@ test("admission enforces per-round count and session budget", () => {
   assert.equal(budgetLimited.rejections.at(-1).reason, "session_budget");
 });
 
+test("chat messages remain presentable without increasing automatic insight counts", () => {
+  const automatic = [autoInsight("Clarify the customer's latency SLO.")];
+  const chat = [
+    autoInsight("Should we recommend Dynamo?", { role: "user" }),
+    autoInsight("It depends on the workload shape.", { role: "assistant" }),
+  ];
+
+  const presentation = coachPolicy.combinePresentation({
+    autoInsights: automatic,
+    chatMessages: chat,
+  });
+  const context = buildContext({ priorAutoInsights: presentation });
+
+  assert.equal(presentation.length, 3);
+  assert.equal(coachPolicy.countAutomaticInsights(presentation), 1);
+  assert.equal(context.sessionInsightCount, 1);
+
+  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
+  const liveTranscriptSource = readFileSync(
+    new URL("./src/components/LiveTranscript.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(hookSource, /const \[autoInsights, setAutoInsights\] = useState/);
+  assert.match(hookSource, /const \[chatMessages, setChatMessages\] = useState/);
+  assert.match(liveTranscriptSource, /countAutomaticInsights\(coachInsights\)/);
+});
+
 test("admission rejects overlong, low-priority, exact, and near-duplicate insights", () => {
   const prior = autoInsight("Ask what p99 latency target they require.");
   const context = buildContext({ priorAutoInsights: [prior] });
-  const output = JSON.stringify([
+  const duplicateOutput = JSON.stringify([
     candidate("Ask what p99 latency target they require."),
     candidate("Ask about their required p99 latency target."),
+  ]);
+  const invalidOutput = JSON.stringify([
     candidate("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive"),
     candidate("Mention this only if there is extra time.", { priority: "low" }),
   ]);
 
-  const result = coachPolicy.admit(output, context, fixedAdapters);
+  const duplicateResult = coachPolicy.admit(duplicateOutput, context, fixedAdapters);
+  const invalidResult = coachPolicy.admit(invalidOutput, context, fixedAdapters);
 
-  assert.equal(result.status, "rejected");
-  assert.deepEqual(result.rejections.map((item) => item.reason), [
+  assert.equal(duplicateResult.status, "rejected");
+  assert.equal(invalidResult.status, "rejected");
+  assert.deepEqual([
+    ...duplicateResult.rejections,
+    ...invalidResult.rejections,
+  ].map((item) => item.reason), [
     "duplicate",
     "duplicate",
     "too_long",

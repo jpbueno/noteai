@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrainCircuit, Mic, MonitorSpeaker, Square, TriangleAlert } from "lucide-react";
 import type { TranscriptSegment, CoachInsight } from "@/lib/types";
 import { formatDuration } from "@/lib/hooks";
+import { coachPolicy } from "@/lib/ai-coach-policy";
 import CoachPanel from "@/components/CoachPanel";
 import {
   emptyRecordingDiagnostics,
@@ -55,6 +56,7 @@ export default function LiveTranscript({
   });
   const isDraggingRef = useRef(false);
   const warnings = recordingDiagnosticsWarnings(diagnostics);
+  const automaticInsightCount = coachPolicy.countAutomaticInsights(coachInsights);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -136,9 +138,9 @@ export default function LiveTranscript({
           >
             <BrainCircuit className="w-3.5 h-3.5" />
             AI Solutions Architect
-            {coachInsights.length > 0 && (
+            {automaticInsightCount > 0 && (
               <span className="text-[10px] bg-accent/20 px-1 rounded ml-0.5">
-                {coachInsights.length}
+                {automaticInsightCount}
               </span>
             )}
           </button>
@@ -241,8 +243,8 @@ export default function LiveTranscript({
             {warning}
           </span>
         ))}
-        {coachEnabled && coachInsights.length > 0 && (
-          <span className="text-accent">{coachInsights.length} insights</span>
+        {coachEnabled && automaticInsightCount > 0 && (
+          <span className="text-accent">{automaticInsightCount} insights</span>
         )}
       </div>
     </div>

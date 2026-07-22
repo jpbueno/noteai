@@ -41,6 +41,7 @@ export interface CoachContext {
 }
 
 export type CoachAdmissionRejectionReason =
+  | "too_many_candidates"
   | "invalid_shape"
   | "invalid_type"
   | "invalid_basis"
@@ -57,7 +58,7 @@ export type CoachAdmissionRejectionReason =
   | "session_budget";
 
 export interface CoachAdmissionRejection {
-  index: number;
+  index: number | null;
   reason: CoachAdmissionRejectionReason;
 }
 
@@ -89,6 +90,27 @@ export interface CoachAdmissionAdapters {
   now: () => Date;
 }
 
+export interface CoachCadenceTracker {
+  canAnalyze: (segmentCount: number) => boolean;
+  complete: (segmentCount: number) => void;
+  fail: (segmentCount: number) => void;
+  reset: () => void;
+}
+
+export interface RecordingSessionScope {
+  sync: (isRecording: boolean) => void;
+  capture: () => number | null;
+  canPublish: (sessionToken: number) => boolean;
+}
+
+export interface CoachReplyPublicationState {
+  mounted: boolean;
+  recording: boolean;
+  enabled: boolean;
+  aborted: boolean;
+  sessionCurrent: boolean;
+}
+
 const LIMITS = Object.freeze({
   maxTranscriptSegments: 24,
   maxTranscriptCharacters: 9_000,
@@ -111,7 +133,6 @@ const CADENCE = Object.freeze({
   minNewSegments: 2,
   minIntervalMs: 300_000,
   failureRetryMs: 30_000,
-  sparseUpdateIntervalMs: 300_000,
   checkIntervalMs: 8_000,
   topicCooldownMs: 300_000,
 });
@@ -199,6 +220,45 @@ export const coachPolicy = {
   limits: LIMITS,
   cadence: CADENCE,
 
+  createCadenceTracker(
+    adapters: { now?: () => number } = {},
+  ): CoachCadenceTracker {
+    return createCadenceTracker(adapters.now ?? Date.now);
+  },
+
+  createRecordingSessionScope(initialRecording = false): RecordingSessionScope {
+    return createRecordingSessionScope(initialRecording);
+  },
+
+  combinePresentation({
+    autoInsights,
+    chatMessages,
+  }: {
+    autoInsights: CoachInsight[];
+    chatMessages: CoachInsight[];
+  }): CoachInsight[] {
+    return [...autoInsights.filter(isAutomaticInsight), ...chatMessages.filter(isChatMessage)]
+      .map((entry, order) => ({ entry, order, timestamp: Date.parse(entry.timestamp) }))
+      .sort((left, right) => {
+        const leftTimestamp = Number.isFinite(left.timestamp) ? left.timestamp : 0;
+        const rightTimestamp = Number.isFinite(right.timestamp) ? right.timestamp : 0;
+        return leftTimestamp - rightTimestamp || left.order - right.order;
+      })
+      .map(({ entry }) => entry);
+  },
+
+  countAutomaticInsights(entries: CoachInsight[]): number {
+    return entries.filter(isAutomaticInsight).length;
+  },
+
+  canPublishReply(state: CoachReplyPublicationState): boolean {
+    return state.mounted
+      && state.recording
+      && state.enabled
+      && !state.aborted
+      && state.sessionCurrent;
+  },
+
   buildContext({ segments, priorAutoInsights }: BuildContextInput): CoachContext {
     const autoInsights = priorAutoInsights.filter(
       (insight) =>
@@ -245,6 +305,13 @@ export const coachPolicy = {
     }
     if (parsed.value.length === 0) {
       return { status: "no_op", insights: [], rejections: [] };
+    }
+    if (parsed.value.length > LIMITS.maxInsightsPerRound) {
+      return {
+        status: "rejected",
+        insights: [],
+        rejections: [{ index: null, reason: "too_many_candidates" }],
+      };
     }
 
     const accepted: CoachInsight[] = [];
@@ -334,6 +401,103 @@ export const coachPolicy = {
     return context.sessionInsightCount >= LIMITS.maxSessionInsights;
   },
 };
+
+function createCadenceTracker(now: () => number): CoachCadenceTracker {
+  let analyzedSegmentCount = 0;
+  let lastAnalysisTime: number | null = null;
+  let failedSegmentCount: number | null = null;
+  let lastFailureTime: number | null = null;
+
+  const reset = () => {
+    analyzedSegmentCount = 0;
+    lastAnalysisTime = null;
+    failedSegmentCount = null;
+    lastFailureTime = null;
+  };
+
+  const normalizedSegmentCount = (segmentCount: number) => (
+    Number.isFinite(segmentCount) ? Math.max(0, Math.floor(segmentCount)) : 0
+  );
+
+  return {
+    canAnalyze(segmentCount: number): boolean {
+      const count = normalizedSegmentCount(segmentCount);
+      if (
+        count < analyzedSegmentCount
+        || (failedSegmentCount !== null && count < failedSegmentCount)
+      ) {
+        reset();
+      }
+
+      const currentTime = now();
+      if (
+        lastFailureTime !== null
+        && currentTime - lastFailureTime < CADENCE.failureRetryMs
+      ) {
+        return false;
+      }
+      if (failedSegmentCount === count && lastFailureTime !== null) {
+        return true;
+      }
+      if (count - analyzedSegmentCount < CADENCE.minNewSegments) {
+        return false;
+      }
+      if (
+        lastAnalysisTime !== null
+        && currentTime - lastAnalysisTime < CADENCE.minIntervalMs
+      ) {
+        return false;
+      }
+      return true;
+    },
+
+    complete(segmentCount: number) {
+      analyzedSegmentCount = Math.max(
+        analyzedSegmentCount,
+        normalizedSegmentCount(segmentCount),
+      );
+      lastAnalysisTime = now();
+      failedSegmentCount = null;
+      lastFailureTime = null;
+    },
+
+    fail(segmentCount: number) {
+      failedSegmentCount = normalizedSegmentCount(segmentCount);
+      lastFailureTime = now();
+    },
+
+    reset,
+  };
+}
+
+function createRecordingSessionScope(initialRecording: boolean): RecordingSessionScope {
+  let active = initialRecording;
+  let sessionToken = initialRecording ? 1 : 0;
+
+  return {
+    sync(isRecording: boolean) {
+      if (isRecording === active) return;
+      active = isRecording;
+      sessionToken += 1;
+    },
+
+    capture() {
+      return active ? sessionToken : null;
+    },
+
+    canPublish(token: number) {
+      return active && token === sessionToken;
+    },
+  };
+}
+
+function isAutomaticInsight(entry: CoachInsight): boolean {
+  return entry.role === undefined;
+}
+
+function isChatMessage(entry: CoachInsight): boolean {
+  return entry.role === "user" || entry.role === "assistant";
+}
 
 function boundTranscriptSegments(segments: TranscriptSegment[]): CoachContextSegment[] {
   const bounded: CoachContextSegment[] = [];

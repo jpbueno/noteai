@@ -819,6 +819,66 @@ final class AICoachModelTests: XCTestCase {
 }
 
 final class AICoachPanelPresentationTests: XCTestCase {
+    func testChatScrollStateOnlyFollowsAnExplicitQuestionThroughItsReply() throws {
+        let existingMessage = CoachInsight(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 10),
+            type: .keyInsight,
+            content: "Existing answer",
+            role: .assistant
+        )
+        let submittedQuestion = CoachInsight(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 20),
+            type: .keyInsight,
+            content: "What should I clarify?",
+            role: .user
+        )
+        let reply = CoachInsight(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 30),
+            type: .keyInsight,
+            content: "Clarify who owns rollout approval.",
+            role: .assistant
+        )
+
+        var state = CoachPanelChatScrollState()
+
+        XCTAssertNil(state.chatMessagesChanged(to: [existingMessage]))
+        XCTAssertFalse(state.isFollowingSubmittedExchange)
+
+        let submitRequest = state.submitQuestion()
+        XCTAssertEqual(submitRequest.target, .chatSection)
+        XCTAssertTrue(state.isFollowingSubmittedExchange)
+
+        let questionRequest = try XCTUnwrap(
+            state.chatMessagesChanged(to: [existingMessage, submittedQuestion])
+        )
+        XCTAssertEqual(questionRequest.target, .message(submittedQuestion.id))
+
+        let thinkingRequest = try XCTUnwrap(state.replyStateChanged(isReplying: true))
+        XCTAssertEqual(thinkingRequest.target, .thinking)
+
+        let replyRequest = try XCTUnwrap(
+            state.chatMessagesChanged(to: [existingMessage, submittedQuestion, reply])
+        )
+        XCTAssertEqual(replyRequest.target, .message(reply.id))
+        XCTAssertFalse(state.isFollowingSubmittedExchange)
+        XCTAssertGreaterThan(replyRequest.sequence, thinkingRequest.sequence)
+
+        let laterMessage = CoachInsight(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 40),
+            type: .keyInsight,
+            content: "Passive history refresh",
+            role: .assistant
+        )
+        XCTAssertNil(
+            state.chatMessagesChanged(to: [existingMessage, submittedQuestion, reply, laterMessage])
+        )
+        XCTAssertNil(state.replyStateChanged(isReplying: false))
+    }
+
     func testPresentationSeparatesAutoInsightsFromChatAndOrdersActiveGuidanceByPriority() {
         let activeHighID = UUID()
         let activeCriticalID = UUID()

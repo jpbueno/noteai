@@ -44,6 +44,54 @@ struct CoachPanelPresentation {
     }
 }
 
+enum CoachPanelScrollTarget: Hashable {
+    case chatSection
+    case message(UUID)
+    case thinking
+}
+
+struct CoachPanelScrollRequest: Equatable {
+    let sequence: Int
+    let target: CoachPanelScrollTarget
+}
+
+/// Keeps chat follow-scrolling scoped to an exchange the user explicitly started.
+struct CoachPanelChatScrollState {
+    private(set) var isFollowingSubmittedExchange = false
+    private(set) var latestRequest: CoachPanelScrollRequest?
+    private var sequence = 0
+
+    @discardableResult
+    mutating func submitQuestion() -> CoachPanelScrollRequest {
+        isFollowingSubmittedExchange = true
+        return request(.chatSection)
+    }
+
+    @discardableResult
+    mutating func chatMessagesChanged(to messages: [CoachInsight]) -> CoachPanelScrollRequest? {
+        guard let message = messages.last else { return nil }
+
+        let scrollRequest = request(.message(message.id))
+        if message.role == .assistant {
+            isFollowingSubmittedExchange = false
+        }
+        return scrollRequest
+    }
+
+    @discardableResult
+    mutating func replyStateChanged(isReplying: Bool) -> CoachPanelScrollRequest? {
+        guard isFollowingSubmittedExchange, isReplying else { return nil }
+        return request(.thinking)
+    }
+
+    private mutating func request(_ target: CoachPanelScrollTarget) -> CoachPanelScrollRequest {
+        sequence += 1
+        let request = CoachPanelScrollRequest(sequence: sequence, target: target)
+        latestRequest = request
+        return request
+    }
+}
+
 /// Right-hand working panel shown during live recording.
 struct CoachPanelView: View {
     let insights: [CoachInsight]
@@ -54,6 +102,7 @@ struct CoachPanelView: View {
     let onShowSource: (CoachEvidenceReference) -> Void
 
     @State private var input: String = ""
+    @State private var chatScrollState = CoachPanelChatScrollState()
     @FocusState private var inputFocused: Bool
 
     private var presentation: CoachPanelPresentation {
@@ -106,21 +155,42 @@ struct CoachPanelView: View {
     // MARK: - Content
 
     private var contentArea: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                liveGuidanceSection
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    liveGuidanceSection
 
-                if !presentation.historyInsights.isEmpty {
+                    if !presentation.historyInsights.isEmpty {
+                        sectionDivider
+                        historySection
+                    }
+
                     sectionDivider
-                    historySection
+                    chatSection
                 }
-
-                sectionDivider
-                chatSection
+                .padding(.vertical, 6)
             }
-            .padding(.vertical, 6)
+            .onChange(of: presentation.chatMessages.map(\.id)) { _, _ in
+                chatScrollState.chatMessagesChanged(to: presentation.chatMessages)
+            }
+            .onChange(of: isReplying) { _, newValue in
+                chatScrollState.replyStateChanged(isReplying: newValue)
+            }
+            .onChange(of: chatScrollState.latestRequest) { _, request in
+                guard let request else { return }
+                scrollToChat(request, using: proxy)
+            }
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private func scrollToChat(_ request: CoachPanelScrollRequest, using proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(
+                request.target,
+                anchor: request.target == .chatSection ? .top : .bottom
+            )
+        }
     }
 
     private var liveGuidanceSection: some View {
@@ -165,17 +235,19 @@ struct CoachPanelView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation.chatMessages) { message in
                         chatEntry(message)
-                            .id(message.id)
+                            .id(CoachPanelScrollTarget.message(message.id))
                     }
 
                     if isReplying {
                         thinkingBubble
+                            .id(CoachPanelScrollTarget.thinking)
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
             }
         }
+        .id(CoachPanelScrollTarget.chatSection)
     }
 
     private func sectionHeader(_ title: String, systemImage: String, count: Int?) -> some View {
@@ -443,6 +515,7 @@ struct CoachPanelView: View {
     private func send() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isReplying else { return }
+        chatScrollState.submitQuestion()
         onSend(trimmed)
         input = ""
     }

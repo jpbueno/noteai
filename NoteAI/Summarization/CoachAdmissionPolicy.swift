@@ -121,6 +121,14 @@ struct CoachAdmissionPolicy: Sendable {
                 rejections.append(.init(candidateIndex: index, reason: .invalidTopic))
                 continue
             }
+            if candidate.type == .actionItem && candidate.basis != .transcript {
+                rejections.append(.init(candidateIndex: index, reason: .unsupportedCommitment))
+                continue
+            }
+            if candidate.basis != .transcript && looksLikeUnsupportedCommitment(content) {
+                rejections.append(.init(candidateIndex: index, reason: .unsupportedCommitment))
+                continue
+            }
 
             let comparisonInsights = existingInsights + accepted
             if comparisonInsights.contains(where: { normalizedText($0.content) == normalizedText(content) }) {
@@ -145,10 +153,6 @@ struct CoachAdmissionPolicy: Sendable {
             }
             if candidate.basis == .transcript && uniqueSourceIDs.isEmpty {
                 rejections.append(.init(candidateIndex: index, reason: .missingTranscriptEvidence))
-                continue
-            }
-            if candidate.type == .actionItem && (candidate.basis != .transcript || uniqueSourceIDs.isEmpty) {
-                rejections.append(.init(candidateIndex: index, reason: .unsupportedCommitment))
                 continue
             }
 
@@ -187,6 +191,26 @@ struct CoachAdmissionPolicy: Sendable {
         }
 
         return CoachAdmissionDecision(accepted: accepted, rejections: rejections)
+    }
+
+    private func looksLikeUnsupportedCommitment(_ content: String) -> Bool {
+        if content.range(of: #"\?\s*$"#, options: .regularExpression) != nil ||
+            content.range(
+                of: #"(?i)^(ask|check|clarify|confirm|determine|probe)\b"#,
+                options: .regularExpression
+            ) != nil {
+            return false
+        }
+        if content.range(
+            of: #"(?i)\b(committed|agreed|promised)\b"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        return content.range(
+            of: #"(?i)\b(customer|client|partner|speaker|team|they|we)\b[\s\S]{0,60}\bwill\s+(complete|deliver|follow up|provide|send|share|submit)\b"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private func normalizedTopic(_ topic: String) -> String {

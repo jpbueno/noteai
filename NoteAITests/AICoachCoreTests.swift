@@ -229,6 +229,61 @@ final class AICoachAdmissionTests: XCTestCase {
         ])
     }
 
+    func testAdmissionRejectsUnsupportedCommitmentInNonActionRecommendation() {
+        let decision = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .keyInsight,
+                content: "Customer will deliver results tomorrow.",
+                basis: .recommendation,
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(decision.accepted, [])
+        XCTAssertEqual(decision.rejections.map(\.reason), [.unsupportedCommitment])
+    }
+
+    func testAdmissionAllowsRecommendationQuestionAboutPotentialCommitment() {
+        let decision = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                content: "Ask whether the customer will deliver results tomorrow.",
+                basis: .recommendation,
+                sourceSegmentIDs: []
+            )],
+            transcript: [],
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(decision.accepted.map(\.content), ["Ask whether the customer will deliver results tomorrow."])
+        XCTAssertEqual(decision.rejections, [])
+    }
+
+    func testAdmissionAllowsGroundedTranscriptCommitmentObservation() {
+        let transcript = [
+            TranscriptSegment(id: 1, text: "Customer: We will deliver results tomorrow."),
+        ]
+        let decision = CoachAdmissionPolicy.default.evaluate(
+            candidates: [candidate(
+                type: .keyInsight,
+                content: "Customer will deliver results tomorrow.",
+                sourceSegmentIDs: [1]
+            )],
+            transcript: transcript,
+            existingInsights: [],
+            sessionID: UUID(),
+            now: Date()
+        )
+
+        XCTAssertEqual(decision.accepted.map(\.content), ["Customer will deliver results tomorrow."])
+        XCTAssertEqual(decision.rejections, [])
+    }
+
     func testAdmissionRejectsResultCountAboveLimit() {
         let policy = CoachAdmissionPolicy.default
         let decision = policy.evaluate(

@@ -194,21 +194,69 @@ struct CoachAdmissionPolicy: Sendable {
     }
 
     private func looksLikeUnsupportedCommitment(_ content: String) -> Bool {
-        if content.range(of: #"\?\s*$"#, options: .regularExpression) != nil ||
-            content.range(
-                of: #"(?i)^(ask|check|clarify|confirm|determine|probe)\b"#,
-                options: .regularExpression
-            ) != nil {
-            return false
+        commitmentClauses(in: content).contains { clause in
+            containsCommitmentClaim(clause) &&
+                !isCommitmentInquiry(clause) &&
+                !isNegatedCommitmentAdvice(clause)
         }
-        if content.range(
-            of: #"(?i)\b(committed|agreed|promised)\b"#,
-            options: .regularExpression
-        ) != nil {
+    }
+
+    private func commitmentClauses(in content: String) -> [String] {
+        var clauses: [String] = []
+        var currentClause = ""
+        let terminators: Set<Character> = [";", ".", "!", "?", "\n"]
+
+        for character in content {
+            currentClause.append(character)
+            if terminators.contains(character) {
+                let clause = currentClause.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !clause.isEmpty { clauses.append(clause) }
+                currentClause = ""
+            }
+        }
+
+        let trailingClause = currentClause.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trailingClause.isEmpty { clauses.append(trailingClause) }
+        return clauses
+    }
+
+    private func containsCommitmentClaim(_ clause: String) -> Bool {
+        let action = #"(?:complete|completing|deliver|delivering|follow\s+up|following\s+up|provide|providing|send|sending|share|sharing|submit|submitting)"#
+        let futurePatterns = [
+            #"(?i)\bwill\s+(?:be\s+)?"# + action + #"\b"#,
+            #"(?i)\b(?:plans?|intends?)\s+to\s+"# + action + #"\b"#,
+            #"(?i)\b(?:am|is|are)\s+going\s+to\s+"# + action + #"\b"#,
+        ]
+        if futurePatterns.contains(where: {
+            clause.range(of: $0, options: .regularExpression) != nil
+        }) {
             return true
         }
-        return content.range(
-            of: #"(?i)\b(customer|client|partner|speaker|team|they|we)\b[\s\S]{0,60}\bwill\s+(complete|deliver|follow up|provide|send|share|submit)\b"#,
+
+        let negatedCommitmentPatterns = [
+            #"(?i)\b(?:(?:has|have|had|did|does|do|is|are|was|were)\s+)?(?:not|never)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
+            #"(?i)\b(?:hasn't|haven't|hadn't|didn't|doesn't|don't|isn't|aren't|wasn't|weren't)\s+(?:yet\s+)?(?:explicitly\s+)?(?:committed|agreed|promised)\b"#,
+        ]
+        let withoutNegatedCommitments = negatedCommitmentPatterns.reduce(clause) { result, pattern in
+            result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        return withoutNegatedCommitments.range(
+            of: #"(?i)\b(?:committed|agreed|promised)\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func isCommitmentInquiry(_ clause: String) -> Bool {
+        if clause.hasSuffix("?") { return true }
+        return clause.range(
+            of: #"(?i)^\s*(?:ask|check|clarify|confirm|determine|probe|verify|recommend\s+asking)\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func isNegatedCommitmentAdvice(_ clause: String) -> Bool {
+        clause.range(
+            of: #"(?i)^\s*(?:(?:do\s+not|don't|never)\s+(?:assume|infer|presume|claim|state|treat)|(?:avoid|refrain\s+from)\s+(?:assuming|inferring|presuming|claiming|stating|treating))\b"#,
             options: .regularExpression
         ) != nil
     }

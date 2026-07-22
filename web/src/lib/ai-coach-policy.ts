@@ -111,6 +111,10 @@ export interface CoachReplyPublicationState {
   sessionCurrent: boolean;
 }
 
+export interface CoachAnalysisPublicationState extends CoachReplyPublicationState {
+  requestCurrent: boolean;
+}
+
 const LIMITS = Object.freeze({
   maxTranscriptSegments: 24,
   maxTranscriptCharacters: 9_000,
@@ -252,11 +256,11 @@ export const coachPolicy = {
   },
 
   canPublishReply(state: CoachReplyPublicationState): boolean {
-    return state.mounted
-      && state.recording
-      && state.enabled
-      && !state.aborted
-      && state.sessionCurrent;
+    return canPublishRequest(state);
+  },
+
+  canPublishAnalysis(state: CoachAnalysisPublicationState): boolean {
+    return state.requestCurrent && canPublishRequest(state);
   },
 
   buildContext({ segments, priorAutoInsights }: BuildContextInput): CoachContext {
@@ -489,6 +493,14 @@ function createRecordingSessionScope(initialRecording: boolean): RecordingSessio
       return active && token === sessionToken;
     },
   };
+}
+
+function canPublishRequest(state: CoachReplyPublicationState): boolean {
+  return state.mounted
+    && state.recording
+    && state.enabled
+    && !state.aborted
+    && state.sessionCurrent;
 }
 
 function isAutomaticInsight(entry: CoachInsight): boolean {

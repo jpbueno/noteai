@@ -267,6 +267,62 @@ test("an aborted reply stays unpublished after the coach is re-enabled", () => {
   );
 });
 
+test("an old analysis cannot publish or clear a newer request after re-enable", () => {
+  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
+  const analyze = sourceSection(
+    hookSource,
+    "  const analyze = useCallback(async () => {",
+    "  }, []);",
+  );
+  const requestGuard = sourceSection(
+    analyze,
+    "    const controller = new AbortController();",
+    "    try {",
+  );
+  const successGuard = sourceSection(
+    analyze,
+    "      const outcome = await analyzeTranscriptLive",
+    "      if (outcome.status === \"insights\") {",
+  );
+  const errorGuard = sourceSection(
+    analyze,
+    "    } catch (error) {",
+    "    } finally {",
+  );
+  const finalizationStart = analyze.indexOf("    } finally {");
+  assert.notEqual(finalizationStart, -1, "Missing analysis finalization block");
+  const finalizationGuard = analyze.slice(finalizationStart);
+
+  assert.match(requestGuard, /requestCurrent: analysisAbortRef\.current === controller/);
+  assert.match(successGuard, /!canPublishAnalysis\(\)/);
+  assert.match(errorGuard, /canPublishAnalysis\(\)/);
+  assert.match(finalizationGuard, /const canFinalizeAnalysis = canPublishAnalysis\(\);/);
+  assert.match(finalizationGuard, /if \(analysisAbortRef\.current === controller\)/);
+  assert.match(finalizationGuard, /if \(canFinalizeAnalysis\)/);
+
+  const activeAnalysis = {
+    mounted: true,
+    recording: true,
+    enabled: true,
+    aborted: false,
+    sessionCurrent: true,
+    requestCurrent: true,
+  };
+  assert.equal(coachPolicy.canPublishAnalysis(activeAnalysis), true);
+  assert.equal(
+    coachPolicy.canPublishAnalysis({
+      ...activeAnalysis,
+      aborted: true,
+      requestCurrent: false,
+    }),
+    false,
+  );
+  assert.equal(
+    coachPolicy.canPublishAnalysis({ ...activeAnalysis, requestCurrent: false }),
+    false,
+  );
+});
+
 test("admission distinguishes a legitimate no-op from a parse failure", () => {
   const context = buildContext();
 

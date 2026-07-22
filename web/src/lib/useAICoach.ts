@@ -63,19 +63,21 @@ export function useAICoach(
     analysisAbortRef.current = controller;
     analyzingRef.current = true;
     setIsAnalyzing(true);
+    const canPublishAnalysis = () => coachPolicy.canPublishAnalysis({
+      mounted: mountedRef.current,
+      recording: recordingRef.current,
+      enabled: enabledRef.current,
+      aborted: controller.signal.aborted,
+      sessionCurrent: sessionScopeRef.current?.canPublish(sessionToken) ?? false,
+      requestCurrent: analysisAbortRef.current === controller,
+    });
 
     try {
       console.log(
         `[AI Coach] Analyzing ${wordCount} words with ${context.transcriptSegments.length} recent segments and ${context.sessionInsightCount} prior auto-insights`,
       );
       const outcome = await analyzeTranscriptLive(context, { signal: controller.signal });
-      if (
-        !mountedRef.current
-        || controller.signal.aborted
-        || !sessionScopeRef.current?.canPublish(sessionToken)
-        || !recordingRef.current
-        || !enabledRef.current
-      ) return;
+      if (!canPublishAnalysis()) return;
 
       if (outcome.status === "insights") {
         console.log(
@@ -96,20 +98,18 @@ export function useAICoach(
 
       cadenceRef.current?.complete(segmentCount);
     } catch (error) {
-      if (
-        !isAbortError(error)
-        && sessionScopeRef.current?.canPublish(sessionToken)
-        && recordingRef.current
-        && enabledRef.current
-      ) {
+      if (!isAbortError(error) && canPublishAnalysis()) {
         console.warn("[AI Coach] Analysis failed:", error);
         cadenceRef.current?.fail(segmentCount);
       }
     } finally {
-      if (analysisAbortRef.current === controller) analysisAbortRef.current = null;
-      if (sessionScopeRef.current?.canPublish(sessionToken)) {
-        analyzingRef.current = false;
-        if (mountedRef.current) setIsAnalyzing(false);
+      const canFinalizeAnalysis = canPublishAnalysis();
+      if (analysisAbortRef.current === controller) {
+        analysisAbortRef.current = null;
+        if (canFinalizeAnalysis) {
+          analyzingRef.current = false;
+          if (mountedRef.current) setIsAnalyzing(false);
+        }
       }
     }
   }, []);

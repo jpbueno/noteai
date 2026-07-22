@@ -551,6 +551,23 @@ test("transcript commitment grounding rejects noncommittal, unrelated, and inqui
   }
 });
 
+test("transcript grounding requires evidence for every commitment scope", () => {
+  const result = coachPolicy.admit(
+    JSON.stringify([
+      candidate("Customer will deliver results; partner will send logs tomorrow.", {
+        type: "key_insight",
+        basis: "transcript",
+        source_segment_ids: [70],
+      }),
+    ]),
+    buildContext({ segments: [segment(70, "Customer will deliver results.")] }),
+    fixedAdapters,
+  );
+
+  assert.equal(result.status, "rejected");
+  assert.deepEqual(result.rejections.map((item) => item.reason), ["invalid_evidence"]);
+});
+
 test("admission rejects unsupported commitments and invalid transcript evidence", () => {
   const context = buildContext({ segments: [segment(12)] });
   const unsupportedOutput = JSON.stringify([

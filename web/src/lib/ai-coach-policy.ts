@@ -875,7 +875,7 @@ const FUTURE_COMMITMENT_ACTION = String.raw`(?:complete|completing|deliver|deliv
 const COMMITMENT_FORM_SOURCE = String.raw`\b(?:will\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|(?:plans?|intends?|expects?)\s+to\s+${BASE_COMMITMENT_ACTION}|(?:am|is|are)\s+going\s+to\s+(?:be\s+)?${FUTURE_COMMITMENT_ACTION}|committed|agreed|promised)\b`;
 const COMMITMENT_CLAUSE_PATTERN = /[^.!?;\n]+(?:[.!?;]+|\n+|$)/g;
 const QUESTION_CLAUSE_PATTERN = /\?[.!?]*$/;
-const LOCAL_SCOPE_BOUNDARY_PATTERN = /\b(?:although|because|but|however|nevertheless|since|so|therefore|though|thus|whereas|yet)\b\s*[:,]?\s*/gi;
+const LOCAL_SCOPE_BOUNDARY_PATTERN = /\b(?:although|because|but|hence|however|nevertheless|since|so|then|therefore|though|thus|whereas|yet)\b\s*[:,]?\s*/gi;
 const INQUIRY_CUE = String.raw`(?:whether|if|when|how|what|why|who|where)`;
 const QUALIFIED_INQUIRY_PATTERN = new RegExp(
   String.raw`^(?:please\s+)?(?:(?:recommend|suggest)\s+)?(?:ask(?:ing)?|check(?:ing)?|clarify(?:ing)?|confirm(?:ing)?|determine|probe|verify)\b[\s\S]*\b${INQUIRY_CUE}\b`,
@@ -890,18 +890,29 @@ const NEGATED_CONTRACTION_PATTERN = /\b[\p{L}]+n['\u2019]t(?:\s+(?:actually|curr
 const ANTI_ASSUMPTION_PATTERN = /^(?:please\s+)?(?:do\s+not|don['\u2019]t|never)\s+(?:assume|infer|presume|claim|state|treat)\b/i;
 
 function looksLikeUnsupportedCommitment(content: string): boolean {
-  return commitmentClauses(content).some((clause) => {
-    for (const match of clause.matchAll(new RegExp(COMMITMENT_FORM_SOURCE, "gi"))) {
+  return unqualifiedCommitmentScopes(content).length > 0;
+}
+
+function unqualifiedCommitmentScopes(content: string): string[] {
+  return commitmentScopes(content).filter((scope) => {
+    for (const match of scope.matchAll(new RegExp(COMMITMENT_FORM_SOURCE, "gi"))) {
       const matchIndex = match.index ?? 0;
       if (
-        !isQualifiedInquiry(clause, matchIndex)
-        && !isNegatedCommitment(clause, matchIndex)
+        !isQualifiedInquiry(scope, matchIndex)
+        && !isNegatedCommitment(scope, matchIndex)
       ) {
         return true;
       }
     }
     return false;
   });
+}
+
+function commitmentScopes(content: string): string[] {
+  return commitmentClauses(content)
+    .flatMap((clause) => clause.split(LOCAL_SCOPE_BOUNDARY_PATTERN))
+    .map((scope) => scope.trim())
+    .filter(Boolean);
 }
 
 function commitmentClauses(content: string): string[] {
@@ -932,9 +943,13 @@ function hasGroundedCommitmentSupport(
   candidateContent: string,
   segments: CoachContextSegment[],
 ): boolean {
-  return segments.some(
-    (segment) => looksLikeUnsupportedCommitment(segment.text)
-      && hasTextualGrounding(candidateContent, segment.text),
+  const candidateScopes = unqualifiedCommitmentScopes(candidateContent);
+  const scopesToGround = candidateScopes.length > 0 ? candidateScopes : [candidateContent];
+  const evidenceScopes = segments.flatMap((segment) =>
+    unqualifiedCommitmentScopes(segment.text),
+  );
+  return scopesToGround.every((scope) =>
+    evidenceScopes.some((evidenceScope) => hasTextualGrounding(scope, evidenceScope)),
   );
 }
 

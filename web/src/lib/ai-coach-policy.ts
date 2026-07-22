@@ -226,7 +226,7 @@ const TRANSCRIPT_PRESENTATIONS: Record<
 };
 const TOPIC_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const QUESTION_PATTERN = /^[^.!?]+\?$/u;
-const QUESTION_SEPARATOR_PATTERN = /[;\r\n\u2028\u2029]/u;
+const QUESTION_SEPARATOR_PATTERN = /[;\r\n]/u;
 const COLLAPSIBLE_WHITESPACE_PATTERN = /[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]+/gu;
 
 const ANALYSIS_SYSTEM_PROMPT = `You are a senior NVIDIA Solutions Architect acting as a terse real-time advisor during a live technical meeting. You are a broad AI, infrastructure, cloud, Kubernetes, GPU, model, data, networking, and MLOps generalist with deep inference expertise, including Dynamo, NIM, Triton Inference Server, TensorRT-LLM, NIXL, KVBM, vLLM, SGLang, disaggregated serving, quantization, speculative decoding, KV-cache design, and TTFT/ITL/p99 trade-offs.
@@ -240,7 +240,7 @@ STRICT V1 OUTPUT CONTRACT:
 - Return exactly one JSON object with exact keys contract_version,candidates and no markdown or prose.
 - contract_version must be the integer 1. candidates must contain zero to two items.
 - The default no-op is exactly {"contract_version":1,"candidates":[]}.
-- A guidance_question has exact keys kind,directive,question,priority,topic. directive is ask, clarify, confirm, check, probe, compare, validate, quantify, discuss, or explore. question must begin with what, why, how, when, where, which, who, whose, is, are, was, were, do, does, did, can, could, should, would, will, has, have, had, may, or might and end in exactly one ASCII question mark, with no earlier period, exclamation mark, or question mark. Do not supply type, basis, content, prefix, action, tool, or any other key.
+- A guidance_question has exact keys kind,directive,question,priority,topic. directive is ask, clarify, confirm, check, probe, compare, validate, quantify, discuss, or explore. question must begin with what, why, how, when, where, which, who, whose, is, are, was, were, do, does, did, can, could, should, would, will, has, have, had, may, or might and end in exactly one ASCII question mark, with no earlier period, exclamation mark, or question mark and no newline, semicolon, control, bidi, or unsafe invisible character. Do not supply type, basis, content, prefix, action, tool, or any other key.
 - A transcript_quote has exact keys kind,presentation,evidence_quotes,priority,topic. presentation is observation, possible_action, or possible_follow_up. Each evidence quote has exact keys source_segment_id,quote.
 - For transcript_quote, copy the complete normalized transcript segment verbatim and its source_segment_id. A source_segment_id must be a positive safe integer. Never use a partial quote, combine segments, or remove negation. Multiple quotes are allowed only for identical normalized text from distinct source segment IDs.
 - Derived content must be at most 24 words and 180 Unicode scalar values after normalization and deterministic prefixing.
@@ -981,6 +981,8 @@ function containsRejectedContractCodePoint(value: string): boolean {
       || (codePoint >= 0x007F && codePoint <= 0x009F)
       || codePoint === 0x061C
       || (codePoint >= 0x200B && codePoint <= 0x200F)
+      || codePoint === 0x2028
+      || codePoint === 0x2029
       || (codePoint >= 0x202A && codePoint <= 0x202E)
       || codePoint === 0x2060
       || (codePoint >= 0x2066 && codePoint <= 0x2069)

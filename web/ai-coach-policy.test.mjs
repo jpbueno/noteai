@@ -188,6 +188,7 @@ test("auto prompt requests only the strict v1 envelope and preserves security pr
   assert.match(messages[0].content, /source_segment_id/i);
   assert.match(messages[0].content, /positive safe integer/i);
   assert.match(messages[0].content, /begin with.*what.*might/i);
+  assert.match(messages[0].content, /no newline, semicolon, control, bidi, or unsafe invisible/i);
   assert.match(messages[0].content, /24 words.*180 Unicode scalar/i);
   assert.match(messages[0].content, /exact keys/i);
   assert.doesNotMatch(messages[0].content, /technical_answer|domain_knowledge/);
@@ -422,7 +423,7 @@ test("admission distinguishes a strict no-op envelope from a parse failure", () 
 test("shared coach admission corpus metadata remains frozen at v1", () => {
   assert.equal(coachAdmissionCorpus.schema_version, 1);
   assert.equal(coachAdmissionCorpus.name, "coach-admission-contract-v1");
-  assert.equal(coachAdmissionCorpus.cases.length, 91);
+  assert.equal(coachAdmissionCorpus.cases.length, 93);
 });
 
 for (const contractCase of coachAdmissionCorpus.cases) {
@@ -462,6 +463,22 @@ for (const contractCase of coachAdmissionCorpus.cases) {
     assert.deepEqual(sideEffects, contractCase.expected.side_effects);
     assert.ok(result.insights.every((insight) => insight.type !== "technical_answer"));
     assert.ok(result.insights.every((insight) => insight.basis !== "domain_knowledge"));
+  });
+}
+
+for (const separator of ["\u2028", "\u2029"]) {
+  test(`admission rejects transcript quotes containing U+${separator.codePointAt(0).toString(16).toUpperCase()}`, () => {
+    const quote = `Capacity${separator}is reserved.`;
+    const context = buildContext({ segments: [segment(12, quote)] });
+    const output = strictEnvelope([
+      transcriptQuote("observation", 12, quote, { topic: "capacity" }),
+    ]);
+
+    const result = coachPolicy.admit(output, context, fixedAdapters);
+
+    assert.equal(result.status, "rejected");
+    assert.deepEqual(result.insights, []);
+    assert.equal(result.rejections[0]?.reason, "invalid_evidence");
   });
 }
 

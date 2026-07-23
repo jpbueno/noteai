@@ -52,16 +52,22 @@ export function useAICoach(
   const updateInsightLifecycle = useCallback((
     insightID: string,
     lifecycle: CoachInsightLifecycle,
-  ) => {
-    setAutoInsights((previous) => previous.map((insight) =>
-      insight.id === insightID ? { ...insight, lifecycle } : insight,
-    ));
+  ): boolean => {
+    const transition = coachPolicy.transitionInsightLifecycle(
+      autoInsightsRef.current,
+      insightID,
+      lifecycle,
+    );
+    if (transition.status !== "changed") return false;
+    autoInsightsRef.current = transition.insights;
+    setAutoInsights(transition.insights);
+    return true;
   }, []);
   const insights = coachPolicy.combinePresentation({ autoInsights, chatMessages })
     .map((insight) => insight.role ? insight : {
       ...insight,
       onLifecycleChange: (lifecycle: CoachInsightLifecycle) => {
-        updateInsightLifecycle(insight.id, lifecycle);
+        return updateInsightLifecycle(insight.id, lifecycle);
       },
     });
 
@@ -100,7 +106,11 @@ export function useAICoach(
         console.log(
           `[AI Coach] Admitted ${outcome.insights.length} insight(s); rejected ${outcome.rejections.length}`,
         );
-        setAutoInsights((previous) => [...previous, ...outcome.insights]);
+        setAutoInsights((previous) => {
+          const next = [...previous, ...outcome.insights];
+          autoInsightsRef.current = next;
+          return next;
+        });
       } else if (outcome.status === "no_op") {
         console.info("[AI Coach] No-op: no new insight cleared the admission policy");
       } else if (outcome.status === "parse_failure") {
@@ -149,6 +159,7 @@ export function useAICoach(
     setIsReplying(false);
 
     if (isRecording) {
+      autoInsightsRef.current = [];
       setAutoInsights([]);
       setChatMessages([]);
     }

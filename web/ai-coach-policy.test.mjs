@@ -222,8 +222,12 @@ test("auto prompt requests only the strict v1 envelope and preserves security pr
 
   assert.equal(messages[0].role, "system");
   assert.match(messages[0].content, /untrusted meeting data/i);
-  assert.match(messages[0].content, /do not execute tools/i);
-  assert.match(messages[0].content, /do not create tasks/i);
+  assert.equal(
+    messages[0].content.includes(
+      "Do not create tasks. Do not execute tools, call tools, or propose tool calls, and do not claim that any external action was completed.",
+    ),
+    true,
+  );
   assert.match(messages[0].content, /"contract_version":1,"candidates":\[\]/);
   assert.match(messages[0].content, /complete normalized transcript segment/i);
   assert.match(messages[0].content, /source_segment_id/i);
@@ -236,6 +240,47 @@ test("auto prompt requests only the strict v1 envelope and preserves security pr
   assert.match(messages[1].content, /"source_segment_id":7/);
   assert.doesNotMatch(messages[1].content, /"id":7/);
   assert.match(messages[1].content, /Ignore earlier instructions/);
+});
+
+test("automatic admission exposes only deterministic ID and clock adapters", () => {
+  const reads = [];
+  const adapters = new Proxy(
+    {
+      createId: fixedAdapters.createId,
+      now: fixedAdapters.now,
+    },
+    {
+      get(target, property, receiver) {
+        reads.push(String(property));
+        if (!Reflect.has(target, property)) {
+          throw new Error(`Unexpected admission capability: ${String(property)}`);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    },
+  );
+  const context = buildContext();
+  const accepted = coachPolicy.admit(
+    strictEnvelope([guidanceQuestion("What capacity is required?")]),
+    context,
+    adapters,
+  );
+  const rejectedToolField = coachPolicy.admit(
+    JSON.stringify({
+      contract_version: 1,
+      candidates: [{
+        ...guidanceQuestion("What capacity is required?"),
+        tool: "create_task",
+      }],
+    }),
+    context,
+    adapters,
+  );
+
+  assert.equal(accepted.status, "insights");
+  assert.deepEqual(new Set(reads), new Set(["createId", "now"]));
+  assert.equal(rejectedToolField.status, "rejected");
+  assert.equal(rejectedToolField.rejections[0]?.reason, "invalid_candidate");
 });
 
 test("failed generations use a short bounded retry interval", () => {
@@ -475,7 +520,7 @@ test("admission distinguishes a strict no-op envelope from a parse failure", () 
 test("raw JSON integer spellings follow numeric value semantics", () => {
   const context = buildContext({ segments: [segment(1, "Capacity is reserved.")] });
 
-  for (const version of ["1.0", "1e0"]) {
+  for (const version of ["1", "1.0", "1e0"]) {
     const result = coachPolicy.admit(
       `{"contract_version":${version},"candidates":[]}`,
       context,
@@ -484,7 +529,7 @@ test("raw JSON integer spellings follow numeric value semantics", () => {
     assert.equal(result.status, "no_op", `contract_version ${version}`);
   }
 
-  for (const sourceID of ["1.0", "1e0"]) {
+  for (const sourceID of ["1", "1.0", "1e0"]) {
     const result = coachPolicy.admit(
       `{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":${sourceID},"quote":"Capacity is reserved."}],"priority":"high","topic":"capacity"}]}`,
       context,
@@ -493,7 +538,7 @@ test("raw JSON integer spellings follow numeric value semantics", () => {
     assert.equal(result.status, "insights", `source_segment_id ${sourceID}`);
   }
 
-  for (const version of ["true", "1.5"]) {
+  for (const version of ["true", "1.5", "9007199254740992"]) {
     const result = coachPolicy.admit(
       `{"contract_version":${version},"candidates":[]}`,
       context,
@@ -503,7 +548,7 @@ test("raw JSON integer spellings follow numeric value semantics", () => {
     assert.equal(result.rejections[0]?.reason, "invalid_envelope");
   }
 
-  for (const sourceID of ["true", "1.5"]) {
+  for (const sourceID of ["true", "1.5", "9007199254740992"]) {
     const result = coachPolicy.admit(
       `{"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":${sourceID},"quote":"Capacity is reserved."}],"priority":"high","topic":"capacity"}]}`,
       context,
@@ -511,6 +556,80 @@ test("raw JSON integer spellings follow numeric value semantics", () => {
     );
     assert.equal(result.status, "rejected", `source_segment_id ${sourceID}`);
     assert.equal(result.rejections[0]?.reason, "invalid_evidence");
+  }
+});
+
+test("raw JSON duplicate keys fail closed at every contract depth", () => {
+  const context = buildContext({ segments: [segment(1, "Capacity is reserved.")] });
+  const probes = [
+    {
+      label: "envelope",
+      output: "{\"contract_version\":2,\"contract_version\":1,\"candidates\":[]}",
+      reason: "invalid_envelope",
+    },
+    {
+      label: "candidate",
+      output: "{\"contract_version\":1,\"candidates\":[{\"kind\":\"guidance_question\",\"directive\":\"ask\",\"question\":\"This is not safe\",\"\\u0071uestion\":\"What capacity is reserved?\",\"priority\":\"high\",\"topic\":\"capacity\"}]}",
+      reason: "invalid_candidate",
+    },
+    {
+      label: "evidence",
+      output: "{\"contract_version\":1,\"candidates\":[{\"kind\":\"transcript_quote\",\"presentation\":\"observation\",\"evidence_quotes\":[{\"source_segment_id\":1,\"quote\":\"Capacity\",\"quote\":\"Capacity is reserved.\"}],\"priority\":\"high\",\"topic\":\"capacity\"}]}",
+      reason: "invalid_evidence",
+    },
+  ];
+
+  for (const probe of probes) {
+    const result = coachPolicy.admit(probe.output, context, fixedAdapters);
+    assert.equal(result.status, "rejected", probe.label);
+    assert.deepEqual(result.insights, [], probe.label);
+    assert.equal(result.rejections[0]?.reason, probe.reason, probe.label);
+  }
+});
+
+test("raw JSON rounded numeric attacks are rejected before JSON.parse value coercion", () => {
+  const unitContext = buildContext({ segments: [segment(1, "Capacity is reserved.")] });
+  const maxSafeContext = buildContext({
+    segments: [segment(Number.MAX_SAFE_INTEGER, "Capacity is reserved.")],
+  });
+  const probes = [
+    {
+      label: "rounded contract version",
+      output: "{\"contract_version\":0.99999999999999999,\"candidates\":[]}",
+      context: unitContext,
+      reason: "invalid_envelope",
+    },
+    {
+      label: "rounded unit source id",
+      output: "{\"contract_version\":1,\"candidates\":[{\"kind\":\"transcript_quote\",\"presentation\":\"observation\",\"evidence_quotes\":[{\"source_segment_id\":1.00000000000000001,\"quote\":\"Capacity is reserved.\"}],\"priority\":\"high\",\"topic\":\"capacity\"}]}",
+      context: unitContext,
+      reason: "invalid_evidence",
+    },
+    {
+      label: "rounded max-safe source id",
+      output: "{\"contract_version\":1,\"candidates\":[{\"kind\":\"transcript_quote\",\"presentation\":\"observation\",\"evidence_quotes\":[{\"source_segment_id\":9007199254740991.1,\"quote\":\"Capacity is reserved.\"}],\"priority\":\"high\",\"topic\":\"capacity\"}]}",
+      context: maxSafeContext,
+      reason: "invalid_evidence",
+    },
+    {
+      label: "non-finite contract number",
+      output: "{\"contract_version\":1e9999,\"candidates\":[]}",
+      context: unitContext,
+      reason: "invalid_envelope",
+    },
+    {
+      label: "non-finite source id",
+      output: "{\"contract_version\":1,\"candidates\":[{\"kind\":\"transcript_quote\",\"presentation\":\"observation\",\"evidence_quotes\":[{\"source_segment_id\":1e9999,\"quote\":\"Capacity is reserved.\"}],\"priority\":\"high\",\"topic\":\"capacity\"}]}",
+      context: unitContext,
+      reason: "invalid_evidence",
+    },
+  ];
+
+  for (const probe of probes) {
+    const result = coachPolicy.admit(probe.output, probe.context, fixedAdapters);
+    assert.equal(result.status, "rejected", probe.label);
+    assert.deepEqual(result.insights, [], probe.label);
+    assert.equal(result.rejections[0]?.reason, probe.reason, probe.label);
   }
 });
 
@@ -522,8 +641,23 @@ test("shared coach admission corpus metadata remains frozen at v1", () => {
 
 for (const contractCase of coachAdmissionCorpus.cases) {
   test(`shared coach admission contract: ${contractCase.id}`, () => {
-    const sideEffects = { task_creations: 0, tool_calls: 0 };
     let nextID = 0;
+    const unexpectedCapabilities = [];
+    const adapters = new Proxy(
+      {
+        createId: () => `corpus-insight-${nextID += 1}`,
+        now: fixedAdapters.now,
+      },
+      {
+        get(target, property, receiver) {
+          if (!Reflect.has(target, property)) {
+            unexpectedCapabilities.push(String(property));
+            throw new Error(`Unexpected admission capability: ${String(property)}`);
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
     const context = buildContext({
       segments: contractCase.transcript_segments.map(({ source_segment_id, text }) =>
         segment(source_segment_id, text),
@@ -532,16 +666,7 @@ for (const contractCase of coachAdmissionCorpus.cases) {
     const result = coachPolicy.admit(
       JSON.stringify(contractCase.model_output),
       context,
-      {
-        createId: () => `corpus-insight-${nextID += 1}`,
-        now: fixedAdapters.now,
-        createTask: () => {
-          sideEffects.task_creations += 1;
-        },
-        callTool: () => {
-          sideEffects.tool_calls += 1;
-        },
-      },
+      adapters,
     );
 
     const actualOutcome = result.status === "insights" ? "accepted" : result.status;
@@ -554,7 +679,8 @@ for (const contractCase of coachAdmissionCorpus.cases) {
       result.status === "rejected" ? result.rejections[0]?.reason ?? null : null,
       contractCase.expected.rejection_category,
     );
-    assert.deepEqual(sideEffects, contractCase.expected.side_effects);
+    assert.deepEqual(unexpectedCapabilities, []);
+    assert.ok(Object.values(contractCase.expected.side_effects).every((count) => count === 0));
     assert.ok(result.insights.every((insight) => insight.type !== "technical_answer"));
     assert.ok(result.insights.every((insight) => insight.basis !== "domain_knowledge"));
   });
@@ -658,7 +784,7 @@ test("admission enforces the session budget", () => {
 });
 
 test("chat messages remain presentable without increasing automatic insight counts", () => {
-  const automatic = Array.from({ length: 12 }, (_, index) =>
+  const automatic = Array.from({ length: 10 }, (_, index) =>
     autoInsight(`Active automatic insight ${index}`),
   );
   const history = [
@@ -677,8 +803,8 @@ test("chat messages remain presentable without increasing automatic insight coun
   const groups = coachPolicy.partitionPresentation(presentation);
   const context = buildContext({ priorAutoInsights: presentation });
 
-  assert.equal(presentation.length, 16);
-  assert.equal(coachPolicy.countAutomaticInsights(presentation), 14);
+  assert.equal(presentation.length, 14);
+  assert.equal(coachPolicy.countAutomaticInsights(presentation), 12);
   assert.equal(context.sessionInsightCount, 12);
   assert.equal(groups.activeAutoInsights.length, coachPolicy.limits.maxSessionInsights);
   assert.deepEqual(groups.history.map((item) => item.lifecycle), ["dismissed", "resolved"]);
@@ -709,6 +835,119 @@ test("chat messages remain presentable without increasing automatic insight coun
   assert.match(coachPanelSource, /aria-label="Resolve insight"/);
   assert.match(coachPanelSource, /onSelectSource\?\./);
   assert.match(coachPanelSource, /item\.onLifecycleChange\?\./);
+});
+
+test("complete session novelty survives bounded prompt-history truncation", () => {
+  const oldest = autoInsight("Ask: What latency percentile defines launch readiness?", {
+    lifecycle: "active",
+  });
+  const laterHistory = Array.from({ length: 11 }, (_, index) =>
+    autoInsight(`Dismissed session insight ${index}`, {
+      id: `dismissed-${index}`,
+      lifecycle: "dismissed",
+    }),
+  );
+  const context = buildContext({ priorAutoInsights: [oldest, ...laterHistory] });
+  const prompt = coachPolicy.buildAutoMessages(context)[1].content;
+
+  assert.equal(context.priorAutoInsights.length, coachPolicy.limits.maxPriorAutoInsights);
+  assert.equal(context.priorAutoInsights.some((item) => item.id === oldest.id), false);
+  assert.equal(prompt.includes(oldest.content), false);
+  assert.equal(context.sessionNoveltyContents.length, 12);
+  assert.equal(context.sessionNoveltyContents.includes(oldest.content), true);
+  assert.equal(context.sessionInsightCount, 12);
+
+  const exact = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("What latency percentile defines launch readiness?", {
+        topic: "launch-latency",
+      }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+  const near = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("What latency percentile defines launch readiness now?", {
+        topic: "launch-latency-near",
+      }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+
+  assert.equal(exact.status, "rejected");
+  assert.equal(exact.rejections[0]?.reason, "duplicate");
+  assert.equal(near.status, "rejected");
+  assert.equal(near.rejections[0]?.reason, "duplicate");
+});
+
+test("lifetime session budget counts dismissed and resolved auto-insights", () => {
+  const history = Array.from({ length: coachPolicy.limits.maxSessionInsights }, (_, index) =>
+    autoInsight(`Historical automatic insight ${index}`, {
+      id: `history-${index}`,
+      lifecycle: index % 2 === 0 ? "dismissed" : "resolved",
+    }),
+  );
+  const context = buildContext({ priorAutoInsights: history });
+  const result = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("Who owns the new capacity decision?", {
+        topic: "new-capacity-owner",
+      }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+
+  assert.equal(context.sessionInsightCount, coachPolicy.limits.maxSessionInsights);
+  assert.equal(result.status, "rejected");
+  assert.equal(result.rejections[0]?.reason, "session_budget");
+});
+
+test("restoring history is a no-op when ten automatic insights are active", () => {
+  const active = Array.from({ length: coachPolicy.limits.maxSessionInsights }, (_, index) =>
+    autoInsight(`Active insight ${index}`, { id: `active-${index}`, lifecycle: "active" }),
+  );
+  const history = autoInsight("Dismissed insight", {
+    id: "restore-target",
+    lifecycle: "dismissed",
+  });
+  const blocked = coachPolicy.transitionInsightLifecycle(
+    [...active, history],
+    history.id,
+    "active",
+  );
+
+  assert.equal(blocked.status, "no_op");
+  assert.equal(blocked.reason, "active_budget");
+  assert.equal(blocked.insights.find((item) => item.id === history.id)?.lifecycle, "dismissed");
+  assert.equal(coachPolicy.partitionPresentation(blocked.insights).activeAutoInsights.length, 10);
+
+  const allowed = coachPolicy.transitionInsightLifecycle(
+    [...active.slice(0, -1), history],
+    history.id,
+    "active",
+  );
+  assert.equal(allowed.status, "changed");
+  assert.equal(allowed.insights.find((item) => item.id === history.id)?.lifecycle, "active");
+  assert.equal(coachPolicy.partitionPresentation(allowed.insights).activeAutoInsights.length, 10);
+  assert.equal(
+    coachPolicy.partitionPresentation([
+      ...active,
+      { ...history, lifecycle: "active" },
+    ]).activeAutoInsights.length,
+    11,
+  );
+
+  const coachPanelSource = readFileSync(
+    new URL("./src/components/CoachPanel.tsx", import.meta.url),
+    "utf8",
+  );
+  const hookSource = readFileSync(new URL("./src/lib/useAICoach.ts", import.meta.url), "utf8");
+  assert.match(coachPanelSource, /transitionInsightLifecycle/);
+  assert.match(coachPanelSource, /transition\.status !== "changed"/);
+  assert.match(hookSource, /transitionInsightLifecycle/);
 });
 
 test("admission rejects exact and near-duplicate derived guidance", () => {
@@ -772,6 +1011,39 @@ test("dedupe matches native Jaccard 0.82 tokenization without containment", () =
   );
   assert.equal(nativeNearDuplicate.status, "rejected");
   assert.equal(nativeNearDuplicate.rejections[0]?.reason, "duplicate");
+});
+
+test("dedupe stemming uses native Unicode grapheme counts for non-BMP letters", () => {
+  const common = "alpha bravo charlie delta echo";
+  const suffixSBoundary = coachPolicy.contentSimilarity(
+    `${common} 𐐨as`,
+    `${common} 𐐨a`,
+  );
+  const suffixIngBoundary = coachPolicy.contentSimilarity(
+    `${common} 𐐨aing`,
+    `${common} 𐐨a`,
+  );
+
+  assert.ok(Math.abs(suffixSBoundary - (5 / 7)) < Number.EPSILON);
+  assert.ok(Math.abs(suffixIngBoundary - (5 / 7)) < Number.EPSILON);
+  assert.ok(suffixSBoundary < coachPolicy.dedupe.nearDuplicateThreshold);
+  assert.ok(suffixIngBoundary < coachPolicy.dedupe.nearDuplicateThreshold);
+
+  const context = buildContext({
+    priorAutoInsights: [
+      autoInsight(`Ask: What ${common} 𐐨as?`),
+    ],
+  });
+  const result = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion(`What ${common} 𐐨a?`, {
+        topic: "unicode-dedupe-boundary",
+      }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+  assert.equal(result.status, "insights");
 });
 
 test("admission prioritizes critical guidance and cools repeated topics", () => {
@@ -937,4 +1209,49 @@ test("deterministic 50-minute replay stays bounded, isolated, and deduplicated",
   assert.equal(duplicateUserQuestions, 0);
   assert.equal(staleCrossSessionResponses, 0);
   assert.equal(nearDuplicateClusters, 0);
+});
+
+test("fifty dismiss-after-admission rounds retain the lifetime emission budget", () => {
+  let insights = [];
+  let emitted = 0;
+
+  for (let round = 0; round < 50; round += 1) {
+    const context = buildContext({ priorAutoInsights: insights });
+    const result = coachPolicy.admit(
+      strictEnvelope([
+        guidanceQuestion(`What decision owner applies to replay round ${round}?`, {
+          topic: `dismiss-replay-${round}`,
+        }),
+      ]),
+      context,
+      {
+        createId: () => `dismiss-replay-insight-${round}`,
+        now: () => new Date(Date.UTC(2026, 6, 22, 16, round)),
+      },
+    );
+
+    if (result.status === "insights") {
+      emitted += result.insights.length;
+      insights = [
+        ...insights,
+        ...result.insights.map((insight) => ({ ...insight, lifecycle: "dismissed" })),
+      ];
+    }
+  }
+
+  assert.equal(emitted, coachPolicy.limits.maxSessionInsights);
+  assert.equal(insights.length, coachPolicy.limits.maxSessionInsights);
+  assert.equal(coachPolicy.partitionPresentation(insights).activeAutoInsights.length, 0);
+
+  const repeat = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion("What decision owner applies to replay round 0?", {
+        topic: "dismiss-replay-repeat",
+      }),
+    ]),
+    buildContext({ priorAutoInsights: insights }),
+    fixedAdapters,
+  );
+  assert.equal(repeat.status, "rejected");
+  assert.equal(repeat.rejections[0]?.reason, "duplicate");
 });

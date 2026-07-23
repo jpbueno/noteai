@@ -2,6 +2,7 @@ import type {
   CoachInsight,
   CoachInsightBasis,
   CoachInsightEvidence,
+  CoachInsightLifecycle,
   CoachInsightPriority,
   CoachInsightType,
   TranscriptSegment,
@@ -31,12 +32,13 @@ export interface CoachContextInsight {
   basis?: CoachInsightBasis;
   evidence?: CoachInsightEvidence[];
   topic?: string;
-  lifecycle?: "active" | "dismissed" | "resolved" | "expired";
+  lifecycle?: CoachInsightLifecycle;
 }
 
 export interface CoachContext {
   transcriptSegments: CoachContextSegment[];
   priorAutoInsights: CoachContextInsight[];
+  sessionNoveltyContents: string[];
   sessionInsightCount: number;
 }
 
@@ -131,6 +133,17 @@ export interface CoachPresentationGroups {
   chatMessages: CoachInsight[];
 }
 
+export type CoachLifecycleTransitionResult =
+  | {
+      status: "changed";
+      insights: CoachInsight[];
+    }
+  | {
+      status: "no_op";
+      reason: "not_found" | "unchanged" | "active_budget";
+      insights: CoachInsight[];
+    };
+
 const LIMITS = Object.freeze({
   maxTranscriptSegments: 24,
   maxTranscriptCharacters: 9_000,
@@ -150,6 +163,9 @@ const LIMITS = Object.freeze({
 
 const DEDUPE = Object.freeze({
   nearDuplicateThreshold: 0.82,
+});
+const DEDUPE_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
 });
 
 const CADENCE = Object.freeze({
@@ -342,13 +358,20 @@ export const coachPolicy = {
     const automaticInsights = entries.filter(isAutomaticInsight);
     return {
       activeAutoInsights: automaticInsights
-        .filter((entry) => (entry.lifecycle ?? "active") === "active")
-        .slice(-LIMITS.maxSessionInsights),
+        .filter((entry) => (entry.lifecycle ?? "active") === "active"),
       history: automaticInsights.filter(
         (entry) => (entry.lifecycle ?? "active") !== "active",
       ),
       chatMessages: entries.filter(isChatMessage),
     };
+  },
+
+  transitionInsightLifecycle(
+    entries: CoachInsight[],
+    insightID: string,
+    lifecycle: CoachInsightLifecycle,
+  ): CoachLifecycleTransitionResult {
+    return transitionInsightLifecycle(entries, insightID, lifecycle);
   },
 
   countAutomaticInsights(entries: CoachInsight[]): number {
@@ -376,9 +399,8 @@ export const coachPolicy = {
       priorAutoInsights: autoInsights
         .slice(-LIMITS.maxPriorAutoInsights)
         .map(toContextInsight),
-      sessionInsightCount: autoInsights.filter(
-        (insight) => (insight.lifecycle ?? "active") === "active",
-      ).length,
+      sessionNoveltyContents: autoInsights.map((insight) => insight.content),
+      sessionInsightCount: autoInsights.length,
     });
   },
 
@@ -433,7 +455,9 @@ export const coachPolicy = {
 
     const accepted: CoachInsight[] = [];
     const rejections: CoachAdmissionRejection[] = [];
-    const comparisonContents = context.priorAutoInsights.map((insight) => insight.content);
+    const comparisonContents = Array.isArray(context.sessionNoveltyContents)
+      ? context.sessionNoveltyContents.filter((content) => typeof content === "string")
+      : context.priorAutoInsights.map((insight) => insight.content);
 
     const prioritizedCandidates = validatedCandidates
       .sort((left, right) => candidatePriorityRank(right.candidate) - candidatePriorityRank(left.candidate));
@@ -654,6 +678,42 @@ function isChatMessage(entry: CoachInsight): boolean {
   return entry.role === "user" || entry.role === "assistant";
 }
 
+function transitionInsightLifecycle(
+  entries: CoachInsight[],
+  insightID: string,
+  lifecycle: CoachInsightLifecycle,
+): CoachLifecycleTransitionResult {
+  const target = entries.find(
+    (entry) => isAutomaticInsight(entry) && entry.id === insightID,
+  );
+  if (!target) {
+    return { status: "no_op", reason: "not_found", insights: entries };
+  }
+
+  const currentLifecycle = target.lifecycle ?? "active";
+  if (currentLifecycle === lifecycle) {
+    return { status: "no_op", reason: "unchanged", insights: entries };
+  }
+  if (
+    lifecycle === "active"
+    && currentLifecycle !== "active"
+    && entries.filter(
+      (entry) => isAutomaticInsight(entry) && (entry.lifecycle ?? "active") === "active",
+    ).length >= LIMITS.maxSessionInsights
+  ) {
+    return { status: "no_op", reason: "active_budget", insights: entries };
+  }
+
+  return {
+    status: "changed",
+    insights: entries.map((entry) =>
+      isAutomaticInsight(entry) && entry.id === insightID
+        ? { ...entry, lifecycle }
+        : entry,
+    ),
+  };
+}
+
 function boundTranscriptSegments(segments: TranscriptSegment[]): CoachContextSegment[] {
   const bounded: CoachContextSegment[] = [];
   let characterCount = 0;
@@ -749,6 +809,9 @@ function fitContextToMessageLimit(context: CoachContext): CoachContext {
       ...insight,
       ...(insight.evidence ? { evidence: insight.evidence.map((item) => ({ ...item })) } : {}),
     })),
+    sessionNoveltyContents: Array.isArray(context.sessionNoveltyContents)
+      ? [...context.sessionNoveltyContents]
+      : context.priorAutoInsights.map((insight) => insight.content),
     sessionInsightCount: context.sessionInsightCount,
   };
   const jsonLimit = LIMITS.maxContextMessageCharacters - MAX_CONTEXT_PREFIX_LENGTH;
@@ -786,13 +849,287 @@ function fitContextToMessageLimit(context: CoachContext): CoachContext {
   return fitted;
 }
 
+type StrictJSONContractContext = "envelope" | "candidate" | "evidence";
+type StrictJSONRejectionReason = "invalid_envelope" | "invalid_candidate" | "invalid_evidence";
+
+class StrictJSONSyntaxError extends Error {}
+
+class StrictJSONContractError extends Error {
+  readonly reason: StrictJSONRejectionReason;
+
+  constructor(reason: StrictJSONRejectionReason) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+class StrictJSONPreflightParser {
+  private index = 0;
+  private readonly source: string;
+
+  constructor(source: string) {
+    this.source = source;
+  }
+
+  parse(): void {
+    this.skipWhitespace();
+    this.parseValue("envelope");
+    this.skipWhitespace();
+    if (this.index !== this.source.length) this.syntaxError();
+  }
+
+  private parseValue(context: StrictJSONContractContext): void {
+    this.skipWhitespace();
+    const character = this.source[this.index];
+    if (character === "{") {
+      this.parseObject(context);
+      return;
+    }
+    if (character === "[") {
+      this.parseArray(context);
+      return;
+    }
+    if (character === "\"") {
+      this.parseString();
+      return;
+    }
+    if (character === "-" || isASCIIDigit(character)) {
+      this.parseNumber();
+      return;
+    }
+    if (this.consumeLiteral("true") || this.consumeLiteral("false") || this.consumeLiteral("null")) {
+      return;
+    }
+    this.syntaxError();
+  }
+
+  private parseObject(context: StrictJSONContractContext): void {
+    this.index += 1;
+    this.skipWhitespace();
+    if (this.source[this.index] === "}") {
+      this.index += 1;
+      return;
+    }
+
+    const keys = new Set<string>();
+    while (this.index < this.source.length) {
+      if (this.source[this.index] !== "\"") this.syntaxError();
+      const key = this.parseString();
+      if (keys.has(key)) {
+        throw new StrictJSONContractError(rejectionReasonForContext(context));
+      }
+      keys.add(key);
+
+      this.skipWhitespace();
+      if (this.source[this.index] !== ":") this.syntaxError();
+      this.index += 1;
+      this.skipWhitespace();
+
+      const childContext = childContractContext(context, key);
+      if (
+        (context === "envelope" && key === "contract_version")
+        || (context === "evidence" && key === "source_segment_id")
+      ) {
+        this.parseIntegerContractValue(
+          context === "evidence" ? "invalid_evidence" : "invalid_envelope",
+          childContext,
+        );
+      } else {
+        this.parseValue(childContext);
+      }
+
+      this.skipWhitespace();
+      if (this.source[this.index] === "}") {
+        this.index += 1;
+        return;
+      }
+      if (this.source[this.index] !== ",") this.syntaxError();
+      this.index += 1;
+      this.skipWhitespace();
+    }
+    this.syntaxError();
+  }
+
+  private parseArray(context: StrictJSONContractContext): void {
+    this.index += 1;
+    this.skipWhitespace();
+    if (this.source[this.index] === "]") {
+      this.index += 1;
+      return;
+    }
+
+    while (this.index < this.source.length) {
+      this.parseValue(context);
+      this.skipWhitespace();
+      if (this.source[this.index] === "]") {
+        this.index += 1;
+        return;
+      }
+      if (this.source[this.index] !== ",") this.syntaxError();
+      this.index += 1;
+      this.skipWhitespace();
+    }
+    this.syntaxError();
+  }
+
+  private parseIntegerContractValue(
+    rejectionReason: StrictJSONRejectionReason,
+    context: StrictJSONContractContext,
+  ): void {
+    const character = this.source[this.index];
+    if (character !== "-" && !isASCIIDigit(character)) {
+      this.parseValue(context);
+      return;
+    }
+
+    const token = this.parseNumber();
+    if (!isExactSafeIntegerJSONNumber(token)) {
+      throw new StrictJSONContractError(rejectionReason);
+    }
+  }
+
+  private parseString(): string {
+    const start = this.index;
+    this.index += 1;
+
+    while (this.index < this.source.length) {
+      const character = this.source[this.index];
+      if (character === "\"") {
+        this.index += 1;
+        try {
+          return JSON.parse(this.source.slice(start, this.index));
+        } catch {
+          this.syntaxError();
+        }
+      }
+      if (character === "\\") {
+        this.index += 1;
+        const escape = this.source[this.index];
+        if (escape === "u") {
+          const digits = this.source.slice(this.index + 1, this.index + 5);
+          if (digits.length !== 4 || !/^[0-9a-fA-F]{4}$/.test(digits)) this.syntaxError();
+          this.index += 5;
+          continue;
+        }
+        if (!escape || !"\"\\/bfnrt".includes(escape)) this.syntaxError();
+        this.index += 1;
+        continue;
+      }
+      if (character.charCodeAt(0) <= 0x1F) this.syntaxError();
+      this.index += 1;
+    }
+    this.syntaxError();
+  }
+
+  private parseNumber(): string {
+    const match = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(
+      this.source.slice(this.index),
+    );
+    if (!match) this.syntaxError();
+    this.index += match[0].length;
+    return match[0];
+  }
+
+  private consumeLiteral(literal: "true" | "false" | "null"): boolean {
+    if (!this.source.startsWith(literal, this.index)) return false;
+    this.index += literal.length;
+    return true;
+  }
+
+  private skipWhitespace(): void {
+    while (
+      this.source[this.index] === " "
+      || this.source[this.index] === "\t"
+      || this.source[this.index] === "\r"
+      || this.source[this.index] === "\n"
+    ) {
+      this.index += 1;
+    }
+  }
+
+  private syntaxError(): never {
+    throw new StrictJSONSyntaxError();
+  }
+}
+
+function preflightStrictJSON(output: string):
+  | { ok: true }
+  | { ok: false; kind: "syntax" }
+  | { ok: false; kind: "contract"; reason: StrictJSONRejectionReason } {
+  try {
+    new StrictJSONPreflightParser(output).parse();
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof StrictJSONContractError) {
+      return { ok: false, kind: "contract", reason: error.reason };
+    }
+    return { ok: false, kind: "syntax" };
+  }
+}
+
+function childContractContext(
+  context: StrictJSONContractContext,
+  key: string,
+): StrictJSONContractContext {
+  if (context === "envelope" && key === "candidates") return "candidate";
+  if (context === "candidate" && key === "evidence_quotes") return "evidence";
+  return context;
+}
+
+function rejectionReasonForContext(context: StrictJSONContractContext): StrictJSONRejectionReason {
+  if (context === "candidate") return "invalid_candidate";
+  if (context === "evidence") return "invalid_evidence";
+  return "invalid_envelope";
+}
+
+function isASCIIDigit(value: string | undefined): boolean {
+  return value !== undefined && value >= "0" && value <= "9";
+}
+
+function isExactSafeIntegerJSONNumber(token: string): boolean {
+  const match = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+  if (!match) return false;
+
+  const fraction = match[3] ?? "";
+  const coefficient = `${match[2]}${fraction}`.replace(/^0+/, "") || "0";
+  if (coefficient === "0") return true;
+
+  const exponent = clampedDecimalExponent(match[4]);
+  const decimalPlaces = fraction.length - exponent;
+  let integerDigits: string;
+  if (decimalPlaces > 0) {
+    const trailingZeroCount = coefficient.length - coefficient.replace(/0+$/, "").length;
+    if (decimalPlaces > trailingZeroCount) return false;
+    integerDigits = coefficient.slice(0, coefficient.length - decimalPlaces);
+  } else {
+    const appendedZeroCount = -decimalPlaces;
+    if (coefficient.length + appendedZeroCount > MAX_SAFE_INTEGER_DIGITS.length) return false;
+    integerDigits = `${coefficient}${"0".repeat(appendedZeroCount)}`;
+  }
+
+  if (integerDigits.length < MAX_SAFE_INTEGER_DIGITS.length) return true;
+  if (integerDigits.length > MAX_SAFE_INTEGER_DIGITS.length) return false;
+  return integerDigits <= MAX_SAFE_INTEGER_DIGITS;
+}
+
+function clampedDecimalExponent(value: string | undefined): number {
+  if (!value) return 0;
+  const negative = value.startsWith("-");
+  const unsigned = value.replace(/^[+-]/, "").replace(/^0+/, "") || "0";
+  if (unsigned.length > 6) return negative ? -1_000_000 : 1_000_000;
+  const parsed = Number(unsigned);
+  return negative ? -parsed : parsed;
+}
+
+const MAX_SAFE_INTEGER_DIGITS = String(Number.MAX_SAFE_INTEGER);
+
 function parseModelOutput(output: string):
   | { ok: true; candidates: unknown[] }
   | { ok: false; kind: "parse_failure"; error: string }
   | {
       ok: false;
       kind: "rejected";
-      reason: "invalid_envelope" | "unsupported_version" | "too_many_candidates";
+      reason: StrictJSONRejectionReason | "unsupported_version" | "too_many_candidates";
     } {
   if (typeof output !== "string") {
     return { ok: false, kind: "parse_failure", error: "Model output was not a string." };
@@ -803,6 +1140,14 @@ function parseModelOutput(output: string):
       kind: "parse_failure",
       error: "Model output exceeded the JSON size limit.",
     };
+  }
+
+  const preflight = preflightStrictJSON(output);
+  if (!preflight.ok) {
+    if (preflight.kind === "contract") {
+      return { ok: false, kind: "rejected", reason: preflight.reason };
+    }
+    return { ok: false, kind: "parse_failure", error: "Model output was not valid JSON." };
   }
 
   let value: unknown;
@@ -1163,15 +1508,35 @@ function normalizedMeaningfulTokens(value: string): Set<string> {
 }
 
 function normalizedWords(value: string): string[] {
-  return value
-    .toLowerCase()
-    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words: string[] = [];
+  let currentWord = "";
+
+  for (const item of DEDUPE_GRAPHEME_SEGMENTER.segment(value.toLowerCase())) {
+    if (isNativeWordGrapheme(item.segment)) {
+      currentWord += item.segment;
+    } else if (currentWord) {
+      words.push(currentWord);
+      currentWord = "";
+    }
+  }
+  if (currentWord) words.push(currentWord);
+  return words;
 }
 
 function stemWord(word: string): string {
-  if (word.length > 5 && word.endsWith("ing")) return word.slice(0, -3);
-  if (word.length > 3 && word.endsWith("s")) return word.slice(0, -1);
+  const characterCount = unicodeGraphemeCount(word);
+  if (characterCount > 5 && word.endsWith("ing")) return word.slice(0, -3);
+  if (characterCount > 3 && word.endsWith("s")) return word.slice(0, -1);
   return word;
+}
+
+function isNativeWordGrapheme(value: string): boolean {
+  return /[\p{L}\p{N}]/u.test(value)
+    && !/[^\p{L}\p{N}\p{M}\u200C\u200D]/u.test(value);
+}
+
+function unicodeGraphemeCount(value: string): number {
+  return Array.from(DEDUPE_GRAPHEME_SEGMENTER.segment(value)).length;
 }
 
 const DUPLICATE_STOP_WORDS = new Set([

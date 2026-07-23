@@ -45,7 +45,7 @@ type CoachView = "active" | "history" | "chat";
 
 interface CoachPanelProps {
   insights: Array<CoachInsight & {
-    onLifecycleChange?: (lifecycle: CoachInsightLifecycle) => void;
+    onLifecycleChange?: (lifecycle: CoachInsightLifecycle) => boolean;
   }>;
   isAnalyzing: boolean;
   isReplying?: boolean;
@@ -92,9 +92,15 @@ export default function CoachPanel({
   }, [visibleCount, view, isReplying]);
 
   const setLifecycle = (item: CoachInsight & {
-    onLifecycleChange?: (lifecycle: CoachInsightLifecycle) => void;
+    onLifecycleChange?: (lifecycle: CoachInsightLifecycle) => boolean;
   }, lifecycle: CoachInsightLifecycle) => {
-    item.onLifecycleChange?.(lifecycle);
+    const transition = coachPolicy.transitionInsightLifecycle(
+      effectiveInsights,
+      item.id,
+      lifecycle,
+    );
+    if (transition.status !== "changed") return;
+    if (item.onLifecycleChange?.(lifecycle) === false) return;
     setLifecycleOverrides((previous) => ({ ...previous, [item.id]: lifecycle }));
     if (lifecycle !== "active") {
       setPinnedIDs((previous) => {

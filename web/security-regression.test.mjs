@@ -86,6 +86,7 @@ test("provider API keys are write-only from browser settings APIs", () => {
 test("cost-bearing AI endpoints enforce local request bounds", () => {
   const aiClient = read("./src/lib/ai.ts");
   const chatRoute = read("./src/app/api/chat/route.ts");
+  const upstreamAbort = read("./src/lib/upstream-abort.ts");
   const transcribeRoute = read("./src/app/api/transcribe/route.ts");
   const ttsRoute = read("./src/app/api/tts/route.ts");
 
@@ -94,7 +95,10 @@ test("cost-bearing AI endpoints enforce local request bounds", () => {
   assert.match(chatRoute, /MAX_CHAT_MESSAGES/);
   assert.match(chatRoute, /MAX_CHAT_TOKENS/);
   assert.match(chatRoute, /CHAT_UPSTREAM_TIMEOUT_MS\s*=\s*60_000/);
-  assert.match(chatRoute, /controller\.abort\(\)/);
+  assert.match(chatRoute, /createUpstreamAbortScope\(request\.signal, CHAT_UPSTREAM_TIMEOUT_MS\)/);
+  assert.match(chatRoute, /signal: abortScope\.signal/);
+  assert.match(upstreamAbort, /requestSignal\.addEventListener\("abort"/);
+  assert.match(upstreamAbort, /controller\.abort\(\)/);
   assert.match(chatRoute, /returned an empty response/);
   assert.match(chatRoute, /supportsTemperature/);
   assert.match(chatRoute, /model\.startsWith\("aws\/anthropic\/"\)/);

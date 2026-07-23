@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
+import { createUpstreamAbortScope } from "@/lib/upstream-abort";
 
 const ENDPOINTS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
@@ -152,17 +153,25 @@ export async function POST(request: NextRequest) {
       body = JSON.stringify(payload);
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CHAT_UPSTREAM_TIMEOUT_MS);
+    const abortScope = createUpstreamAbortScope(request.signal, CHAT_UPSTREAM_TIMEOUT_MS);
     let response: Response;
     try {
       response = await fetch(endpoint, {
         method: "POST",
         headers,
         body,
-        signal: controller.signal,
+        signal: abortScope.signal,
       });
     } catch (err) {
+      if (abortScope.cause() === "timeout") {
+        return NextResponse.json(
+          { error: "LLM request timed out. Try again or choose a faster model." },
+          { status: 504 },
+        );
+      }
+      if (abortScope.cause() === "request") {
+        return NextResponse.json({ error: "Request cancelled" }, { status: 499 });
+      }
       if (err instanceof Error && err.name === "AbortError") {
         return NextResponse.json(
           { error: "LLM request timed out. Try again or choose a faster model." },
@@ -171,7 +180,7 @@ export async function POST(request: NextRequest) {
       }
       throw err;
     } finally {
-      clearTimeout(timeout);
+      abortScope.dispose();
     }
 
     if (!response.ok) {

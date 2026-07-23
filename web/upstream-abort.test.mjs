@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { createUpstreamAbortScope } from "./src/lib/upstream-abort.ts";
+import {
+  consumeUpstreamResponse,
+  createUpstreamAbortScope,
+  UpstreamAbortError,
+} from "./src/lib/upstream-abort.ts";
 
 function controlledScheduler() {
   let callback = null;
@@ -27,6 +31,23 @@ function controlledScheduler() {
       return cleared;
     },
   };
+}
+
+function abortError() {
+  const error = new Error("body read aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function pendingBody(signal, onStarted) {
+  onStarted();
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(abortError());
+      return;
+    }
+    signal.addEventListener("abort", () => reject(abortError()), { once: true });
+  });
 }
 
 test("request cancellation aborts the provider signal without becoming a timeout", () => {
@@ -71,15 +92,74 @@ test("an already-aborted request creates an immediately cancelled provider scope
   assert.equal(scheduler.wasCleared(), false);
 });
 
-test("chat route uses the production abort scope for provider fetch", () => {
+test("request cancellation remains active after success headers while JSON is pending", async () => {
+  const request = new AbortController();
+  const scheduler = controlledScheduler();
+  let bodyStartedResolve;
+  const bodyStarted = new Promise((resolve) => {
+    bodyStartedResolve = resolve;
+  });
+
+  const operation = consumeUpstreamResponse(
+    request.signal,
+    60_000,
+    async (signal) => ({
+      ok: true,
+      json: () => pendingBody(signal, bodyStartedResolve),
+    }),
+    scheduler.adapter,
+  );
+
+  await bodyStarted;
+  assert.equal(scheduler.wasCleared(), false);
+  request.abort();
+
+  await assert.rejects(
+    operation,
+    (error) => error instanceof UpstreamAbortError && error.abortCause === "request",
+  );
+  assert.equal(scheduler.wasCleared(), true);
+});
+
+test("timeout remains active after error headers while text is pending", async () => {
+  const request = new AbortController();
+  const scheduler = controlledScheduler();
+  let bodyStartedResolve;
+  const bodyStarted = new Promise((resolve) => {
+    bodyStartedResolve = resolve;
+  });
+
+  const operation = consumeUpstreamResponse(
+    request.signal,
+    60_000,
+    async (signal) => ({
+      ok: false,
+      status: 429,
+      text: () => pendingBody(signal, bodyStartedResolve),
+    }),
+    scheduler.adapter,
+  );
+
+  await bodyStarted;
+  assert.equal(scheduler.wasCleared(), false);
+  scheduler.fire();
+
+  await assert.rejects(
+    operation,
+    (error) => error instanceof UpstreamAbortError && error.abortCause === "timeout",
+  );
+  assert.equal(scheduler.wasCleared(), true);
+});
+
+test("chat route uses the production body-lifetime interface for provider fetch", () => {
   const routeSource = readFileSync(
     new URL("./src/app/api/chat/route.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(routeSource, /createUpstreamAbortScope\(request\.signal, CHAT_UPSTREAM_TIMEOUT_MS\)/);
-  assert.match(routeSource, /signal: abortScope\.signal/);
-  assert.match(routeSource, /abortScope\.cause\(\) === "timeout"/);
-  assert.match(routeSource, /abortScope\.cause\(\) === "request"/);
-  assert.match(routeSource, /abortScope\.dispose\(\)/);
+  assert.match(routeSource, /consumeUpstreamResponse\(/);
+  assert.match(routeSource, /request\.signal/);
+  assert.match(routeSource, /signal/);
+  assert.match(routeSource, /error\.abortCause === "timeout"/);
+  assert.match(routeSource, /error\.abortCause === "request"/);
 });

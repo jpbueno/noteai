@@ -1046,6 +1046,44 @@ test("dedupe stemming uses native Unicode grapheme counts for non-BMP letters", 
   assert.equal(result.status, "insights");
 });
 
+test("dedupe classifies extended graphemes like Swift Character word properties", () => {
+  const modifier = "\u{1F3FB}";
+  const modifierSimilarity = coachPolicy.contentSimilarity(
+    `Ask: What capacity${modifier}s?`,
+    `Ask: What capacity${modifier}?`,
+  );
+  const punctuationSimilarity = coachPolicy.contentSimilarity(
+    "Ask: What capacity!s?",
+    "Ask: What capacity!?",
+  );
+  const controlSimilarity = coachPolicy.contentSimilarity(
+    "Ask: What capacity\ts?",
+    "Ask: What capacity\t?",
+  );
+
+  assert.equal(modifierSimilarity, 1);
+  assert.ok(punctuationSimilarity < 1);
+  assert.ok(controlSimilarity < 1);
+
+  const context = buildContext({
+    priorAutoInsights: [
+      autoInsight(`Ask: What capacity${modifier}s?`),
+    ],
+  });
+  const result = coachPolicy.admit(
+    strictEnvelope([
+      guidanceQuestion(`What capacity${modifier}?`, {
+        topic: "unicode-modifier-dedupe",
+      }),
+    ]),
+    context,
+    fixedAdapters,
+  );
+
+  assert.equal(result.status, "rejected");
+  assert.equal(result.rejections[0]?.reason, "duplicate");
+});
+
 test("admission prioritizes critical guidance and cools repeated topics", () => {
   const priorAutoInsights = [autoInsight("Ask: What is the current p99 target?", {
     topic: "latency-slo",

@@ -1531,8 +1531,9 @@ function stemWord(word: string): string {
 }
 
 function isNativeWordGrapheme(value: string): boolean {
-  return /[\p{L}\p{N}]/u.test(value)
-    && !/[^\p{L}\p{N}\p{M}\u200C\u200D]/u.test(value);
+  // Swift Character word properties use the leading scalar's classification.
+  const leadingScalar = Array.from(value)[0];
+  return leadingScalar !== undefined && /[\p{L}\p{N}]/u.test(leadingScalar);
 }
 
 function unicodeGraphemeCount(value: string): number {

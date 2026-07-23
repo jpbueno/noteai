@@ -95,8 +95,9 @@ test("cost-bearing AI endpoints enforce local request bounds", () => {
   assert.match(chatRoute, /MAX_CHAT_MESSAGES/);
   assert.match(chatRoute, /MAX_CHAT_TOKENS/);
   assert.match(chatRoute, /CHAT_UPSTREAM_TIMEOUT_MS\s*=\s*60_000/);
-  assert.match(chatRoute, /createUpstreamAbortScope\(request\.signal, CHAT_UPSTREAM_TIMEOUT_MS\)/);
-  assert.match(chatRoute, /signal: abortScope\.signal/);
+  assert.match(chatRoute, /consumeUpstreamResponse\(/);
+  assert.match(chatRoute, /request\.signal/);
+  assert.match(upstreamAbort, /await operation\(scope\.signal\)/);
   assert.match(upstreamAbort, /requestSignal\.addEventListener\("abort"/);
   assert.match(upstreamAbort, /controller\.abort\(\)/);
   assert.match(chatRoute, /returned an empty response/);

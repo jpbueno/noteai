@@ -11,6 +11,20 @@ export interface UpstreamAbortScope {
   dispose: () => void;
 }
 
+export class UpstreamAbortError extends Error {
+  readonly abortCause: UpstreamAbortCause;
+
+  constructor(abortCause: UpstreamAbortCause) {
+    super(abortCause === "timeout" ? "Upstream request timed out" : "Request cancelled");
+    this.name = "UpstreamAbortError";
+    this.abortCause = abortCause;
+  }
+}
+
+export type ConsumedUpstreamResponse =
+  | { ok: true; data: unknown }
+  | { ok: false; status: number; text: string };
+
 const defaultScheduler: UpstreamAbortScheduler = {
   setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
   clearTimeout: (handle) => {
@@ -56,4 +70,50 @@ export function createUpstreamAbortScope(
       if (timeoutHandle !== null) scheduler.clearTimeout(timeoutHandle);
     },
   };
+}
+
+async function runWithUpstreamAbortScope<T>(
+  requestSignal: AbortSignal,
+  timeoutMs: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+  scheduler: UpstreamAbortScheduler = defaultScheduler,
+): Promise<T> {
+  const scope = createUpstreamAbortScope(requestSignal, timeoutMs, scheduler);
+  try {
+    const result = await operation(scope.signal);
+    const abortCause = scope.cause();
+    if (abortCause) throw new UpstreamAbortError(abortCause);
+    return result;
+  } catch (error) {
+    if (error instanceof UpstreamAbortError) throw error;
+    const abortCause = scope.cause();
+    if (abortCause) throw new UpstreamAbortError(abortCause);
+    throw error;
+  } finally {
+    scope.dispose();
+  }
+}
+
+export async function consumeUpstreamResponse(
+  requestSignal: AbortSignal,
+  timeoutMs: number,
+  fetchResponse: (signal: AbortSignal) => Promise<Response>,
+  scheduler: UpstreamAbortScheduler = defaultScheduler,
+): Promise<ConsumedUpstreamResponse> {
+  return runWithUpstreamAbortScope(
+    requestSignal,
+    timeoutMs,
+    async (signal) => {
+      const response = await fetchResponse(signal);
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          text: await response.text(),
+        };
+      }
+      return { ok: true, data: await response.json() };
+    },
+    scheduler,
+  );
 }

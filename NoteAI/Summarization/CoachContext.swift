@@ -229,17 +229,20 @@ struct CoachContext: Sendable {
 
             let remainingCharacters = policy.maxTranscriptCharacters - characterCount
             guard remainingCharacters > 0 else { break }
+            let speaker = boundedSpeaker(segment.speaker)
             let textCharacterCount = text.unicodeScalars.count
-            guard textCharacterCount <= remainingCharacters else { continue }
+            let excerptCharacterCount = textCharacterCount
+                + (speaker?.unicodeScalars.count ?? 0)
+            guard excerptCharacterCount <= remainingCharacters else { continue }
 
             excerpts.insert(CoachTranscriptExcerpt(
                 id: segment.id,
                 text: text,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
-                speaker: boundedSpeaker(segment.speaker)
+                speaker: speaker
             ), at: 0)
-            characterCount += textCharacterCount
+            characterCount += excerptCharacterCount
         }
 
         return excerpts
@@ -251,6 +254,6 @@ struct CoachContext: Sendable {
               CoachAutoAdmissionContractV1.isSafeTranscriptSourceText(trimmed) else {
             return nil
         }
-        return String(trimmed.prefix(policy.maxSpeakerCharacters))
+        return String(trimmed.unicodeScalars.prefix(policy.maxSpeakerCharacters))
     }
 }

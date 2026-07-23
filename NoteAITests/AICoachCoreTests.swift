@@ -226,6 +226,64 @@ final class AICoachContextTests: XCTestCase {
         XCTAssertFalse(request.rollingContext.contains("[3 "))
     }
 
+    func testTranscriptBudgetCountsSpeakerUnicodeScalarsAndOmitsWholeSegments() throws {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 0,
+            failureRetryInterval: 0,
+            maxRecentSegments: 6,
+            maxDeltaSegments: 6,
+            maxTranscriptCharacters: 10,
+            maxSpeakerCharacters: 20,
+            maxRollingContextCharacters: 120,
+            maxChatMessages: 4
+        ))
+        let combiningSpeaker = "e\u{0301}e\u{0301}e\u{0301}"
+        let oversizedCombiningSpeaker = combiningSpeaker + "e\u{0301}"
+        let transcript = [
+            TranscriptSegment(id: 1, text: "data", speaker: combiningSpeaker),
+            TranscriptSegment(id: 2, text: "data", speaker: oversizedCombiningSpeaker),
+        ]
+
+        let request = try XCTUnwrap(context.prepareAnalysis(
+            sessionID: UUID(),
+            transcript: transcript,
+            now: Date()
+        ))
+
+        XCTAssertEqual(request.recentTranscript.map(\.id), [1])
+        XCTAssertEqual(request.recentTranscript.first?.text, "data")
+        XCTAssertEqual(request.recentTranscript.first?.speaker, combiningSpeaker)
+        XCTAssertEqual(request.recentTranscript.first?.speaker?.unicodeScalars.count, 6)
+    }
+
+    func testSpeakerLimitUsesUnicodeScalarsRatherThanExtendedGraphemes() throws {
+        var context = CoachContext(policy: CoachContextPolicy(
+            minimumWordCount: 1,
+            minimumNewSegments: 1,
+            minimumAnalysisInterval: 0,
+            failureRetryInterval: 0,
+            maxRecentSegments: 6,
+            maxDeltaSegments: 6,
+            maxTranscriptCharacters: 100,
+            maxSpeakerCharacters: 6,
+            maxRollingContextCharacters: 120,
+            maxChatMessages: 4
+        ))
+        let speaker = "e\u{0301}e\u{0301}e\u{0301}e\u{0301}"
+
+        let request = try XCTUnwrap(context.prepareAnalysis(
+            sessionID: UUID(),
+            transcript: [TranscriptSegment(id: 1, text: "complete evidence", speaker: speaker)],
+            now: Date()
+        ))
+        let boundedSpeaker = try XCTUnwrap(request.recentTranscript.first?.speaker)
+
+        XCTAssertEqual(boundedSpeaker, "e\u{0301}e\u{0301}e\u{0301}")
+        XCTAssertEqual(boundedSpeaker.unicodeScalars.count, 6)
+    }
+
     private func makeSegments(_ ids: ClosedRange<Int>) -> [TranscriptSegment] {
         ids.map { id in
             TranscriptSegment(
@@ -660,15 +718,16 @@ final class AICoachEngineTests: XCTestCase {
                 }
             }
 
-            let observedSideEffects: [String: Int?] = [
-                "task_creations": 0,
-                "tool_calls": 0,
-            ]
-            let expectedSideEffectCounts = [
-                "task_creations": (expectedSideEffects["task_creations"] as? NSNumber)?.intValue,
-                "tool_calls": (expectedSideEffects["tool_calls"] as? NSNumber)?.intValue,
-            ]
-            XCTAssertEqual(observedSideEffects, expectedSideEffectCounts, caseID)
+            XCTAssertEqual(
+                (expectedSideEffects["task_creations"] as? NSNumber)?.intValue,
+                0,
+                caseID
+            )
+            XCTAssertEqual(
+                (expectedSideEffects["tool_calls"] as? NSNumber)?.intValue,
+                0,
+                caseID
+            )
         }
     }
 
@@ -691,8 +750,65 @@ final class AICoachEngineTests: XCTestCase {
         }
     }
 
+    func testStrictRawJSONParserEnforcesByteAndScalarLimitsAtTheirBoundaries() throws {
+        let byteLimit = StrictCoachJSONParser.maximumRawBytes
+        let scalarLimit = StrictCoachJSONParser.maximumRawScalars
+        let emoji = "\u{1F600}"
+        let quotedStringOverhead = 2
+        let innerByteCount = byteLimit - quotedStringOverhead
+        let emojiCount = innerByteCount / emoji.utf8.count
+        let byteRemainder = innerByteCount % emoji.utf8.count
+        let exactByteJSON = "\""
+            + String(repeating: emoji, count: emojiCount)
+            + String(repeating: "a", count: byteRemainder)
+            + "\""
+        let overByteJSON = String(exactByteJSON.dropLast()) + "a\""
+
+        XCTAssertEqual(exactByteJSON.utf8.count, byteLimit)
+        XCTAssertLessThan(exactByteJSON.unicodeScalars.count, scalarLimit)
+        XCTAssertNoThrow(try StrictCoachJSONParser.parse(exactByteJSON))
+        XCTAssertThrowsError(try StrictCoachJSONParser.parse(overByteJSON))
+
+        let noOp = #"{"contract_version":1,"candidates":[]}"#
+        let exactScalarJSON = noOp
+            + String(repeating: " ", count: scalarLimit - noOp.unicodeScalars.count)
+        let overScalarJSON = exactScalarJSON + " "
+
+        XCTAssertEqual(exactScalarJSON.unicodeScalars.count, scalarLimit)
+        XCTAssertLessThan(exactScalarJSON.utf8.count, byteLimit)
+        XCTAssertEqual(
+            AICoachEngine.parseAnalysisResponse(exactScalarJSON, transcriptContext: []),
+            .candidates([])
+        )
+        XCTAssertEqual(
+            AICoachEngine.parseAnalysisResponse(overScalarJSON, transcriptContext: []),
+            .malformed("invalid_envelope")
+        )
+    }
+
+    func testStrictRawJSONParserEnforcesArrayAndObjectDepthAndDuplicateKeysNearLimit() {
+        let maximumDepth = StrictCoachJSONParser.maximumNestingDepth
+        let exactArrayDepth = String(repeating: "[", count: maximumDepth)
+            + "0"
+            + String(repeating: "]", count: maximumDepth)
+        let overArrayDepth = "[" + exactArrayDepth + "]"
+        let exactObjectDepth = String(repeating: #"{"value":"#, count: maximumDepth)
+            + "0"
+            + String(repeating: "}", count: maximumDepth)
+        let overObjectDepth = #"{"value":"# + exactObjectDepth + "}"
+        let duplicateNearLimit = String(repeating: "[", count: maximumDepth - 1)
+            + #"{"value":1,"value":2}"#
+            + String(repeating: "]", count: maximumDepth - 1)
+
+        XCTAssertNoThrow(try StrictCoachJSONParser.parse(exactArrayDepth))
+        XCTAssertThrowsError(try StrictCoachJSONParser.parse(overArrayDepth))
+        XCTAssertNoThrow(try StrictCoachJSONParser.parse(exactObjectDepth))
+        XCTAssertThrowsError(try StrictCoachJSONParser.parse(overObjectDepth))
+        XCTAssertThrowsError(try StrictCoachJSONParser.parse(duplicateNearLimit))
+    }
+
     func testRawJSONAcceptsMathematicallyIntegralVersionsAndSourceIDs() {
-        for version in ["1", "1.0", "1e0"] {
+        for version in ["1", "1.0", "1e0", "1e00000000", "1e+00000000", "10e-00000001"] {
             XCTAssertEqual(
                 AICoachEngine.parseAnalysisResponse(
                     "{\"contract_version\":\(version),\"candidates\":[]}",
@@ -710,7 +826,7 @@ final class AICoachEngineTests: XCTestCase {
             endTime: 1,
             speaker: nil
         )]
-        for sourceID in ["1", "1.0", "1e0"] {
+        for sourceID in ["1", "1.0", "1e0", "1e00000000", "1e+00000000", "10e-00000001"] {
             let response = """
             {"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":\(sourceID),"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}
             """
@@ -723,6 +839,25 @@ final class AICoachEngineTests: XCTestCase {
             }
             XCTAssertEqual(candidates.map(\.sourceSegmentIDs), [[1]], sourceID)
         }
+
+        let maximumSafeID = 9_007_199_254_740_991
+        let maximumTranscript = [CoachTranscriptExcerpt(
+            id: maximumSafeID,
+            text: "Capacity is missing.",
+            startTime: 0,
+            endTime: 1,
+            speaker: nil
+        )]
+        let maximumResponse = """
+        {"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":90071992547409910e-1,"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}
+        """
+        guard case .candidates(let maximumCandidates) = AICoachEngine.parseAnalysisResponse(
+            maximumResponse,
+            transcriptContext: maximumTranscript
+        ) else {
+            return XCTFail("Expected exact safe-integer boundary to be accepted")
+        }
+        XCTAssertEqual(maximumCandidates.map(\.sourceSegmentIDs), [[maximumSafeID]])
     }
 
     func testRawJSONRejectsInvalidSourceIDDomainsAndNonFiniteSyntax() {
@@ -733,7 +868,15 @@ final class AICoachEngineTests: XCTestCase {
             endTime: 1,
             speaker: nil
         )]
-        for sourceID in ["true", "1.5", "9007199254740992", "1e9999"] {
+        for sourceID in [
+            "true",
+            "1.5",
+            "1.0000000000000001",
+            "9007199254740992",
+            "90071992547409911e-1",
+            "9007199254740991.0000000000000001",
+            "1e9999",
+        ] {
             let response = """
             {"contract_version":1,"candidates":[{"kind":"transcript_quote","presentation":"observation","evidence_quotes":[{"source_segment_id":\(sourceID),"quote":"Capacity is missing."}],"priority":"high","topic":"capacity"}]}
             """
@@ -743,6 +886,13 @@ final class AICoachEngineTests: XCTestCase {
         XCTAssertEqual(
             AICoachEngine.parseAnalysisResponse(
                 #"{"contract_version":NaN,"candidates":[]}"#,
+                transcriptContext: []
+            ),
+            .malformed("invalid_envelope")
+        )
+        XCTAssertEqual(
+            AICoachEngine.parseAnalysisResponse(
+                #"{"contract_version":1.0000000000000001,"candidates":[]}"#,
                 transcriptContext: []
             ),
             .malformed("invalid_envelope")
@@ -824,28 +974,87 @@ final class AICoachEngineTests: XCTestCase {
         XCTAssertThrowsError(try AICoachEngine.makeInteractiveMessages(request: question))
     }
 
-    func testAutoCoachCoreHasNoTaskPersistenceOrToolExecutionDependency() throws {
+    func testAutoCoachProductionPathHasNoTaskPersistenceOrToolExecutionDependency() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let relativePaths = [
+        let coreRelativePaths = [
             "NoteAI/Summarization/AICoachEngine.swift",
             "NoteAI/Summarization/CoachAdmissionPolicy.swift",
+            "NoteAI/Summarization/CoachContext.swift",
             "NoteAI/Summarization/LiveCoachSession.swift",
         ]
         let forbiddenSymbols = [
-            "MeetingStore", "TaskItem", "saveTask(", "createTask(", "ToolExecutor", "executeTool(",
+            "MeetingStore",
+            "TaskItem",
+            "TaskStore",
+            "saveTask(",
+            "createTask(",
+            "ToolExecutor",
+            "executeTool(",
+            "tool_calls",
         ]
 
-        for relativePath in relativePaths {
+        for relativePath in coreRelativePaths {
             let source = try String(
                 contentsOf: repositoryURL.appendingPathComponent(relativePath),
                 encoding: .utf8
             )
+            let imports = source
+                .split(separator: "\n")
+                .map(String.init)
+                .filter { $0.hasPrefix("import ") }
+            XCTAssertEqual(imports, ["import Foundation"], relativePath)
             for symbol in forbiddenSymbols {
                 XCTAssertFalse(source.contains(symbol), "\(relativePath) references \(symbol)")
             }
         }
+
+        let managerPath = "NoteAI/App/MeetingManager.swift"
+        let managerSource = try String(
+            contentsOf: repositoryURL.appendingPathComponent(managerPath),
+            encoding: .utf8
+        )
+        let autoCoachConsumer = try sourceSection(
+            in: managerSource,
+            from: "// MARK: - AI Coach loop",
+            through: "    private func setupAutoDetection()"
+        )
+        let sessionLifecycle = try sourceSection(
+            in: managerSource,
+            from: "    private func resetCoachStateForRecording()",
+            through: "    private func startDurationTimer()"
+        )
+        let productionConsumer = autoCoachConsumer + sessionLifecycle
+        for symbol in forbiddenSymbols + ["meetingStore.", "tasks.append", "todos.append"] {
+            XCTAssertFalse(productionConsumer.contains(symbol), "\(managerPath) coach path references \(symbol)")
+        }
+
+        let sessionSource = try String(
+            contentsOf: repositoryURL
+                .appendingPathComponent("NoteAI/Summarization/LiveCoachSession.swift"),
+            encoding: .utf8
+        )
+        let generatorInterface = try sourceSection(
+            in: sessionSource,
+            from: "protocol AICoachGenerating: Sendable",
+            through: "protocol CoachClock: Sendable"
+        )
+        XCTAssertTrue(generatorInterface.contains("generateInsights"))
+        XCTAssertTrue(generatorInterface.contains("answerQuestion"))
+        for symbol in forbiddenSymbols {
+            XCTAssertFalse(generatorInterface.contains(symbol), "Generator Interface references \(symbol)")
+        }
+    }
+
+    private func sourceSection(
+        in source: String,
+        from startMarker: String,
+        through endMarker: String
+    ) throws -> String {
+        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
+        let end = try XCTUnwrap(source.range(of: endMarker, range: start..<source.endIndex)?.lowerBound)
+        return String(source[start..<end])
     }
 
     private func fixtureTranscriptID(_ value: Any?, caseID: String) throws -> Int {
@@ -992,7 +1201,7 @@ final class AICoachSessionTests: XCTestCase {
         requireLifecycleInterface(MeetingManager.self)
     }
 
-    func testMeetingManagerDisablePathCancelsAllCoachWorkAndGuardsReplyPublication() throws {
+    func testMeetingManagerDisablePathCancelsAllCoachWorkAndGuardsEveryPublication() throws {
         let repositoryURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1002,9 +1211,89 @@ final class AICoachSessionTests: XCTestCase {
         )
 
         XCTAssertTrue(source.contains("session.cancelPendingWork()"))
-        XCTAssertNotNil(source.range(
-            of: #"guard let self,\s+self\.coachEnabled,\s+self\.liveCoachSession\?\.id == session\.id else \{ return \}"#,
-            options: .regularExpression
+        XCTAssertTrue(source.contains("coachOperationEpoch.invalidate()"))
+        XCTAssertTrue(source.contains("let operationToken = coachOperationEpoch.capture"))
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: "coachOperationEpoch.allows(").count - 1,
+            4
+        )
+        XCTAssertTrue(source.contains("refreshCoachTimeline(from: session, operationToken: operationToken)"))
+    }
+
+    @MainActor
+    func testDisableDuringRefreshInvalidatesTheCommitPointToken() async {
+        let operationEpoch = CoachOperationEpoch()
+        let sessionID = UUID()
+        let token = operationEpoch.capture(sessionID: sessionID)
+        let commitPoint = SuspendedCommitPoint()
+        let publicationState = CoachPublicationTestState()
+
+        let publication = Task { @MainActor in
+            await commitPoint.suspend()
+            return operationEpoch.allows(
+                token,
+                coachEnabled: publicationState.coachEnabled,
+                currentSessionID: sessionID
+            )
+        }
+        await commitPoint.waitUntilSuspended()
+        publicationState.coachEnabled = false
+        operationEpoch.invalidate()
+        await commitPoint.resume()
+
+        let wasPublished = await publication.value
+        XCTAssertFalse(wasPublished)
+    }
+
+    @MainActor
+    func testDisableReenableCannotMakeAnOldOperationCurrentAgain() {
+        let operationEpoch = CoachOperationEpoch()
+        let sessionID = UUID()
+        let staleToken = operationEpoch.capture(sessionID: sessionID)
+
+        operationEpoch.invalidate()
+        let currentToken = operationEpoch.capture(sessionID: sessionID)
+
+        XCTAssertFalse(operationEpoch.allows(
+            staleToken,
+            coachEnabled: true,
+            currentSessionID: sessionID
+        ))
+        XCTAssertTrue(operationEpoch.allows(
+            currentToken,
+            coachEnabled: true,
+            currentSessionID: sessionID
+        ))
+    }
+
+    @MainActor
+    func testQuestionCompletionAfterDisableReenableCannotPublishWithOldToken() async {
+        let generator = SuspendedQuestionCoachGenerator()
+        let session = LiveCoachSession(
+            generator: generator,
+            clock: FixedCoachClock(now: Date()),
+            contextPolicy: .testing
+        )
+        let operationEpoch = CoachOperationEpoch()
+        let token = operationEpoch.capture(sessionID: session.id)
+
+        let questionTask = Task {
+            await session.ask(
+                question: "Who owns production rollout?",
+                transcript: [TranscriptSegment(id: 1, text: "Rollout ownership is undecided.")]
+            )
+        }
+        await generator.waitUntilQuestionStarts()
+        operationEpoch.invalidate()
+        await generator.resumeQuestion(with: "The platform team owns the rollout.")
+
+        guard case .answered = await questionTask.value else {
+            return XCTFail("Expected the underlying session reply to complete")
+        }
+        XCTAssertFalse(operationEpoch.allows(
+            token,
+            coachEnabled: true,
+            currentSessionID: session.id
         ))
     }
 
@@ -1594,6 +1883,34 @@ private actor SuspendedQuestionCoachGenerator: AICoachGenerating {
         questionContinuation?.resume(returning: answer)
         questionContinuation = nil
     }
+}
+
+private actor SuspendedCommitPoint {
+    private var isSuspended = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        isSuspended = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        while !isSuspended {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class CoachPublicationTestState {
+    var coachEnabled = true
 }
 
 private actor SuspendedDualCoachGenerator: AICoachGenerating {

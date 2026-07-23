@@ -33,7 +33,7 @@ enum CoachAutoAdmissionRejectionCategory: String, Equatable, Sendable {
     case invalidEvidence = "invalid_evidence"
 }
 
-private indirect enum StrictCoachJSONValue {
+indirect enum StrictCoachJSONValue {
     case object([String: StrictCoachJSONValue])
     case array([StrictCoachJSONValue])
     case string(String)
@@ -43,32 +43,41 @@ private indirect enum StrictCoachJSONValue {
 }
 
 /// Strict JSON grammar Module for untrusted automatic coach responses.
-private struct StrictCoachJSONParser {
+struct StrictCoachJSONParser {
+    static let maximumRawBytes = 32_768
+    static let maximumRawScalars = 16_384
+    static let maximumNestingDepth = 24
+
     private struct ParseFailure: Error {}
 
     private let bytes: [UInt8]
     private var index = 0
 
-    private init(_ text: String) {
+    private init(_ text: String) throws {
+        guard text.utf8.count <= Self.maximumRawBytes,
+              text.unicodeScalars.count <= Self.maximumRawScalars else {
+            throw ParseFailure()
+        }
         bytes = Array(text.utf8)
     }
 
     static func parse(_ text: String) throws -> StrictCoachJSONValue {
-        var parser = StrictCoachJSONParser(text)
+        var parser = try StrictCoachJSONParser(text)
         parser.skipWhitespace()
-        let value = try parser.parseValue()
+        let value = try parser.parseValue(depth: 0)
         parser.skipWhitespace()
         guard parser.index == parser.bytes.count else { throw ParseFailure() }
         return value
     }
 
-    private mutating func parseValue() throws -> StrictCoachJSONValue {
+    private mutating func parseValue(depth: Int) throws -> StrictCoachJSONValue {
+        guard depth <= Self.maximumNestingDepth else { throw ParseFailure() }
         guard let byte = currentByte else { throw ParseFailure() }
         switch byte {
         case 0x7B:
-            return try parseObject()
+            return try parseObject(depth: depth)
         case 0x5B:
-            return try parseArray()
+            return try parseArray(depth: depth)
         case 0x22:
             return .string(try parseString())
         case 0x2D, 0x30...0x39:
@@ -87,7 +96,7 @@ private struct StrictCoachJSONParser {
         }
     }
 
-    private mutating func parseObject() throws -> StrictCoachJSONValue {
+    private mutating func parseObject(depth: Int) throws -> StrictCoachJSONValue {
         try consume(0x7B)
         skipWhitespace()
         if consumeIfPresent(0x7D) { return .object([:]) }
@@ -100,7 +109,7 @@ private struct StrictCoachJSONParser {
             skipWhitespace()
             try consume(0x3A)
             skipWhitespace()
-            object[key] = try parseValue()
+            object[key] = try parseValue(depth: depth + 1)
             skipWhitespace()
             if consumeIfPresent(0x7D) { return .object(object) }
             try consume(0x2C)
@@ -108,14 +117,14 @@ private struct StrictCoachJSONParser {
         }
     }
 
-    private mutating func parseArray() throws -> StrictCoachJSONValue {
+    private mutating func parseArray(depth: Int) throws -> StrictCoachJSONValue {
         try consume(0x5B)
         skipWhitespace()
         if consumeIfPresent(0x5D) { return .array([]) }
 
         var array: [StrictCoachJSONValue] = []
         while true {
-            array.append(try parseValue())
+            array.append(try parseValue(depth: depth + 1))
             skipWhitespace()
             if consumeIfPresent(0x5D) { return .array(array) }
             try consume(0x2C)
@@ -610,7 +619,13 @@ struct CoachAutoAdmissionContractV1 {
         guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
         if digits.allSatisfy({ $0 == "0" }) { return 0 }
 
-        guard exponentText.count <= 7, let exponent = Int(exponentText) else { return nil }
+        let maximumRelevantExponent = digits.count
+            + fractionalCount
+            + String(maximumSafeInteger).count
+        guard let exponent = boundedDecimalExponent(
+            exponentText,
+            maximumMagnitude: maximumRelevantExponent
+        ) else { return nil }
         let scale = exponent - fractionalCount
         if scale >= 0 {
             guard digits.count + scale <= String(maximumSafeInteger).count else { return nil }
@@ -632,6 +647,32 @@ struct CoachAutoAdmissionContractV1 {
             return nil
         }
         return isNegative ? -magnitude : magnitude
+    }
+
+    private static func boundedDecimalExponent(
+        _ rawValue: String,
+        maximumMagnitude: Int
+    ) -> Int? {
+        var digits = rawValue
+        var sign = 1
+        if digits.first == "+" {
+            digits.removeFirst()
+        } else if digits.first == "-" {
+            sign = -1
+            digits.removeFirst()
+        }
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
+
+        digits = String(digits.drop(while: { $0 == "0" }))
+        guard !digits.isEmpty else { return 0 }
+
+        let maximum = String(maximumMagnitude)
+        guard digits.count < maximum.count
+                || (digits.count == maximum.count && digits <= maximum),
+              let magnitude = Int(digits) else {
+            return nil
+        }
+        return sign * magnitude
     }
 
     private static func isPositiveSafeInteger(_ value: Int) -> Bool {

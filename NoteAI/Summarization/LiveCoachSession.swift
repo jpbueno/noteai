@@ -41,7 +41,6 @@ struct LiveCoachSnapshot: Equatable, Sendable {
 enum CoachInsightLifecycleMutationOutcome: Equatable, Sendable {
     case updated(CoachInsight)
     case notFound
-    case activeBudgetExceeded
     case staleSession
 }
 

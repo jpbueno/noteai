@@ -1,4 +1,31 @@
+import AppKit
 import SwiftUI
+
+struct LiveTranscriptSourceRequest: Equatable {
+    let segmentID: Int
+    let sequence: Int
+}
+
+struct LiveTranscriptScrollState {
+    private(set) var isFollowingLive = true
+    private(set) var sourceRequest: LiveTranscriptSourceRequest?
+    private var requestSequence = 0
+
+    mutating func revealSource(segmentID: Int) {
+        requestSequence += 1
+        sourceRequest = LiveTranscriptSourceRequest(segmentID: segmentID, sequence: requestSequence)
+        isFollowingLive = false
+    }
+
+    mutating func userDidScroll() {
+        isFollowingLive = false
+    }
+
+    mutating func resumeFollowing() {
+        isFollowingLive = true
+        sourceRequest = nil
+    }
+}
 
 // TranscriptView is no longer used standalone — transcript is rendered
 // inline in NotionPageView. Kept for compatibility.
@@ -31,7 +58,12 @@ struct TranscriptView: View {
 struct LiveTranscriptView: View {
     @ObservedObject var meetingManager: MeetingManager
     @State private var coachWidth: CGFloat = 300
+    @State private var transcriptScrollState = LiveTranscriptScrollState()
     private static let coachWidthKey = "aiCoachPanelWidth"
+
+    private var coachPresentation: CoachPanelPresentation {
+        CoachPanelPresentation(entries: meetingManager.coachInsights)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,7 +83,18 @@ struct LiveTranscriptView: View {
                         insights: meetingManager.coachInsights,
                         isAnalyzing: meetingManager.coachAnalyzing,
                         isReplying: meetingManager.coachReplying,
-                        onSend: { meetingManager.sendCoachMessage($0) }
+                        onSend: { meetingManager.sendCoachMessage($0) },
+                        onSetLifecycle: { id, lifecycle in
+                            Task {
+                                _ = await meetingManager.setAutoInsightLifecycle(
+                                    id: id,
+                                    lifecycle: lifecycle
+                                )
+                            }
+                        },
+                        onShowSource: { evidence in
+                            transcriptScrollState.revealSource(segmentID: evidence.segmentID)
+                        }
                     )
                     .frame(width: coachWidth)
                 }
@@ -97,8 +140,8 @@ struct LiveTranscriptView: View {
                         .font(.system(size: 11))
                     Text("AI Solutions Architect")
                         .font(.system(size: 12, weight: .medium))
-                    if !meetingManager.coachInsights.isEmpty {
-                        Text("\(meetingManager.coachInsights.count)")
+                    if coachPresentation.autoInsightCount > 0 {
+                        Text("\(coachPresentation.autoInsightCount)")
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -173,9 +216,17 @@ struct LiveTranscriptView: View {
                                         .foregroundStyle(Theme.textPrimary)
                                         .lineSpacing(4)
                                         .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
                                 }
                             }
-                            .padding(.vertical, 2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(
+                                transcriptScrollState.sourceRequest?.segmentID == segment.id
+                                    ? Color.accentColor.opacity(0.12)
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 4)
+                            )
                             .id(segment.id)
                         }
                     }
@@ -184,10 +235,44 @@ struct LiveTranscriptView: View {
                 .padding(.horizontal, Theme.pagePadding)
                 .padding(.vertical, 24)
                 .frame(maxWidth: .infinity)
+                .background {
+                    TranscriptLiveScrollObserver {
+                        transcriptScrollState.userDidScroll()
+                    }
+                    .frame(width: 0, height: 0)
+                }
             }
             .onChange(of: meetingManager.currentTranscript.count) { _, _ in
-                if let last = meetingManager.currentTranscript.last {
+                if transcriptScrollState.isFollowingLive,
+                   let last = meetingManager.currentTranscript.last {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+            .onChange(of: transcriptScrollState.sourceRequest) { _, request in
+                guard let request else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(request.segmentID, anchor: .center)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !transcriptScrollState.isFollowingLive,
+                   let last = meetingManager.currentTranscript.last {
+                    Button {
+                        transcriptScrollState.resumeFollowing()
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.sidebarBG, in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Return to live transcript")
+                    .padding(12)
                 }
             }
         }
@@ -249,8 +334,8 @@ struct LiveTranscriptView: View {
                 Text(warning)
                     .foregroundStyle(Color(hex: "FFA94D"))
             }
-            if meetingManager.coachEnabled && !meetingManager.coachInsights.isEmpty {
-                Text("\(meetingManager.coachInsights.count) insights")
+            if meetingManager.coachEnabled && coachPresentation.autoInsightCount > 0 {
+                Text("\(coachPresentation.autoInsightCount) insights")
                     .foregroundStyle(Color.accentColor)
             }
             Spacer()
@@ -270,6 +355,63 @@ struct LiveTranscriptView: View {
             return String(format: "%d:%02d:%02d", h, m, s)
         }
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+private struct TranscriptLiveScrollObserver: NSViewRepresentable {
+    let onUserScroll: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onUserScroll: onUserScroll)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.attach(whenReadyFrom: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onUserScroll = onUserScroll
+        context.coordinator.attach(whenReadyFrom: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class Coordinator {
+        var onUserScroll: () -> Void
+        private weak var scrollView: NSScrollView?
+        private var observer: NSObjectProtocol?
+
+        init(onUserScroll: @escaping () -> Void) {
+            self.onUserScroll = onUserScroll
+        }
+
+        func attach(whenReadyFrom view: NSView) {
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let scrollView = view?.enclosingScrollView else { return }
+                guard self.scrollView !== scrollView else { return }
+                self.detach()
+                self.scrollView = scrollView
+                self.observer = NotificationCenter.default.addObserver(
+                    forName: NSScrollView.willStartLiveScrollNotification,
+                    object: scrollView,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.onUserScroll()
+                }
+            }
+        }
+
+        func detach() {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observer = nil
+            scrollView = nil
+        }
     }
 }
 

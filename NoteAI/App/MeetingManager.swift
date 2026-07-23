@@ -2,9 +2,96 @@ import Foundation
 import Combine
 import UserNotifications
 
+struct CoachOperationToken: Equatable, Sendable {
+    fileprivate let epoch: UInt64
+    fileprivate let sessionID: UUID
+}
+
+/// MainActor commit barrier for recording-scoped coach work.
+@MainActor
+final class CoachOperationEpoch {
+    private var epoch: UInt64 = 0
+
+    func invalidate() {
+        epoch &+= 1
+    }
+
+    func capture(sessionID: UUID) -> CoachOperationToken {
+        CoachOperationToken(epoch: epoch, sessionID: sessionID)
+    }
+
+    func allows(
+        _ token: CoachOperationToken,
+        coachEnabled: Bool,
+        currentSessionID: UUID?
+    ) -> Bool {
+        coachEnabled
+            && token.epoch == epoch
+            && token.sessionID == currentSessionID
+    }
+}
+
+/// Recording-scoped slot that severs retired actor generations synchronously.
+@MainActor
+final class CoachSessionSlot {
+    typealias Factory = @MainActor (
+        _ id: UUID,
+        _ initialAutoInsights: [CoachInsight],
+        _ initialChatMessages: [CoachChatMessage]
+    ) -> LiveCoachSession
+
+    private let factory: Factory
+    private(set) var recordingID: UUID?
+    private(set) var current: LiveCoachSession?
+
+    init(factory: @escaping Factory) {
+        self.factory = factory
+    }
+
+    func beginRecording() -> LiveCoachSession {
+        let id = UUID()
+        recordingID = id
+        let session = factory(id, [], [])
+        current = session
+        return session
+    }
+
+    func resume(publishedEntries: [CoachInsight]) -> LiveCoachSession? {
+        guard let recordingID else { return nil }
+        if let current { return current }
+
+        let autoInsights = publishedEntries.filter {
+            $0.sessionID == recordingID && $0.role == nil
+        }
+        let chatMessages = publishedEntries.compactMap { entry -> CoachChatMessage? in
+            guard entry.sessionID == recordingID, let role = entry.role else { return nil }
+            return CoachChatMessage(
+                id: entry.id,
+                timestamp: entry.timestamp,
+                sessionID: recordingID,
+                role: role,
+                content: entry.content
+            )
+        }
+        let session = factory(recordingID, autoInsights, chatMessages)
+        current = session
+        return session
+    }
+
+    func retire() -> LiveCoachSession? {
+        defer { current = nil }
+        return current
+    }
+
+    func endRecording() -> LiveCoachSession? {
+        recordingID = nil
+        return retire()
+    }
+}
+
 /// Central orchestrator that coordinates audio capture, transcription, and summarization.
 @MainActor
-final class MeetingManager: ObservableObject {
+final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
     private static let noteSpacesDefaultsKey = "noteSpaces"
 
     enum State: Equatable {
@@ -116,6 +203,9 @@ final class MeetingManager: ObservableObject {
     @Published var coachEnabled: Bool {
         didSet {
             UserDefaults.standard.set(coachEnabled, forKey: "aiCoachEnabled")
+            if !coachEnabled {
+                coachOperationEpoch.invalidate()
+            }
         }
     }
 
@@ -132,9 +222,19 @@ final class MeetingManager: ObservableObject {
     private var localHelperSessionId: UUID?
     private var recordingTimer: Timer?
     private var coachTimer: Timer?
-    private var coachAnalyzingInFlight = false
-    private var coachLastAnalyzedSegmentCount = 0
-    private var coachLastAnalyzedTime: Date?
+    private lazy var coachSessionSlot = CoachSessionSlot { [unowned self] id, autoInsights, chatMessages in
+        LiveCoachSession(
+            id: id,
+            generator: self.aiCoachEngine,
+            initialAutoInsights: autoInsights,
+            initialChatMessages: chatMessages
+        )
+    }
+    private var liveCoachSession: LiveCoachSession? { coachSessionSlot.current }
+    private var coachAnalysisTask: Task<Void, Never>?
+    private var coachAnalysisOperationID: UUID?
+    private var coachQuestionTask: Task<Void, Never>?
+    private let coachOperationEpoch = CoachOperationEpoch()
     private var deferredSpeakerTagIDs = Set<String>()
     private var speakerAttribution = TranscriptSpeakerAttribution()
     private var cancellables = Set<AnyCancellable>()
@@ -284,12 +384,7 @@ final class MeetingManager: ObservableObject {
         currentPreferredCaptureSource = preferredCaptureSource
         recordingDuration = 0
 
-        // Reset AI Coach state for the new recording
-        coachInsights = []
-        coachAnalyzing = false
-        coachAnalyzingInFlight = false
-        coachLastAnalyzedSegmentCount = 0
-        coachLastAnalyzedTime = nil
+        resetCoachStateForRecording()
         startCoachLoopIfEnabled()
 
         // Start duration timer
@@ -312,6 +407,7 @@ final class MeetingManager: ObservableObject {
                 lastError = "Audio capture failed: \(error.localizedDescription). Check Screen Recording and Microphone permissions in System Settings > Privacy & Security."
                 stopDurationTimer()
                 stopCoachLoop()
+                endCoachSession()
                 state = .idle
                 currentDetectedAppName = nil
                 currentPreferredCaptureSource = nil
@@ -325,6 +421,7 @@ final class MeetingManager: ObservableObject {
         recordingTimer?.invalidate()
         recordingTimer = nil
         stopCoachLoop()
+        endCoachSession()
         audioCaptureManager.stopCapture()
 
         let appName = currentDetectedAppName ?? meetingDetector.detectedApp ?? teamsCallDetectorV5.detectedApp ?? "Meeting"
@@ -380,6 +477,7 @@ final class MeetingManager: ObservableObject {
         recordingDuration = 0
         summarizationStatus = .idle
         coachInsights = []
+        endCoachSession()
         state = .idle
 
         Task {
@@ -1229,6 +1327,7 @@ final class MeetingManager: ObservableObject {
 
     private func startCoachLoopIfEnabled() {
         guard coachEnabled else { return }
+        guard coachSessionSlot.resume(publishedEntries: coachInsights) != nil else { return }
         coachTimer?.invalidate()
         // Poll every 8 seconds — mirrors the web implementation in useAICoach.ts.
         coachTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
@@ -1241,113 +1340,156 @@ final class MeetingManager: ObservableObject {
     private func stopCoachLoop() {
         coachTimer?.invalidate()
         coachTimer = nil
+        coachAnalysisTask?.cancel()
+        coachQuestionTask?.cancel()
+        coachAnalysisTask = nil
+        coachAnalysisOperationID = nil
+        coachQuestionTask = nil
+        coachAnalyzing = false
+        coachReplying = false
+        retireCoachGeneration()
     }
 
-    /// Send a chat message to the AI SA. Appends the user message, awaits a
-    /// reply using the current transcript + prior auto-insights, and appends
-    /// the assistant response to `coachInsights`.
+    /// Send a chat message through the current recording-scoped coach session.
     func sendCoachMessage(_ question: String) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard coachEnabled else { return }
         guard !trimmed.isEmpty else { return }
         guard !coachReplying else { return }
+        guard let session = liveCoachSession else { return }
+        let operationToken = coachOperationEpoch.capture(sessionID: session.id)
 
-        let userMsg = CoachInsight(type: .keyInsight, content: trimmed, role: .user)
-        coachInsights.append(userMsg)
+        coachInsights.append(CoachInsight(
+            type: .keyInsight,
+            content: trimmed,
+            role: .user,
+            sessionID: session.id
+        ))
         coachReplying = true
+        let transcript = currentTranscript
 
-        let transcript = currentTranscript.map { $0.text }.joined(separator: " ")
-        let chatHistory: [(role: CoachRole, content: String)] = coachInsights
-            .compactMap { entry in
-                guard let role = entry.role else { return nil }
-                return (role: role, content: entry.content)
-            }
-        let priorInsights = coachInsights
-            .filter { $0.role == nil }
-            .map { $0.content }
+        coachQuestionTask = Task { [weak self] in
+            let outcome = await session.ask(question: trimmed, transcript: transcript)
+            guard let self,
+                  self.coachOperationEpoch.allows(
+                      operationToken,
+                      coachEnabled: self.coachEnabled,
+                      currentSessionID: self.liveCoachSession?.id
+                  ) else { return }
+            self.coachQuestionTask = nil
+            self.coachReplying = false
 
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                Task { @MainActor in self.coachReplying = false }
+            switch outcome {
+            case .staleSession:
+                return
+            case .failed:
+                print("[AICoach] Question request failed")
+            case .ignored, .busy, .answered:
+                break
             }
-            do {
-                let reply = try await self.aiCoachEngine.ask(
-                    question: trimmed,
-                    transcript: transcript,
-                    chatHistory: chatHistory,
-                    priorInsights: priorInsights
-                )
-                let cleaned = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !cleaned.isEmpty else { return }
-                await MainActor.run {
-                    self.coachInsights.append(
-                        CoachInsight(type: .keyInsight, content: cleaned, role: .assistant)
-                    )
-                }
-            } catch {
-                let msg = "Reply failed: \(error.localizedDescription)"
-                await MainActor.run {
-                    self.coachInsights.append(
-                        CoachInsight(type: .keyInsight, content: msg, role: .assistant)
-                    )
-                }
-            }
+            await self.refreshCoachTimeline(from: session, operationToken: operationToken)
         }
+    }
+
+    @discardableResult
+    func setAutoInsightLifecycle(
+        id: UUID,
+        lifecycle: CoachInsightLifecycle
+    ) async -> CoachInsightLifecycleMutationOutcome {
+        guard coachEnabled, let session = liveCoachSession else { return .staleSession }
+        let operationToken = coachOperationEpoch.capture(sessionID: session.id)
+        let outcome = await session.setAutoInsightLifecycle(id: id, lifecycle: lifecycle)
+        guard coachOperationEpoch.allows(
+            operationToken,
+            coachEnabled: coachEnabled,
+            currentSessionID: liveCoachSession?.id
+        ) else { return .staleSession }
+        if case .updated = outcome {
+            await refreshCoachTimeline(from: session, operationToken: operationToken)
+        }
+        return outcome
     }
 
     private func considerCoachAnalysis() {
         guard coachEnabled else { return }
         guard state == .recording else { return }
-        guard !coachAnalyzingInFlight else { return }
+        guard coachAnalysisTask == nil else { return }
+        guard let session = liveCoachSession else { return }
+        let operationToken = coachOperationEpoch.capture(sessionID: session.id)
 
-        let segments = currentTranscript
-        guard !segments.isEmpty else { return }
+        let transcript = currentTranscript
+        let operationID = UUID()
+        coachAnalysisOperationID = operationID
 
-        let fullText = segments.map { $0.text }.joined(separator: " ")
-        let words = fullText.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-        guard words.count >= 25 else { return }
+        coachAnalysisTask = Task { [weak self] in
+            let isReady = await session.isAnalysisReady(transcript: transcript)
+            guard let self,
+                  self.coachOperationEpoch.allows(
+                      operationToken,
+                      coachEnabled: self.coachEnabled,
+                      currentSessionID: self.liveCoachSession?.id
+                  ),
+                  self.state == .recording,
+                  self.coachAnalysisOperationID == operationID else { return }
+            guard isReady else {
+                self.coachAnalysisTask = nil
+                self.coachAnalysisOperationID = nil
+                return
+            }
 
-        // Enforce minimum interval between analyses
-        if let last = coachLastAnalyzedTime {
-            let elapsed = Date().timeIntervalSince(last)
-            if elapsed < 45 { return }
-            let newSegments = segments.count - coachLastAnalyzedSegmentCount
-            if newSegments < 2 && elapsed < 90 { return }
+            self.coachAnalyzing = true
+            let outcome = await session.analyze(transcript: transcript)
+            guard self.coachOperationEpoch.allows(
+                      operationToken,
+                      coachEnabled: self.coachEnabled,
+                      currentSessionID: self.liveCoachSession?.id
+                  ),
+                  self.state == .recording,
+                  self.coachAnalysisOperationID == operationID else { return }
+            self.coachAnalysisTask = nil
+            self.coachAnalysisOperationID = nil
+            self.coachAnalyzing = false
+
+            switch outcome {
+            case .admitted:
+                await self.refreshCoachTimeline(from: session, operationToken: operationToken)
+            case .malformed(let reason):
+                print("[AICoach] Malformed analysis response: \(reason)")
+            case .failed:
+                print("[AICoach] Analysis request failed")
+            case .rejected(let rejections):
+                print("[AICoach] Rejected \(rejections.count) candidate(s) by admission policy")
+            case .notReady, .busy, .noOp, .staleSession:
+                break
+            }
         }
+    }
 
-        coachAnalyzingInFlight = true
-        coachAnalyzing = true
-        let priorContents = coachInsights.map { $0.content }
-        let currentCount = segments.count
+    private func refreshCoachTimeline(
+        from session: LiveCoachSession,
+        operationToken: CoachOperationToken
+    ) async {
+        let snapshot = await session.snapshot()
+        guard snapshot.sessionID == session.id,
+              coachOperationEpoch.allows(
+                  operationToken,
+                  coachEnabled: coachEnabled,
+                  currentSessionID: liveCoachSession?.id
+              ) else { return }
 
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                Task { @MainActor in
-                    self.coachAnalyzingInFlight = false
-                    self.coachAnalyzing = false
-                }
-            }
-
-            do {
-                let new = try await self.aiCoachEngine.analyze(
-                    transcript: fullText,
-                    previousInsights: priorContents
-                )
-                await MainActor.run {
-                    guard self.state == .recording else { return }
-                    if !new.isEmpty {
-                        self.coachInsights.append(contentsOf: new)
-                    }
-                    self.coachLastAnalyzedSegmentCount = currentCount
-                    self.coachLastAnalyzedTime = Date()
-                }
-            } catch {
-                print("[AICoach] Analysis failed: \(error.localizedDescription)")
-                await MainActor.run {
-                    self.coachLastAnalyzedTime = Date()
-                }
-            }
+        let chatEntries = snapshot.chatMessages.map { message in
+            CoachInsight(
+                id: message.id,
+                timestamp: message.timestamp,
+                type: .keyInsight,
+                content: message.content,
+                role: message.role,
+                sessionID: message.sessionID
+            )
+        }
+        coachInsights = (snapshot.autoInsights + chatEntries).sorted { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return lhs.id.uuidString < rhs.id.uuidString
         }
     }
 
@@ -1463,6 +1605,7 @@ extension MeetingManager: LocalCaptureControlling {
             audioCaptureManager.stopCapture()
             stopDurationTimer()
             stopCoachLoop()
+            endCoachSession()
             localHelperSessionId = nil
             currentMeetingStart = nil
             recordingDuration = 0
@@ -1487,6 +1630,7 @@ extension MeetingManager: LocalCaptureControlling {
 
         stopDurationTimer()
         stopCoachLoop()
+        endCoachSession()
         audioCaptureManager.stopCapture()
         await transcriptionEngine.reset()
 
@@ -1510,11 +1654,32 @@ extension MeetingManager: LocalCaptureControlling {
     }
 
     private func resetCoachStateForRecording() {
+        endCoachSession()
+        _ = coachSessionSlot.beginRecording()
         coachInsights = []
         coachAnalyzing = false
-        coachAnalyzingInFlight = false
-        coachLastAnalyzedSegmentCount = 0
-        coachLastAnalyzedTime = nil
+        coachReplying = false
+    }
+
+    private func endCoachSession() {
+        coachOperationEpoch.invalidate()
+        let session = coachSessionSlot.endRecording()
+        coachAnalysisTask?.cancel()
+        coachQuestionTask?.cancel()
+        coachAnalysisTask = nil
+        coachAnalysisOperationID = nil
+        coachQuestionTask = nil
+        coachAnalyzing = false
+        coachReplying = false
+        if let session {
+            Task { await session.cancel() }
+        }
+    }
+
+    private func retireCoachGeneration() {
+        coachOperationEpoch.invalidate()
+        guard let session = coachSessionSlot.retire() else { return }
+        Task { await session.cancel() }
     }
 
     private func startDurationTimer() {

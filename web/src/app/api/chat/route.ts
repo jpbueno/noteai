@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
+import {
+  consumeUpstreamResponse,
+  UpstreamAbortError,
+} from "@/lib/upstream-abort";
+import type { ConsumedUpstreamResponse } from "@/lib/upstream-abort";
 
 const ENDPOINTS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
@@ -152,44 +157,51 @@ export async function POST(request: NextRequest) {
       body = JSON.stringify(payload);
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CHAT_UPSTREAM_TIMEOUT_MS);
-    let response: Response;
+    let upstream: ConsumedUpstreamResponse;
     try {
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
+      upstream = await consumeUpstreamResponse(
+        request.signal,
+        CHAT_UPSTREAM_TIMEOUT_MS,
+        async (signal) =>
+          fetch(endpoint, {
+            method: "POST",
+            headers,
+            body,
+            signal,
+          }),
+      );
+    } catch (error) {
+      if (error instanceof UpstreamAbortError && error.abortCause === "timeout") {
         return NextResponse.json(
           { error: "LLM request timed out. Try again or choose a faster model." },
           { status: 504 },
         );
       }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
+      if (error instanceof UpstreamAbortError && error.abortCause === "request") {
+        return NextResponse.json({ error: "Request cancelled" }, { status: 499 });
+      }
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          { error: "LLM request timed out. Try again or choose a faster model." },
+          { status: 504 },
+        );
+      }
+      throw error;
     }
 
-    if (!response.ok) {
-      const upstreamText = await response.text();
-      const upstreamDetail = extractUpstreamError(upstreamText);
+    if (!upstream.ok) {
+      const upstreamDetail = extractUpstreamError(upstream.text);
       return NextResponse.json(
         {
-          error: `LLM request failed (${response.status})${
+          error: `LLM request failed (${upstream.status})${
             upstreamDetail ? `: ${upstreamDetail}` : ""
           }`,
         },
-        { status: response.status }
+        { status: upstream.status }
       );
     }
 
-    const data = await response.json();
-
-    const content = extractChatContent(provider, data);
+    const content = extractChatContent(provider, upstream.data);
     if (!content) {
       return NextResponse.json(
         { error: "LLM request returned an empty response." },

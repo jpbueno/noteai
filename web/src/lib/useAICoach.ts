@@ -1,153 +1,283 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TranscriptSegment, CoachInsight } from "./types";
+import type {
+  TranscriptSegment,
+  CoachInsight,
+  CoachInsightLifecycle,
+} from "./types";
 import { analyzeTranscriptLive, askAISA } from "./ai";
-
-const MIN_WORDS = 25;
-const MIN_NEW_SEGMENTS = 2;
-const MIN_INTERVAL_MS = 45_000;
-const CHECK_INTERVAL_MS = 8_000;
+import { coachPolicy } from "./ai-coach-policy";
 
 export function useAICoach(
   segments: TranscriptSegment[],
   isRecording: boolean,
 ) {
-  const [insights, setInsights] = useState<CoachInsight[]>([]);
+  const [autoInsights, setAutoInsights] = useState<CoachInsight[]>([]);
+  const [chatMessages, setChatMessages] = useState<CoachInsight[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
   const [enabled, setEnabled] = useState(true);
 
-  const lastAnalyzedCount = useRef(0);
-  const lastAnalyzedTime = useRef(0);
   const analyzingRef = useRef(false);
+  const replyingRef = useRef(false);
   const mountedRef = useRef(true);
+  const recordingRef = useRef(isRecording);
+  const enabledRef = useRef(enabled);
+  const replyAbortRef = useRef<AbortController | null>(null);
   const segmentsRef = useRef(segments);
-  const insightsRef = useRef(insights);
+  const autoInsightsRef = useRef(autoInsights);
+  const chatMessagesRef = useRef(chatMessages);
+  const cadenceRef = useRef<ReturnType<typeof coachPolicy.createCadenceTracker> | null>(null);
+  const sessionScopeRef = useRef<ReturnType<typeof coachPolicy.createRecordingSessionScope> | null>(null);
+  const analysisLifecycleRef = useRef<ReturnType<typeof coachPolicy.createAnalysisLifecycle> | null>(null);
+  if (!cadenceRef.current) cadenceRef.current = coachPolicy.createCadenceTracker();
+  if (!sessionScopeRef.current) {
+    sessionScopeRef.current = coachPolicy.createRecordingSessionScope(isRecording);
+  }
+  if (!analysisLifecycleRef.current) {
+    analysisLifecycleRef.current = coachPolicy.createAnalysisLifecycle({
+      isMounted: () => mountedRef.current,
+      isRecording: () => recordingRef.current,
+      isEnabled: () => enabledRef.current,
+      isSessionCurrent: (token) => sessionScopeRef.current?.canPublish(token) ?? false,
+    });
+  }
+  recordingRef.current = isRecording;
+  enabledRef.current = enabled;
   segmentsRef.current = segments;
-  insightsRef.current = insights;
+  autoInsightsRef.current = autoInsights;
+  chatMessagesRef.current = chatMessages;
+
+  const updateInsightLifecycle = useCallback((
+    insightID: string,
+    lifecycle: CoachInsightLifecycle,
+  ): boolean => {
+    const transition = coachPolicy.transitionInsightLifecycle(
+      autoInsightsRef.current,
+      insightID,
+      lifecycle,
+    );
+    if (transition.status !== "changed") return false;
+    autoInsightsRef.current = transition.insights;
+    setAutoInsights(transition.insights);
+    return true;
+  }, []);
+  const insights = coachPolicy.combinePresentation({ autoInsights, chatMessages })
+    .map((insight) => insight.role ? insight : {
+      ...insight,
+      onLifecycleChange: (lifecycle: CoachInsightLifecycle) => {
+        return updateInsightLifecycle(insight.id, lifecycle);
+      },
+    });
 
   const analyze = useCallback(async () => {
     const segs = segmentsRef.current;
-    if (analyzingRef.current) return;
+    if (analyzingRef.current || !recordingRef.current || !enabledRef.current) return;
     if (segs.length === 0) return;
 
-    const fullText = segs.map((s) => s.text).join(" ");
-    const wordCount = fullText.split(/\s+/).length;
-    if (wordCount < MIN_WORDS) return;
+    const wordCount = coachPolicy.countTranscriptWords(segs);
+    if (wordCount < coachPolicy.cadence.minWords) return;
 
-    const newSegsSinceLast = segs.length - lastAnalyzedCount.current;
-    const timeSinceLast = Date.now() - lastAnalyzedTime.current;
+    const segmentCount = segs.length;
+    if (!cadenceRef.current?.canAnalyze(segmentCount)) return;
 
-    // Need enough new content AND enough time elapsed — be strict
-    if (lastAnalyzedTime.current > 0) {
-      if (timeSinceLast < MIN_INTERVAL_MS) return;
-      if (newSegsSinceLast < MIN_NEW_SEGMENTS && timeSinceLast < 90_000) return;
-    }
+    const context = coachPolicy.buildContext({
+      segments: segs,
+      priorAutoInsights: autoInsightsRef.current,
+    });
+    if (coachPolicy.isSessionBudgetExhausted(context)) return;
 
+    const sessionToken = sessionScopeRef.current?.capture();
+    if (sessionToken === null || sessionToken === undefined) return;
+    const request = analysisLifecycleRef.current?.begin(sessionToken);
+    if (!request) return;
     analyzingRef.current = true;
     setIsAnalyzing(true);
 
     try {
-      const previousContents = insightsRef.current.map((i) => i.content);
-      console.log(`[AI Coach] Analyzing — ${wordCount} words, ${previousContents.length} prior insights`);
-      const newInsights = await analyzeTranscriptLive(fullText, previousContents);
-      console.log(`[AI Coach] Got ${newInsights.length} new insight(s)`);
+      console.log(
+        `[AI Coach] Analyzing ${wordCount} words with ${context.transcriptSegments.length} recent segments and ${context.sessionInsightCount} prior auto-insights`,
+      );
+      const outcome = await analyzeTranscriptLive(context, { signal: request.signal });
+      if (!request.canPublish()) return;
 
-      if (mountedRef.current && newInsights.length > 0) {
-        setInsights((prev) => [...prev, ...newInsights]);
+      if (outcome.status === "insights") {
+        console.log(
+          `[AI Coach] Admitted ${outcome.insights.length} insight(s); rejected ${outcome.rejections.length}`,
+        );
+        setAutoInsights((previous) => {
+          const next = [...previous, ...outcome.insights];
+          autoInsightsRef.current = next;
+          return next;
+        });
+      } else if (outcome.status === "no_op") {
+        console.info("[AI Coach] No-op: no new insight cleared the admission policy");
+      } else if (outcome.status === "parse_failure") {
+        console.warn(`[AI Coach] Model output parse failure: ${outcome.error}`);
+        cadenceRef.current?.fail(segmentCount);
+        return;
+      } else {
+        console.info(
+          `[AI Coach] Rejected model output: ${outcome.rejections.map((item) => item.reason).join(", ")}`,
+        );
       }
 
-      lastAnalyzedCount.current = segs.length;
-      lastAnalyzedTime.current = Date.now();
-    } catch (err) {
-      console.warn("[AI Coach] Analysis failed:", err);
+      cadenceRef.current?.complete(segmentCount);
+    } catch (error) {
+      if (!isAbortError(error) && request.canPublish()) {
+        console.warn("[AI Coach] Analysis failed:", error);
+        cadenceRef.current?.fail(segmentCount);
+      }
     } finally {
-      analyzingRef.current = false;
-      if (mountedRef.current) setIsAnalyzing(false);
+      if (request.finish()) {
+        analyzingRef.current = false;
+        if (mountedRef.current) setIsAnalyzing(false);
+      }
     }
   }, []);
 
-  // Periodic check loop
   useEffect(() => {
-    if (!isRecording || !enabled) return;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      sessionScopeRef.current?.sync(false);
+      analysisLifecycleRef.current?.cancel();
+      replyAbortRef.current?.abort();
+    };
+  }, []);
 
-    const interval = setInterval(() => {
-      analyze();
-    }, CHECK_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isRecording, enabled, analyze]);
-
-  // Reset when recording starts
   useEffect(() => {
+    sessionScopeRef.current?.sync(isRecording);
+    cadenceRef.current?.reset();
+    analysisLifecycleRef.current?.cancel();
+    replyAbortRef.current?.abort();
+    replyAbortRef.current = null;
+    analyzingRef.current = false;
+    replyingRef.current = false;
+    setIsAnalyzing(false);
+    setIsReplying(false);
+
     if (isRecording) {
-      setInsights([]);
-      lastAnalyzedCount.current = 0;
-      lastAnalyzedTime.current = 0;
+      autoInsightsRef.current = [];
+      setAutoInsights([]);
+      setChatMessages([]);
     }
   }, [isRecording]);
 
-  // Cleanup
   useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
+    if (enabled) return;
+    analysisLifecycleRef.current?.cancel();
+    replyAbortRef.current?.abort();
+    replyAbortRef.current = null;
+    analyzingRef.current = false;
+    replyingRef.current = false;
+    setIsAnalyzing(false);
+    setIsReplying(false);
+  }, [enabled]);
 
-  // Send an interactive message to the AI SA
+  useEffect(() => {
+    if (!isRecording || !enabled) return;
+
+    const interval = setInterval(analyze, coachPolicy.cadence.checkIntervalMs);
+    return () => clearInterval(interval);
+  }, [isRecording, enabled, analyze]);
+
   const sendMessage = useCallback(async (question: string) => {
     const trimmed = question.trim();
-    if (!trimmed || isReplying) return;
+    if (
+      !trimmed
+      || replyingRef.current
+      || !recordingRef.current
+      || !enabledRef.current
+    ) return;
 
-    const userMsg: CoachInsight = {
+    const sessionToken = sessionScopeRef.current?.capture();
+    if (sessionToken === null || sessionToken === undefined) return;
+
+    const context = coachPolicy.buildContext({
+      segments: segmentsRef.current,
+      priorAutoInsights: autoInsightsRef.current,
+    });
+    const chatHistory = chatMessagesRef.current
+      .map((entry) => ({
+        role: entry.role as "user" | "assistant",
+        content: entry.content,
+      }));
+    const userMessage: CoachInsight = {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       type: "key_insight",
       content: trimmed,
       role: "user",
     };
-    setInsights((prev) => [...prev, userMsg]);
+
+    setChatMessages((previous) => [...previous, userMessage]);
+    replyingRef.current = true;
     setIsReplying(true);
+    const controller = new AbortController();
+    replyAbortRef.current?.abort();
+    replyAbortRef.current = controller;
+    const canPublishReply = () => coachPolicy.canPublishReply({
+      mounted: mountedRef.current,
+      recording: recordingRef.current,
+      enabled: enabledRef.current,
+      aborted: controller.signal.aborted,
+      sessionCurrent: sessionScopeRef.current?.canPublish(sessionToken) ?? false,
+    });
 
     try {
-      const segs = segmentsRef.current;
-      const transcript = segs.map((s) => s.text).join(" ");
-      const all = insightsRef.current;
-      const chatHistory = all
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
-      const priorInsights = all
-        .filter((m) => !m.role)
-        .map((m) => m.content);
+      const reply = await askAISA(trimmed, context, chatHistory, { signal: controller.signal });
+      if (!canPublishReply()) return;
 
-      const reply = await askAISA(trimmed, transcript, chatHistory, priorInsights);
-
-      if (mountedRef.current && reply.trim()) {
-        const assistantMsg: CoachInsight = {
+      const content = reply.trim();
+      if (content) {
+        const assistantMessage: CoachInsight = {
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           type: "key_insight",
-          content: reply.trim(),
+          content,
           role: "assistant",
         };
-        setInsights((prev) => [...prev, assistantMsg]);
+        setChatMessages((previous) => [...previous, assistantMessage]);
       }
-    } catch (err) {
-      console.warn("[AI SA] Reply failed:", err);
-      if (mountedRef.current) {
-        const errorMsg: CoachInsight = {
-          id: crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
-          type: "key_insight",
-          content: `Reply failed: ${err instanceof Error ? err.message : "unknown error"}`,
-          role: "assistant",
-        };
-        setInsights((prev) => [...prev, errorMsg]);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.warn("[AI SA] Reply failed:", error);
+        if (canPublishReply()) {
+          const errorMessage: CoachInsight = {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            type: "key_insight",
+            content: `Reply failed: ${error instanceof Error ? error.message : "unknown error"}`,
+            role: "assistant",
+          };
+          setChatMessages((previous) => [...previous, errorMessage]);
+        }
       }
     } finally {
-      if (mountedRef.current) setIsReplying(false);
+      if (replyAbortRef.current === controller) {
+        replyAbortRef.current = null;
+        if (canPublishReply()) {
+          replyingRef.current = false;
+          if (mountedRef.current) setIsReplying(false);
+        }
+      }
     }
-  }, [isReplying]);
+  }, []);
 
-  return { insights, isAnalyzing, isReplying, enabled, setEnabled, sendMessage };
+  return {
+    insights,
+    autoInsights,
+    chatMessages,
+    isAnalyzing,
+    isReplying,
+    enabled,
+    setEnabled,
+    sendMessage,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

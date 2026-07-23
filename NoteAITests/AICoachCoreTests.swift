@@ -1210,7 +1210,9 @@ final class AICoachSessionTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(source.contains("session.cancelPendingWork()"))
+        XCTAssertTrue(source.contains("coachSessionSlot.resume(publishedEntries: coachInsights)"))
+        XCTAssertTrue(source.contains("guard let session = coachSessionSlot.retire()"))
+        XCTAssertTrue(source.contains("Task { await session.cancel() }"))
         XCTAssertTrue(source.contains("coachOperationEpoch.invalidate()"))
         XCTAssertTrue(source.contains("let operationToken = coachOperationEpoch.capture"))
         XCTAssertGreaterThanOrEqual(
@@ -1295,6 +1297,121 @@ final class AICoachSessionTests: XCTestCase {
             coachEnabled: true,
             currentSessionID: session.id
         ))
+    }
+
+    @MainActor
+    func testFreshEnableGenerationCannotRepublishLateStateFromRetiredSession() async throws {
+        let staleGenerator = SuspendedDualCoachGenerator()
+        let freshGenerator = RecordingCoachGenerator(
+            analysisResult: .candidates([CoachInsightCandidate(
+                type: .talkingPoint,
+                content: "Ask: What is the fresh launch risk?",
+                basis: .recommendation,
+                sourceSegmentIDs: [],
+                topic: "fresh-launch-risk",
+                priority: .high
+            )]),
+            answer: "Fresh reply."
+        )
+        var generationCount = 0
+        let slot = CoachSessionSlot { id, autoInsights, chatMessages in
+            generationCount += 1
+            if generationCount == 1 {
+                return LiveCoachSession(
+                    id: id,
+                    generator: staleGenerator,
+                    clock: FixedCoachClock(now: Date()),
+                    contextPolicy: .testing,
+                    initialAutoInsights: autoInsights,
+                    initialChatMessages: chatMessages
+                )
+            }
+            return LiveCoachSession(
+                id: id,
+                generator: freshGenerator,
+                clock: FixedCoachClock(now: Date()),
+                contextPolicy: .testing,
+                initialAutoInsights: autoInsights,
+                initialChatMessages: chatMessages
+            )
+        }
+        let transcript = [TranscriptSegment(
+            id: 1,
+            text: "This transcript has enough material for both coach paths."
+        )]
+        let retiredSession = slot.beginRecording()
+        let staleAnalysis = Task { await retiredSession.analyze(transcript: transcript) }
+        let staleQuestion = Task {
+            await retiredSession.ask(question: "What is the stale risk?", transcript: transcript)
+        }
+        await staleGenerator.waitUntilBothRequestsStart()
+
+        XCTAssertTrue(slot.retire() === retiredSession)
+        XCTAssertNil(slot.current)
+
+        await staleGenerator.resumeAll(
+            analysis: .candidates([CoachInsightCandidate(
+                type: .talkingPoint,
+                content: "Ask: What is the stale launch risk?",
+                basis: .recommendation,
+                sourceSegmentIDs: [],
+                topic: "stale-launch-risk",
+                priority: .critical
+            )]),
+            answer: "Stale reply."
+        )
+        guard case .admitted = await staleAnalysis.value,
+              case .answered = await staleQuestion.value else {
+            return XCTFail("Expected the retired actor to complete before delayed cancellation")
+        }
+        let contaminatedSnapshot = await retiredSession.snapshot()
+        XCTAssertTrue(contaminatedSnapshot.autoInsights.contains { $0.content.contains("stale") })
+        XCTAssertTrue(contaminatedSnapshot.chatMessages.contains { $0.content == "Stale reply." })
+        await retiredSession.cancel()
+
+        let publishedInsight = CoachInsight(
+            type: .talkingPoint,
+            content: "Ask: What was already published?",
+            sessionID: retiredSession.id,
+            basis: .recommendation,
+            topic: "published-history",
+            priority: .high
+        )
+        let publishedQuestion = CoachInsight(
+            type: .keyInsight,
+            content: "What was already answered?",
+            role: .user,
+            sessionID: retiredSession.id
+        )
+        let publishedReply = CoachInsight(
+            type: .keyInsight,
+            content: "Published reply.",
+            role: .assistant,
+            sessionID: retiredSession.id
+        )
+        let freshSession = try XCTUnwrap(slot.resume(publishedEntries: [
+            publishedInsight,
+            publishedQuestion,
+            publishedReply,
+        ]))
+        XCTAssertFalse(freshSession === retiredSession)
+        XCTAssertEqual(freshSession.id, retiredSession.id)
+
+        guard case .admitted = await freshSession.analyze(transcript: transcript) else {
+            return XCTFail("Expected a valid operation in the fresh enable generation")
+        }
+        let refreshedSnapshot = await freshSession.snapshot()
+
+        XCTAssertEqual(
+            refreshedSnapshot.autoInsights.map(\.content),
+            ["Ask: What was already published?", "Ask: What is the fresh launch risk?"]
+        )
+        XCTAssertEqual(
+            refreshedSnapshot.chatMessages.map(\.content),
+            ["What was already answered?", "Published reply."]
+        )
+        XCTAssertFalse(refreshedSnapshot.autoInsights.contains { $0.content.contains("stale") })
+        XCTAssertFalse(refreshedSnapshot.chatMessages.contains { $0.content == "Stale reply." })
     }
 
     func testSessionReadinessDoesNotStartGeneration() async {

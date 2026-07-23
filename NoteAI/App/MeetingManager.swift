@@ -31,6 +31,64 @@ final class CoachOperationEpoch {
     }
 }
 
+/// Recording-scoped slot that severs retired actor generations synchronously.
+@MainActor
+final class CoachSessionSlot {
+    typealias Factory = @MainActor (
+        _ id: UUID,
+        _ initialAutoInsights: [CoachInsight],
+        _ initialChatMessages: [CoachChatMessage]
+    ) -> LiveCoachSession
+
+    private let factory: Factory
+    private(set) var recordingID: UUID?
+    private(set) var current: LiveCoachSession?
+
+    init(factory: @escaping Factory) {
+        self.factory = factory
+    }
+
+    func beginRecording() -> LiveCoachSession {
+        let id = UUID()
+        recordingID = id
+        let session = factory(id, [], [])
+        current = session
+        return session
+    }
+
+    func resume(publishedEntries: [CoachInsight]) -> LiveCoachSession? {
+        guard let recordingID else { return nil }
+        if let current { return current }
+
+        let autoInsights = publishedEntries.filter {
+            $0.sessionID == recordingID && $0.role == nil
+        }
+        let chatMessages = publishedEntries.compactMap { entry -> CoachChatMessage? in
+            guard entry.sessionID == recordingID, let role = entry.role else { return nil }
+            return CoachChatMessage(
+                id: entry.id,
+                timestamp: entry.timestamp,
+                sessionID: recordingID,
+                role: role,
+                content: entry.content
+            )
+        }
+        let session = factory(recordingID, autoInsights, chatMessages)
+        current = session
+        return session
+    }
+
+    func retire() -> LiveCoachSession? {
+        defer { current = nil }
+        return current
+    }
+
+    func endRecording() -> LiveCoachSession? {
+        recordingID = nil
+        return retire()
+    }
+}
+
 /// Central orchestrator that coordinates audio capture, transcription, and summarization.
 @MainActor
 final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
@@ -164,7 +222,15 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
     private var localHelperSessionId: UUID?
     private var recordingTimer: Timer?
     private var coachTimer: Timer?
-    private var liveCoachSession: LiveCoachSession?
+    private lazy var coachSessionSlot = CoachSessionSlot { [unowned self] id, autoInsights, chatMessages in
+        LiveCoachSession(
+            id: id,
+            generator: self.aiCoachEngine,
+            initialAutoInsights: autoInsights,
+            initialChatMessages: chatMessages
+        )
+    }
+    private var liveCoachSession: LiveCoachSession? { coachSessionSlot.current }
     private var coachAnalysisTask: Task<Void, Never>?
     private var coachAnalysisOperationID: UUID?
     private var coachQuestionTask: Task<Void, Never>?
@@ -1261,6 +1327,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
 
     private func startCoachLoopIfEnabled() {
         guard coachEnabled else { return }
+        guard coachSessionSlot.resume(publishedEntries: coachInsights) != nil else { return }
         coachTimer?.invalidate()
         // Poll every 8 seconds — mirrors the web implementation in useAICoach.ts.
         coachTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
@@ -1280,9 +1347,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         coachQuestionTask = nil
         coachAnalyzing = false
         coachReplying = false
-        if let session = liveCoachSession {
-            Task { await session.cancelPendingWork() }
-        }
+        retireCoachGeneration()
     }
 
     /// Send a chat message through the current recording-scoped coach session.
@@ -1590,7 +1655,7 @@ extension MeetingManager: LocalCaptureControlling {
 
     private func resetCoachStateForRecording() {
         endCoachSession()
-        liveCoachSession = LiveCoachSession(generator: aiCoachEngine)
+        _ = coachSessionSlot.beginRecording()
         coachInsights = []
         coachAnalyzing = false
         coachReplying = false
@@ -1598,8 +1663,7 @@ extension MeetingManager: LocalCaptureControlling {
 
     private func endCoachSession() {
         coachOperationEpoch.invalidate()
-        let session = liveCoachSession
-        liveCoachSession = nil
+        let session = coachSessionSlot.endRecording()
         coachAnalysisTask?.cancel()
         coachQuestionTask?.cancel()
         coachAnalysisTask = nil
@@ -1610,6 +1674,12 @@ extension MeetingManager: LocalCaptureControlling {
         if let session {
             Task { await session.cancel() }
         }
+    }
+
+    private func retireCoachGeneration() {
+        coachOperationEpoch.invalidate()
+        guard let session = coachSessionSlot.retire() else { return }
+        Task { await session.cancel() }
     }
 
     private func startDurationTimer() {

@@ -74,13 +74,19 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
         generator: any AICoachGenerating,
         clock: any CoachClock = SystemCoachClock(),
         contextPolicy: CoachContextPolicy = .default,
-        admissionPolicy: CoachAdmissionPolicy = .default
+        admissionPolicy: CoachAdmissionPolicy = .default,
+        initialAutoInsights: [CoachInsight] = [],
+        initialChatMessages: [CoachChatMessage] = []
     ) {
         self.id = id
         self.generator = generator
         self.clock = clock
         self.context = CoachContext(policy: contextPolicy)
         self.admissionPolicy = admissionPolicy
+        self.autoInsights = initialAutoInsights.filter {
+            $0.role == nil && $0.sessionID == id
+        }
+        self.chatMessages = initialChatMessages.filter { $0.sessionID == id }
     }
 
     func isAnalysisReady(transcript: [TranscriptSegment]) -> Bool {

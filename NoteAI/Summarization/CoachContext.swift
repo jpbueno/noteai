@@ -96,7 +96,7 @@ struct CoachContext: Sendable {
     private var analyzedSegmentCount = 0
     private var rolledSegmentCount = 0
     private var lastAnalysisDate: Date?
-    private var lastFailureDate: Date?
+    private var lastShortRetryDate: Date?
     private var rollingContext = ""
 
     init(policy: CoachContextPolicy = .default) {
@@ -119,8 +119,8 @@ struct CoachContext: Sendable {
            now.timeIntervalSince(lastAnalysisDate) < policy.minimumAnalysisInterval {
             return false
         }
-        if let lastFailureDate,
-           now.timeIntervalSince(lastFailureDate) < policy.failureRetryInterval {
+        if let lastShortRetryDate,
+           now.timeIntervalSince(lastShortRetryDate) < policy.failureRetryInterval {
             return false
         }
         return true
@@ -154,11 +154,16 @@ struct CoachContext: Sendable {
     mutating func completeAnalysis(segmentCount: Int, at date: Date) {
         analyzedSegmentCount = max(analyzedSegmentCount, segmentCount)
         lastAnalysisDate = date
-        lastFailureDate = nil
+        lastShortRetryDate = nil
+    }
+
+    mutating func completeNoOp(segmentCount: Int, at date: Date) {
+        analyzedSegmentCount = max(analyzedSegmentCount, segmentCount)
+        lastShortRetryDate = date
     }
 
     mutating func failAnalysis(at date: Date) {
-        lastFailureDate = date
+        lastShortRetryDate = date
     }
 
     mutating func prepareQuestion(
@@ -185,7 +190,7 @@ struct CoachContext: Sendable {
         analyzedSegmentCount = 0
         rolledSegmentCount = 0
         lastAnalysisDate = nil
-        lastFailureDate = nil
+        lastShortRetryDate = nil
         rollingContext = ""
     }
 

@@ -1612,6 +1612,71 @@ final class AICoachSessionTests: XCTestCase {
         XCTAssertEqual(malformedOutcome, .malformed("invalid JSON"))
     }
 
+    func testValidNoOpRetriesFreshTranscriptAfterShortIntervalWithoutHammeringUnchangedText() async {
+        let clock = MutableCoachClock(now: Date(timeIntervalSince1970: 1_000))
+        let generator = SequencedCoachGenerator(analysisResults: [
+            .candidates([]),
+            .candidates([CoachInsightCandidate(
+                type: .talkingPoint,
+                content: "Ask: What latency target defines launch readiness?",
+                basis: .recommendation,
+                sourceSegmentIDs: [],
+                topic: "latency-target",
+                priority: .high
+            )]),
+        ])
+        let session = LiveCoachSession(
+            generator: generator,
+            clock: clock,
+            contextPolicy: CoachContextPolicy(
+                minimumWordCount: 3,
+                minimumNewSegments: 2,
+                minimumAnalysisInterval: 300,
+                failureRetryInterval: 30,
+                maxRecentSegments: 12,
+                maxDeltaSegments: 6,
+                maxTranscriptCharacters: 9_000,
+                maxSpeakerCharacters: 80,
+                maxRollingContextCharacters: 500,
+                maxChatMessages: 4
+            )
+        )
+        let initialTranscript = [
+            TranscriptSegment(id: 1, text: "Thanks for joining today."),
+            TranscriptSegment(id: 2, text: "Let us begin with introductions."),
+        ]
+        let freshTranscript = initialTranscript + [
+            TranscriptSegment(id: 3, text: "Production requires a defined latency target."),
+            TranscriptSegment(id: 4, text: "Launch readiness depends on that target."),
+        ]
+
+        let initialOutcome = await session.analyze(transcript: initialTranscript)
+        XCTAssertEqual(initialOutcome, .noOp)
+
+        clock.advance(by: 29)
+        let earlyFreshOutcome = await session.analyze(transcript: freshTranscript)
+        XCTAssertEqual(earlyFreshOutcome, .notReady)
+
+        clock.advance(by: 1)
+        let unchangedOutcome = await session.analyze(transcript: initialTranscript)
+        XCTAssertEqual(unchangedOutcome, .notReady)
+
+        guard case .admitted(let insights) = await session.analyze(transcript: freshTranscript) else {
+            return XCTFail("Expected fresh transcript to retry after the short interval")
+        }
+        XCTAssertEqual(insights.map(\.content), ["Ask: What latency target defines launch readiness?"])
+
+        clock.advance(by: 299)
+        let postAdmissionTranscript = freshTranscript + [
+            TranscriptSegment(id: 5, text: "The target must include queueing latency."),
+            TranscriptSegment(id: 6, text: "The owner must confirm the percentile."),
+        ]
+        let postAdmissionIsReady = await session.isAnalysisReady(transcript: postAdmissionTranscript)
+        let analysisRequestCount = await generator.recordedAnalysisRequestCount()
+        XCTAssertFalse(postAdmissionIsReady)
+        XCTAssertEqual(analysisRequestCount, 2)
+    }
+
     func testCancelledSessionRejectsLateGeneration() async {
         let generator = SuspendedCoachGenerator()
         let session = LiveCoachSession(
@@ -1890,6 +1955,52 @@ private struct FixedCoachClock: CoachClock {
     let now: Date
 
     func currentDate() -> Date { now }
+}
+
+private final class MutableCoachClock: CoachClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var now: Date
+
+    init(now: Date) {
+        self.now = now
+    }
+
+    func currentDate() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return now
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        now = now.addingTimeInterval(interval)
+        lock.unlock()
+    }
+}
+
+private actor SequencedCoachGenerator: AICoachGenerating {
+    private var analysisResults: [CoachGenerationResult]
+    private var analysisRequestCount = 0
+
+    init(analysisResults: [CoachGenerationResult]) {
+        self.analysisResults = analysisResults
+    }
+
+    func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult {
+        analysisRequestCount += 1
+        guard !analysisResults.isEmpty else {
+            return .malformed("Unexpected extra analysis request")
+        }
+        return analysisResults.removeFirst()
+    }
+
+    func answerQuestion(_ request: CoachQuestionRequest) async throws -> String {
+        ""
+    }
+
+    func recordedAnalysisRequestCount() -> Int {
+        analysisRequestCount
+    }
 }
 
 private actor RecordingCoachGenerator: AICoachGenerating {

@@ -126,8 +126,11 @@ actor LiveCoachSession: CoachInsightLifecycleMutating {
                 context.failAnalysis(at: completionDate)
                 return .malformed(reason)
             case .candidates(let candidates):
+                guard !candidates.isEmpty else {
+                    context.completeNoOp(segmentCount: transcript.count, at: completionDate)
+                    return .noOp
+                }
                 context.completeAnalysis(segmentCount: transcript.count, at: completionDate)
-                guard !candidates.isEmpty else { return .noOp }
                 let decision = admissionPolicy.evaluate(
                     candidates: candidates,
                     transcript: transcript,

@@ -100,6 +100,54 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains("converterCache[srcFormat.sampleRate]"))
     }
 
+    func testAudioCaptureCoalescesOnlyLevelPublicationAndKeepsAudioDeliverySynchronous() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/Audio/AudioCaptureManager.swift"))
+        let appAudioHandler = try sourceFragment(
+            named: "private func handleAppAudioBuffer(_ buffer: AVAudioPCMBuffer)",
+            before: "    private func handleMicBuffer",
+            in: source
+        )
+        let microphoneHandler = try sourceFragment(
+            named: "private func handleMicBuffer(_ buffer: AVAudioPCMBuffer)",
+            before: "    /// Resample any audio buffer",
+            in: source
+        )
+
+        for (handler, ringName, sourceName) in [
+            (appAudioHandler, "appAudioRing", "systemAudio"),
+            (microphoneHandler, "micAudioRing", "microphone"),
+        ] {
+            XCTAssertTrue(handler.contains("updateDiagnostics(publication: .coalesced)"))
+            XCTAssertTrue(handler.contains("\(ringName).append(resampled)"))
+            XCTAssertTrue(handler.contains("\(ringName).mergeIfReady(targetDuration: 7.0)"))
+            XCTAssertTrue(handler.contains("onAudioBuffer?(CapturedAudioBuffer(source: .\(sourceName), buffer: merged))"))
+            XCTAssertFalse(handler.contains("asyncAfter"))
+            XCTAssertFalse(handler.contains("Task {"))
+        }
+    }
+
+    func testLiveTranscriptUsesLazyRowsAndNonAnimatedBottomScrolling() throws {
+        let source = try String(contentsOf: repositoryRoot()
+            .appendingPathComponent("NoteAI/UI/TranscriptViewer/TranscriptView.swift"))
+        let transcriptArea = try sourceFragment(
+            named: "private var transcriptArea: some View",
+            before: "    @ViewBuilder\n    private var stableSpeakerPromptOverlay",
+            in: source
+        )
+
+        XCTAssertTrue(transcriptArea.contains("ScrollView {\n                LazyVStack(alignment: .leading, spacing: 6)"))
+        XCTAssertTrue(transcriptArea.contains("ForEach(segments)"))
+        XCTAssertTrue(transcriptArea.contains(".id(segment.id)"))
+        XCTAssertTrue(transcriptArea.contains(".textSelection(.enabled)"))
+        XCTAssertEqual(
+            transcriptArea.components(separatedBy: "proxy.scrollTo(last.id, anchor: .bottom)").count - 1,
+            2
+        )
+        XCTAssertEqual(transcriptArea.components(separatedBy: "withAnimation").count - 1, 1)
+        XCTAssertTrue(transcriptArea.contains("proxy.scrollTo(request.segmentID, anchor: .center)"))
+    }
+
     func testMicrophoneCaptureAvoidsVoiceProcessingDucking() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/MicrophoneCaptureManager.swift"))

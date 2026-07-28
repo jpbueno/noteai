@@ -1304,6 +1304,22 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(source.contains(".frame(height: layout.actionButtonHeight)"))
     }
 
+    func testTopBarRecordingControlDoesNotContinuouslyAnimateWhileRecording() throws {
+        let source = try meetingLibrarySource()
+        let controlStart = try XCTUnwrap(
+            source.range(of: "private func topBarRecordingControl(layout: CommandCenterLayout) -> some View")
+        )
+        let nextFunction = try XCTUnwrap(
+            source.range(of: "private func sidebar(layout: CommandCenterLayout)", range: controlStart.upperBound..<source.endIndex)
+        )
+        let controlSource = String(source[controlStart.lowerBound..<nextFunction.lowerBound])
+
+        XCTAssertTrue(controlSource.contains(".fill(Theme.danger)"))
+        XCTAssertFalse(controlSource.contains("repeatForever"))
+        XCTAssertFalse(controlSource.contains("pulseAnimation"))
+        XCTAssertFalse(controlSource.contains(".onAppear { withAnimation"))
+    }
+
     func testRecordingControlLivesInTopBarBeforeAICopilot() throws {
         let source = try meetingLibrarySource()
 

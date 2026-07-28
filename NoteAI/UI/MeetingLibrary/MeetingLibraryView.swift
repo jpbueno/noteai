@@ -62,7 +62,6 @@ struct MeetingLibraryView: View {
     @ObservedObject var ttsService: TextToSpeechService
     @State private var selection: SidebarSelection? = .home
     @State private var settingsWindow: NSWindow?
-    @State private var pulseAnimation = false
     @State private var showChatDrawer = false
     @State private var sidebarWidth: CGFloat = 0
     @State private var sidebarDragStartWidth: CGFloat?
@@ -456,7 +455,6 @@ struct MeetingLibraryView: View {
                     Circle()
                         .fill(Theme.danger)
                         .frame(width: round(8 * layout.scale), height: round(8 * layout.scale))
-                        .opacity(pulseAnimation ? 0.4 : 1.0)
                     Image(systemName: LibraryListPresentation.SidebarItemKind.meeting.icon)
                         .font(.system(size: layout.smallFontSize, weight: .semibold))
                         .foregroundStyle(LibraryListPresentation.SidebarItemKind.meeting.tint)
@@ -485,8 +483,6 @@ struct MeetingLibraryView: View {
                 .accessibilityLabel(Text("Show live transcription"))
                 .accessibilityAddTraits(.isButton)
                 .help("Show live transcription")
-                .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { pulseAnimation = true } }
-                .onDisappear { pulseAnimation = false }
             } else {
                 Button {
                     meetingManager.startRecording()

@@ -185,7 +185,7 @@ struct LiveTranscriptView: View {
     private var transcriptArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     let segments = meetingManager.currentTranscript
 
                     if segments.isEmpty {
@@ -245,7 +245,7 @@ struct LiveTranscriptView: View {
             .onChange(of: meetingManager.currentTranscript.count) { _, _ in
                 if transcriptScrollState.isFollowingLive,
                    let last = meetingManager.currentTranscript.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
             .onChange(of: transcriptScrollState.sourceRequest) { _, request in
@@ -259,9 +259,7 @@ struct LiveTranscriptView: View {
                    let last = meetingManager.currentTranscript.last {
                     Button {
                         transcriptScrollState.resumeFollowing()
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     } label: {
                         Image(systemName: "arrow.down.to.line")
                             .font(.system(size: 11, weight: .semibold))

@@ -159,6 +159,78 @@ struct RecordingDiagnosticsSnapshot: Equatable {
     }
 }
 
+enum RecordingDiagnosticsPublicationPriority {
+    case immediate
+    case coalesced
+}
+
+enum RecordingDiagnosticsPublicationDirective: Equatable {
+    case none
+    case publish(RecordingDiagnosticsSnapshot)
+    case schedule(after: TimeInterval)
+}
+
+/// Keeps high-frequency level metadata behind a small publication cadence
+/// while allowing capture and permission state changes through immediately.
+struct RecordingDiagnosticsPublicationPolicy {
+    private let minimumInterval: TimeInterval
+    private var lastPublicationTime: TimeInterval?
+    private var pendingSnapshot: RecordingDiagnosticsSnapshot?
+    private var hasScheduledFlush = false
+
+    init(minimumInterval: TimeInterval = 0.25) {
+        precondition(minimumInterval > 0)
+        self.minimumInterval = minimumInterval
+    }
+
+    mutating func submit(
+        _ snapshot: RecordingDiagnosticsSnapshot,
+        priority: RecordingDiagnosticsPublicationPriority,
+        at time: TimeInterval
+    ) -> RecordingDiagnosticsPublicationDirective {
+        if priority == .immediate {
+            pendingSnapshot = nil
+            lastPublicationTime = time
+            return .publish(snapshot)
+        }
+
+        guard let lastPublicationTime else {
+            self.lastPublicationTime = time
+            return .publish(snapshot)
+        }
+
+        let remainingDelay = minimumInterval - (time - lastPublicationTime)
+        guard remainingDelay > 0 else {
+            pendingSnapshot = nil
+            self.lastPublicationTime = time
+            return .publish(snapshot)
+        }
+
+        pendingSnapshot = snapshot
+        guard !hasScheduledFlush else { return .none }
+
+        hasScheduledFlush = true
+        return .schedule(after: remainingDelay)
+    }
+
+    mutating func flush(at time: TimeInterval) -> RecordingDiagnosticsPublicationDirective {
+        hasScheduledFlush = false
+        guard let pendingSnapshot else { return .none }
+
+        if let lastPublicationTime {
+            let remainingDelay = minimumInterval - (time - lastPublicationTime)
+            if remainingDelay > 0 {
+                hasScheduledFlush = true
+                return .schedule(after: remainingDelay)
+            }
+        }
+
+        self.pendingSnapshot = nil
+        lastPublicationTime = time
+        return .publish(pendingSnapshot)
+    }
+}
+
 extension RecordingCaptureStatus {
     var diagnosticDescription: String {
         switch self {

@@ -43,7 +43,12 @@ final class AudioCaptureManager: NSObject {
     private let appAudioRing = AudioBufferRing(capacity: 60)
     private let micAudioRing = AudioBufferRing(capacity: 60)
     private var diagnostics = RecordingDiagnosticsSnapshot.currentPermissions()
+    private var diagnosticsPublicationPolicy = RecordingDiagnosticsPublicationPolicy()
     private let diagnosticsLock = NSLock()
+    private let diagnosticsPublicationQueue = DispatchQueue(
+        label: "com.noteai.recording-diagnostics-publication",
+        qos: .utility
+    )
     private lazy var outputVolumePreserver = SystemOutputVolumePreserver { [weak self] message in
         self?.log(message)
     }
@@ -306,7 +311,7 @@ final class AudioCaptureManager: NSObject {
 
     private func handleAppAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         let resampled = resampleTo16kMono(buffer)
-        updateDiagnostics { snapshot in
+        updateDiagnostics(publication: .coalesced) { snapshot in
             snapshot.updateLevel(.systemAudio, rms: rms(resampled))
         }
         appAudioRing.append(resampled)
@@ -318,7 +323,7 @@ final class AudioCaptureManager: NSObject {
 
     private func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
         let resampled = resampleTo16kMono(buffer)
-        updateDiagnostics { snapshot in
+        updateDiagnostics(publication: .coalesced) { snapshot in
             snapshot.updateLevel(.microphone, rms: rms(resampled))
         }
         micAudioRing.append(resampled)
@@ -393,12 +398,43 @@ final class AudioCaptureManager: NSObject {
         return sqrt(sum / Float(count))
     }
 
-    private func updateDiagnostics(_ update: (inout RecordingDiagnosticsSnapshot) -> Void) {
+    private func updateDiagnostics(
+        publication priority: RecordingDiagnosticsPublicationPriority = .immediate,
+        _ update: (inout RecordingDiagnosticsSnapshot) -> Void
+    ) {
         diagnosticsLock.lock()
         update(&diagnostics)
-        let snapshot = diagnostics
+        let directive = diagnosticsPublicationPolicy.submit(
+            diagnostics,
+            priority: priority,
+            at: ProcessInfo.processInfo.systemUptime
+        )
+        enqueueDiagnosticsPublicationLocked(directive)
         diagnosticsLock.unlock()
-        onDiagnosticsChange?(snapshot)
+    }
+
+    private func flushDiagnosticsPublication() {
+        diagnosticsLock.lock()
+        let directive = diagnosticsPublicationPolicy.flush(at: ProcessInfo.processInfo.systemUptime)
+        enqueueDiagnosticsPublicationLocked(directive)
+        diagnosticsLock.unlock()
+    }
+
+    private func enqueueDiagnosticsPublicationLocked(
+        _ directive: RecordingDiagnosticsPublicationDirective
+    ) {
+        switch directive {
+        case .none:
+            break
+        case .publish(let snapshot):
+            diagnosticsPublicationQueue.async { [weak self] in
+                self?.onDiagnosticsChange?(snapshot)
+            }
+        case .schedule(let delay):
+            diagnosticsPublicationQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.flushDiagnosticsPublication()
+            }
+        }
     }
 
     private func writeDiagnosticsLog(_ event: String) {

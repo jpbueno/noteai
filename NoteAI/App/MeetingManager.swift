@@ -553,7 +553,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
             print("[MeetingManager] Summarization failed: \(error)")
             lastError = "Summarization failed: \(error.localizedDescription)"
             summarizationStatus = .failed(error: error.localizedDescription)
-            summary = MeetingCaptureWorkflow.failedSummary(errorDescription: error.localizedDescription)
+            summary = MeetingCaptureWorkflow.failedSummary(error: error)
         }
 
         let meeting = MeetingCaptureWorkflow.makeMeeting(

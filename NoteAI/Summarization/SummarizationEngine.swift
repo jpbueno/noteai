@@ -3,13 +3,48 @@ import Foundation
 /// Generates structured meeting summaries by routing to the user's chosen LLM provider/model.
 /// Supports OpenRouter (100+ models), Anthropic direct, and OpenAI direct.
 final class SummarizationEngine {
+    private let requestContextOverride: LLMRequestContext?
+    private let templateOverride: MeetingTemplate?
+
+    init() {
+        requestContextOverride = nil
+        templateOverride = nil
+    }
+
+    init(
+        client: LLMClient,
+        provider: LLMProviderType,
+        model: String,
+        template: MeetingTemplate = .auto
+    ) {
+        requestContextOverride = LLMRequestContext(provider: provider, model: model, client: client)
+        templateOverride = template
+    }
 
     func summarize(transcript: String) async throws -> MeetingSummary {
         let request = try buildRequestContext()
         let template = selectedTemplate()
         let prompt = buildPrompt(transcript: transcript, template: template)
-        let responseText = try await complete(prompt: prompt, context: request)
-        return try AITasks.parseMeetingSummary(responseText)
+
+        do {
+            let responseText = try await complete(prompt: prompt, context: request)
+            return try AITasks.parseMeetingSummary(responseText)
+        } catch {
+            guard shouldRecoverStructuredSummary(from: error) else {
+                throw error
+            }
+        }
+
+        let recoveryPrompt = buildRecoveryPrompt(transcript: transcript, template: template)
+        do {
+            let responseText = try await complete(prompt: recoveryPrompt, context: request)
+            return try AITasks.parseMeetingSummary(responseText)
+        } catch {
+            guard shouldRecoverStructuredSummary(from: error) else {
+                throw error
+            }
+            throw SummarizationError.parseError
+        }
     }
 
     func regenerateSection(_ section: MeetingSummarySection, meeting: Meeting) async throws -> MeetingSummarySectionContent {
@@ -66,6 +101,10 @@ final class SummarizationEngine {
     }
 
     private func buildRequestContext() throws -> LLMRequestContext {
+        if let requestContextOverride {
+            return requestContextOverride
+        }
+
         let provider = selectedProvider()
         let model = selectedModelID()
         let apiKey = resolveAPIKey(for: provider)
@@ -138,6 +177,10 @@ final class SummarizationEngine {
     }
 
     private func selectedTemplate() -> MeetingTemplate {
+        if let templateOverride {
+            return templateOverride
+        }
+
         let raw = UserDefaults.standard.string(forKey: "meetingTemplate") ?? "auto"
         return MeetingTemplate(rawValue: raw) ?? .auto
     }
@@ -154,12 +197,50 @@ final class SummarizationEngine {
 
         Analyze the following meeting transcript and produce a structured summary.
 
+        Keep the response concise so the JSON is complete:
+        - At most 5 decisions, 8 action items, 8 topics, and 5 open questions
+        - Keep every string under 160 characters
+        - Use empty arrays when a section does not apply
+        - Do not quote long passages from the transcript
+
         Output ONLY valid JSON with this exact structure:
         \(template.jsonStructure)
 
         TRANSCRIPT:
         \(transcript)
         """
+    }
+
+    private func buildRecoveryPrompt(transcript: String, template: MeetingTemplate) -> String {
+        """
+        RECOVERY ATTEMPT: The previous structured summary was incomplete or invalid.
+
+        Summarize the meeting again in an extra-compact form. \(template.promptInstruction)
+        - At most 4 decisions, 6 action items, 6 topics, and 4 open questions
+        - Keep every string under 120 characters
+        - Use empty arrays when a section does not apply
+        - Do not include commentary, Markdown, code fences, or transcript quotations
+
+        Output ONLY one complete valid JSON object with this exact structure:
+        \(template.jsonStructure)
+
+        TRANSCRIPT:
+        \(transcript)
+        """
+    }
+
+    private func shouldRecoverStructuredSummary(from error: Error) -> Bool {
+        guard let summarizationError = error as? SummarizationError else {
+            return error is DecodingError
+        }
+
+        if case .parseError = summarizationError {
+            return true
+        }
+        if case .responseTruncated = summarizationError {
+            return true
+        }
+        return false
     }
 
     private func buildSectionPrompt(section: MeetingSummarySection, meeting: Meeting) -> String {
@@ -235,6 +316,7 @@ enum SummarizationError: LocalizedError {
     case noAPIKey
     case apiError(statusCode: Int, message: String)
     case parseError
+    case responseTruncated
     case invalidURL(String)
 
     var errorDescription: String? {
@@ -244,7 +326,9 @@ enum SummarizationError: LocalizedError {
         case .apiError(let code, let message):
             return "API error (\(code)): \(SummarizationError.readableAPIMessage(from: message))"
         case .parseError:
-            return "Failed to parse summary from LLM response"
+            return "The model returned an incomplete or invalid summary. NoteAI retried once, but could not decode it."
+        case .responseTruncated:
+            return "The model stopped before completing the summary response."
         case .invalidURL(let url):
             return "Invalid API URL: \(url)"
         }

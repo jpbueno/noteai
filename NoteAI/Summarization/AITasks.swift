@@ -23,7 +23,12 @@ enum AITasks {
             throw SummarizationError.parseError
         }
 
-        let raw = try JSONDecoder().decode(RawSummary.self, from: jsonData)
+        let raw: RawSummary
+        do {
+            raw = try JSONDecoder().decode(RawSummary.self, from: jsonData)
+        } catch {
+            throw SummarizationError.parseError
+        }
         return MeetingSummary(
             decisions: raw.decisions,
             actionItems: actionItems(from: raw.actionItems),

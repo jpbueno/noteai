@@ -1,6 +1,9 @@
 import Foundation
 
 enum MeetingCaptureWorkflow {
+    private static let retrySummaryGuidance = "Use Regenerate summary to try again. If the problem continues, select another model in Settings > AI."
+    private static let settingsGuidance = "Check Settings > AI to verify your API key and model are configured correctly."
+
     static func transcriptText(
         from transcript: [TranscriptSegment],
         speakerLabels: [String: String] = [:],
@@ -53,11 +56,34 @@ enum MeetingCaptureWorkflow {
     }
 
     static func failedSummary(errorDescription: String) -> MeetingSummary {
-        MeetingSummary(
+        let normalizedError = errorDescription.lowercased()
+        let guidance = normalizedError.contains("correct format")
+            || normalizedError.contains("parse")
+            || normalizedError.contains("incomplete")
+            ? retrySummaryGuidance
+            : settingsGuidance
+
+        return failedSummary(errorDescription: errorDescription, guidance: guidance)
+    }
+
+    static func failedSummary(error: Error) -> MeetingSummary {
+        let guidance: String
+        switch error {
+        case SummarizationError.parseError, SummarizationError.responseTruncated:
+            guidance = retrySummaryGuidance
+        default:
+            guidance = settingsGuidance
+        }
+
+        return failedSummary(errorDescription: error.localizedDescription, guidance: guidance)
+    }
+
+    private static func failedSummary(errorDescription: String, guidance: String) -> MeetingSummary {
+        return MeetingSummary(
             decisions: [],
             actionItems: [],
             topics: ["Summarization failed: \(errorDescription)"],
-            openQuestions: ["Check Settings > AI to verify your API key and model are configured correctly."],
+            openQuestions: [guidance],
             wasSummarized: false
         )
     }

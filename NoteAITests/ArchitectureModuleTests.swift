@@ -391,6 +391,26 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertFalse(fallback.wasSummarized)
     }
 
+    func testMeetingCaptureWorkflowDoesNotBlameSettingsForMalformedModelOutput() {
+        let fallback = MeetingCaptureWorkflow.failedSummary(
+            errorDescription: "The data couldn't be read because it isn't in the correct format."
+        )
+
+        XCTAssertEqual(
+            fallback.openQuestions,
+            ["Use Regenerate summary to try again. If the problem continues, select another model in Settings > AI."]
+        )
+    }
+
+    func testMeetingCaptureWorkflowUsesRetryGuidanceForTypedParseFailure() {
+        let fallback = MeetingCaptureWorkflow.failedSummary(error: SummarizationError.parseError)
+
+        XCTAssertEqual(
+            fallback.openQuestions,
+            ["Use Regenerate summary to try again. If the problem continues, select another model in Settings > AI."]
+        )
+    }
+
     func testMeetingCaptureWorkflowIncludesSpeakerContextForSummaries() {
         let segments = [
             TranscriptSegment(id: 1, text: "We should prioritize the beta.", startTime: 3, speaker: "speaker-remote", confidence: 0.9)
@@ -844,6 +864,116 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertEqual(summary.decisions, ["Go"])
         XCTAssertEqual(summary.actionItems.first?.task, "Email")
         XCTAssertTrue(summary.wasSummarized)
+    }
+
+    func testAITasksReportsMalformedSummaryAsParseError() {
+        let truncated = """
+        {"decisions":["Go"],"actionItems":[],"topics":["Launch"
+        """
+
+        XCTAssertThrowsError(try AITasks.parseMeetingSummary(truncated)) { error in
+            guard case SummarizationError.parseError = error else {
+                return XCTFail("Expected a summarization parse error, got \(error)")
+            }
+        }
+    }
+
+    func testSummarizationEngineUsesInjectedClientForStructuredSummary() async throws {
+        let client = SequencedLLMClient(responses: [
+            """
+            {"decisions":["Proceed"],"actionItems":[],"topics":["Inference"],"openQuestions":[]}
+            """
+        ])
+        let engine = SummarizationEngine(
+            client: client,
+            provider: .nvidia,
+            model: "test-model",
+            template: .general
+        )
+
+        let summary = try await engine.summarize(transcript: "A short transcript")
+        let requestCount = await client.requestCount
+        let prompts = await client.recordedPrompts()
+
+        XCTAssertEqual(summary.decisions, ["Proceed"])
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertTrue(prompts[0].contains("At most 5 decisions, 8 action items, 8 topics, and 5 open questions"))
+        XCTAssertTrue(prompts[0].contains("Keep every string under 160 characters"))
+    }
+
+    func testSummarizationEngineRetriesMalformedOutputWithConciseRecoveryPrompt() async throws {
+        let client = SequencedLLMClient(responses: [
+            """
+            {"decisions":["Proceed"],"actionItems":[],"topics":["Inference"
+            """,
+            """
+            {"decisions":["Proceed"],"actionItems":[],"topics":["Inference"],"openQuestions":[]}
+            """
+        ])
+        let engine = SummarizationEngine(
+            client: client,
+            provider: .nvidia,
+            model: "test-model",
+            template: .general
+        )
+
+        let summary = try await engine.summarize(transcript: "A long transcript")
+        let prompts = await client.recordedPrompts()
+
+        XCTAssertEqual(summary.decisions, ["Proceed"])
+        XCTAssertEqual(prompts.count, 2)
+        XCTAssertTrue(prompts[1].contains("RECOVERY ATTEMPT"))
+        XCTAssertTrue(prompts[1].contains("Keep every string under 120 characters"))
+    }
+
+    func testSummarizationEngineRetriesWhenProviderReportsTokenLimit() async throws {
+        let client = SequencedLLMClient(results: [
+            .failure(.responseTruncated),
+            .success(
+                """
+                {"decisions":["Proceed"],"actionItems":[],"topics":["Inference"],"openQuestions":[]}
+                """
+            )
+        ])
+        let engine = SummarizationEngine(
+            client: client,
+            provider: .nvidia,
+            model: "test-model",
+            template: .general
+        )
+
+        let summary = try await engine.summarize(transcript: "A long transcript")
+        let requestCount = await client.requestCount
+
+        XCTAssertEqual(summary.decisions, ["Proceed"])
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    func testOpenRouterCompletionParserReturnsCompletedContent() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "choices": [[
+                "finish_reason": "stop",
+                "message": ["content": "{\"decisions\":[]}"]
+            ]]
+        ])
+
+        XCTAssertEqual(try OpenRouterClient.responseText(from: data), "{\"decisions\":[]}")
+    }
+
+    func testOpenRouterCompletionParserRejectsTokenLimitedOutput() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "choices": [[
+                "finish_reason": "length",
+                "message": ["content": "{\"decisions\":[\"Incomplete"]
+            ]]
+        ])
+
+        XCTAssertThrowsError(try OpenRouterClient.responseText(from: data)) { error in
+            XCTAssertEqual(
+                error.localizedDescription,
+                "The model stopped before completing the summary response."
+            )
+        }
     }
 
     func testParsedActionItemsUseDeterministicContentIDs() throws {
@@ -2985,5 +3115,30 @@ final class ArchitectureModuleTests: XCTestCase {
         let start = try XCTUnwrap(source.range(of: startMarker))
         let end = try XCTUnwrap(source.range(of: endMarker, range: start.upperBound..<source.endIndex))
         return String(source[start.lowerBound..<end.lowerBound])
+    }
+}
+
+private actor SequencedLLMClient: LLMClient {
+    private var results: [Result<String, SummarizationError>]
+    private(set) var prompts: [String] = []
+
+    init(responses: [String]) {
+        results = responses.map(Result.success)
+    }
+
+    init(results: [Result<String, SummarizationError>]) {
+        self.results = results
+    }
+
+    var requestCount: Int { prompts.count }
+
+    func recordedPrompts() -> [String] { prompts }
+
+    func complete(prompt: String, model: String) async throws -> String {
+        prompts.append(prompt)
+        guard !results.isEmpty else {
+            throw SummarizationError.apiError(statusCode: 500, message: "No stub response")
+        }
+        return try results.removeFirst().get()
     }
 }

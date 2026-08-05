@@ -36,7 +36,7 @@ struct OpenRouterClient: LLMClient {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "messages": [
                 ["role": "user", "content": prompt]
             ]
@@ -54,13 +54,7 @@ struct OpenRouterClient: LLMClient {
             throw SummarizationError.apiError(statusCode: httpResponse.statusCode, message: body)
         }
 
-        // Parse OpenAI-compatible response format
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let choices = json?["choices"] as? [[String: Any]]
-        let message = choices?.first?["message"] as? [String: Any]
-        let text = message?["content"] as? String ?? ""
-
-        return text
+        return try Self.responseText(from: data)
     }
 
     func chat(messages: [(role: String, content: String)], model: String) async throws -> String {
@@ -90,8 +84,16 @@ struct OpenRouterClient: LLMClient {
             throw SummarizationError.apiError(statusCode: code, message: body)
         }
 
+        return try Self.responseText(from: data)
+    }
+
+    static func responseText(from data: Data) throws -> String {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let choices = json?["choices"] as? [[String: Any]]
+        let finishReason = choices?.first?["finish_reason"] as? String
+        if finishReason == "length" || finishReason == "max_tokens" {
+            throw SummarizationError.responseTruncated
+        }
         let message = choices?.first?["message"] as? [String: Any]
         return message?["content"] as? String ?? ""
     }

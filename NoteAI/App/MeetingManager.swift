@@ -102,9 +102,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
 
     @Published var state: State = .idle
     @Published var currentTranscript: [TranscriptSegment] = []
-    @Published var currentSpeakerProfiles: [String: SpeakerProfile] = [:]
-    @Published var currentSpeakerSuggestions: [MeetingSpeakerSuggestion] = []
-    @Published var pendingSpeakerTagID: String?
     @Published var meetings: [Meeting] = []
     @Published var lastError: String?
     @Published var recordingDuration: TimeInterval = 0
@@ -235,7 +232,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
     private var coachAnalysisOperationID: UUID?
     private var coachQuestionTask: Task<Void, Never>?
     private let coachOperationEpoch = CoachOperationEpoch()
-    private var deferredSpeakerTagIDs = Set<String>()
     private var speakerAttribution = TranscriptSpeakerAttribution()
     private var cancellables = Set<AnyCancellable>()
     private var onboardingPermissionRefreshSequenceTask: Task<Void, Never>?
@@ -374,10 +370,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         }
         state = .recording
         currentTranscript = []
-        currentSpeakerProfiles = [:]
-        currentSpeakerSuggestions = meetingDetector.speakerSuggestionsForCurrentMeeting()
-        pendingSpeakerTagID = nil
-        deferredSpeakerTagIDs = []
         speakerAttribution = TranscriptSpeakerAttribution()
         currentMeetingStart = Date()
         currentDetectedAppName = detectedAppName
@@ -411,7 +403,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
                 state = .idle
                 currentDetectedAppName = nil
                 currentPreferredCaptureSource = nil
-                currentSpeakerSuggestions = []
             }
         }
     }
@@ -443,22 +434,16 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
             await transcriptionEngine.reset()
 
             let transcript = currentTranscript
-            let speakerProfiles = currentSpeakerProfiles
             let meeting = await summarizeAndSaveMeeting(
                 title: title,
                 startedAt: currentMeetingStart,
-                transcript: transcript,
-                speakerProfiles: speakerProfiles
+                transcript: transcript
             )
             if meeting != nil {
                 currentTranscript = []
-                currentSpeakerProfiles = [:]
             }
 
             state = .idle
-            pendingSpeakerTagID = nil
-            deferredSpeakerTagIDs = []
-            currentSpeakerSuggestions = []
         }
     }
 
@@ -466,10 +451,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         showMeetingNamePrompt = false
         pendingMeetingName = ""
         currentTranscript = []
-        currentSpeakerProfiles = [:]
-        currentSpeakerSuggestions = []
-        pendingSpeakerTagID = nil
-        deferredSpeakerTagIDs = []
         speakerAttribution = TranscriptSpeakerAttribution()
         currentMeetingStart = nil
         currentDetectedAppName = nil
@@ -692,61 +673,11 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
         return updated
     }
 
-    var pendingSpeakerProfile: SpeakerProfile? {
-        guard let pendingSpeakerTagID else { return nil }
-        return currentSpeakerProfiles[pendingSpeakerTagID] ?? SpeakerProfile(speakerID: pendingSpeakerTagID)
-    }
-
-    var pendingSpeakerSuggestions: [MeetingSpeakerSuggestion] {
-        let usedNames = Set(currentSpeakerProfiles.values.compactMap { profile in
-            profile.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        })
-
-        return currentSpeakerSuggestions.filter { suggestion in
-            !usedNames.contains(suggestion.displayName.lowercased())
-        }
-    }
-
     func currentSpeakerDisplayName(for segment: TranscriptSegment) -> String {
         TranscriptSpeakerLabels.displayName(
             for: TranscriptSpeakerLabels.speakerID(for: segment),
-            labels: [:],
-            profiles: currentSpeakerProfiles
+            labels: [:]
         )
-    }
-
-    func saveCurrentSpeakerProfile(_ profile: SpeakerProfile) {
-        currentSpeakerProfiles = TranscriptSpeakerLabels.settingProfile(profile, in: currentSpeakerProfiles)
-        deferredSpeakerTagIDs.remove(profile.speakerID)
-        if pendingSpeakerTagID == profile.speakerID {
-            pendingSpeakerTagID = nil
-        }
-        refreshPendingSpeakerTag()
-    }
-
-    func deferCurrentSpeakerPrompt() {
-        guard let speakerID = pendingSpeakerTagID else { return }
-        deferredSpeakerTagIDs.insert(speakerID)
-        pendingSpeakerTagID = nil
-        refreshPendingSpeakerTag()
-    }
-
-    private func refreshPendingSpeakerTag() {
-        if let pendingSpeakerTagID,
-           TranscriptSpeakerLabels.isTagged(
-                speakerID: pendingSpeakerTagID,
-                labels: [:],
-                profiles: currentSpeakerProfiles
-           ) {
-            self.pendingSpeakerTagID = nil
-        }
-
-        guard pendingSpeakerTagID == nil else { return }
-        pendingSpeakerTagID = TranscriptSpeakerLabels.untaggedSpeakerIDs(
-            in: currentTranscript,
-            profiles: currentSpeakerProfiles,
-            deferredSpeakerIDs: deferredSpeakerTagIDs
-        ).first
     }
 
     private func debugLog(_ message: String) {
@@ -1298,7 +1229,6 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
                                 source: buffer.source
                             )
                         )
-                        self.refreshPendingSpeakerTag()
                     }
                 } catch {
                     print("Transcription error: \(error)")
@@ -1583,10 +1513,6 @@ extension MeetingManager: LocalCaptureControlling {
         localHelperSessionId = sessionId
         state = .recording
         currentTranscript = []
-        currentSpeakerProfiles = [:]
-        currentSpeakerSuggestions = []
-        pendingSpeakerTagID = nil
-        deferredSpeakerTagIDs = []
         currentMeetingStart = startedAt
         recordingDuration = 0
         resetCoachStateForRecording()

@@ -132,7 +132,7 @@ final class ArchitectureModuleTests: XCTestCase {
             .appendingPathComponent("NoteAI/UI/TranscriptViewer/TranscriptView.swift"))
         let transcriptArea = try sourceFragment(
             named: "private var transcriptArea: some View",
-            before: "    @ViewBuilder\n    private var stableSpeakerPromptOverlay",
+            before: "    private var resizeHandle: some View",
             in: source
         )
 
@@ -216,10 +216,6 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(methodSource.contains("showMeetingNamePrompt = false"))
         XCTAssertTrue(methodSource.contains("pendingMeetingName = \"\""))
         XCTAssertTrue(methodSource.contains("currentTranscript = []"))
-        XCTAssertTrue(methodSource.contains("currentSpeakerProfiles = [:]"))
-        XCTAssertTrue(methodSource.contains("currentSpeakerSuggestions = []"))
-        XCTAssertTrue(methodSource.contains("pendingSpeakerTagID = nil"))
-        XCTAssertTrue(methodSource.contains("deferredSpeakerTagIDs = []"))
         XCTAssertTrue(methodSource.contains("speakerAttribution = TranscriptSpeakerAttribution()"))
         XCTAssertTrue(methodSource.contains("currentMeetingStart = nil"))
         XCTAssertTrue(methodSource.contains("currentDetectedAppName = nil"))
@@ -633,31 +629,6 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertNil(profile.role)
         XCTAssertNil(profile.company)
         XCTAssertEqual(profile.notes, "Calendar attendee: sarah.chen@acme.com")
-    }
-
-    func testLiveSpeakerPromptAcceptsCalendarSuggestions() throws {
-        let source = try transcriptViewSource()
-        let suggestionSource = try meetingSpeakerSuggestionSource()
-
-        XCTAssertTrue(source.contains("speakerSuggestions: meetingManager.pendingSpeakerSuggestions"))
-        XCTAssertTrue(source.contains("ForEach(speakerSuggestions)"))
-        XCTAssertTrue(source.contains("applySuggestion"))
-        XCTAssertTrue(suggestionSource.contains("Calendar attendee:"))
-    }
-
-    func testLiveSpeakerPromptIsOutsideAutoScrollingTranscriptStream() throws {
-        let source = try transcriptViewSource()
-
-        XCTAssertTrue(source.contains("private var stableSpeakerPromptOverlay: some View"))
-        XCTAssertTrue(source.contains(".overlay(alignment: .top)"))
-
-        let scrollContentStart = try XCTUnwrap(source.range(of: "ScrollView {", options: [], range: try XCTUnwrap(source.range(of: "private var transcriptArea: some View")).lowerBound..<source.endIndex))
-        let autoScrollStart = try XCTUnwrap(source.range(of: ".onChange(of: meetingManager.currentTranscript.count)", options: [], range: scrollContentStart.lowerBound..<source.endIndex))
-        let transcriptAreaSource = String(source[scrollContentStart.lowerBound..<autoScrollStart.lowerBound])
-
-        XCTAssertFalse(transcriptAreaSource.contains("pendingSpeakerProfile"))
-        XCTAssertFalse(transcriptAreaSource.contains("LiveSpeakerTagPrompt("))
-        XCTAssertTrue(source.contains("proxy.scrollTo(last.id, anchor: .bottom)"))
     }
 
     func testSpeakerLabelingResolvesStablePlaceholdersAndOverrides() {
@@ -2734,20 +2705,6 @@ final class ArchitectureModuleTests: XCTestCase {
         let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
         let integrationFile = projectRoot.appendingPathComponent("NoteAI/Integrations/AIPIM/AIPIMTypes.swift")
         return try String(contentsOf: integrationFile, encoding: .utf8)
-    }
-
-    private func transcriptViewSource() throws -> String {
-        let testFile = URL(fileURLWithPath: #filePath)
-        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
-        let transcriptFile = projectRoot.appendingPathComponent("NoteAI/UI/TranscriptViewer/TranscriptView.swift")
-        return try String(contentsOf: transcriptFile, encoding: .utf8)
-    }
-
-    private func meetingSpeakerSuggestionSource() throws -> String {
-        let testFile = URL(fileURLWithPath: #filePath)
-        let projectRoot = testFile.deletingLastPathComponent().deletingLastPathComponent()
-        let suggestionFile = projectRoot.appendingPathComponent("NoteAI/MeetingDetection/MeetingSpeakerSuggestion.swift")
-        return try String(contentsOf: suggestionFile, encoding: .utf8)
     }
 
     private func t5tComposerSource() throws -> String {

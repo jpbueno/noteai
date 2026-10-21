@@ -1,54 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
-
-struct CommandCenterSnapshot {
-    let overdue: [TodoItem]
-    let today: [TodoItem]
-    let upcoming: [TodoItem]
-    let noDueDate: [TodoItem]
-    let completed: [TodoItem]
-
-    var pendingCount: Int {
-        overdue.count + today.count + upcoming.count + noDueDate.count
-    }
-
-    var focusCount: Int {
-        overdue.count + today.count
-    }
-
-    var nextTodo: TodoItem? {
-        overdue.first ?? today.first ?? upcoming.first ?? noDueDate.first
-    }
-
-    init(todos: [TodoItem]) {
-        var overdue: [TodoItem] = []
-        var today: [TodoItem] = []
-        var upcoming: [TodoItem] = []
-        var noDueDate: [TodoItem] = []
-        var completed: [TodoItem] = []
-
-        for todo in todos {
-            switch todo.dueGroup {
-            case .overdue:
-                overdue.append(todo)
-            case .today:
-                today.append(todo)
-            case .upcoming:
-                upcoming.append(todo)
-            case .noDueDate:
-                noDueDate.append(todo)
-            case .completed:
-                completed.append(todo)
-            }
-        }
-
-        self.overdue = overdue.sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
-        self.today = today.sorted { $0.createdDate < $1.createdDate }
-        self.upcoming = upcoming.sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
-        self.noDueDate = noDueDate.sorted { $0.createdDate > $1.createdDate }
-        self.completed = completed.sorted { $0.modifiedDate > $1.modifiedDate }
-    }
-}
 
 struct CommandCenterLayout: Equatable {
     let scale: CGFloat
@@ -112,108 +62,6 @@ struct CommandCenterLayout: Equatable {
     }
 }
 
-enum DashboardPanelID: String, CaseIterable, Hashable {
-    case operationalSnapshot
-    case suggestedNextMove
-    case setupChecklist
-    case focusQueue
-    case upcoming
-    case recentlyCompleted
-
-    static let defaultOrder: [DashboardPanelID] = [
-        .operationalSnapshot,
-        .suggestedNextMove,
-        .focusQueue,
-        .upcoming,
-        .recentlyCompleted,
-        .setupChecklist,
-    ]
-
-    var isFullWidth: Bool {
-        self == .setupChecklist
-    }
-}
-
-enum CommandCenterPanelOrder {
-    private static let versionPrefix = "v2:"
-
-    static func orderedIDs(availableIDs: [DashboardPanelID], rawValue: String) -> [DashboardPanelID] {
-        guard rawValue.hasPrefix(versionPrefix) else {
-            return availableIDs
-        }
-
-        let savedOrder = rawValue.dropFirst(versionPrefix.count)
-        let validIDs = Set(availableIDs)
-        var seen: Set<DashboardPanelID> = []
-        var result: [DashboardPanelID] = []
-
-        for rawID in savedOrder.split(separator: ",") {
-            guard let id = DashboardPanelID(rawValue: String(rawID)),
-                  validIDs.contains(id),
-                  !seen.contains(id) else {
-                continue
-            }
-            seen.insert(id)
-            result.append(id)
-        }
-
-        for id in availableIDs where !seen.contains(id) {
-            result.append(id)
-        }
-
-        return result
-    }
-
-    static func moveForDrop(
-        _ movingID: DashboardPanelID,
-        onto targetID: DashboardPanelID,
-        in ids: [DashboardPanelID]
-    ) -> [DashboardPanelID] {
-        guard movingID != targetID,
-              let movingIndex = ids.firstIndex(of: movingID),
-              let originalTargetIndex = ids.firstIndex(of: targetID) else {
-            return ids
-        }
-
-        var result = ids
-        result.remove(at: movingIndex)
-        guard let targetIndex = result.firstIndex(of: targetID) else {
-            return ids
-        }
-        let insertIndex = movingIndex < originalTargetIndex ? targetIndex + 1 : targetIndex
-        result.insert(movingID, at: insertIndex)
-        return result
-    }
-
-    static func rows(for ids: [DashboardPanelID]) -> [[DashboardPanelID]] {
-        var rows: [[DashboardPanelID]] = []
-        var currentRow: [DashboardPanelID] = []
-        let fullWidthPanels = ids.filter(\.isFullWidth)
-
-        for id in ids where !id.isFullWidth {
-            currentRow.append(id)
-            if currentRow.count == 2 {
-                rows.append(currentRow)
-                currentRow.removeAll()
-            }
-        }
-
-        if !currentRow.isEmpty {
-            rows.append(currentRow)
-        }
-
-        for id in fullWidthPanels {
-            rows.append([id])
-        }
-
-        return rows
-    }
-
-    static func rawValue(for ids: [DashboardPanelID]) -> String {
-        versionPrefix + ids.map(\.rawValue).joined(separator: ",")
-    }
-}
-
 private struct CommandCenterLayoutKey: EnvironmentKey {
     static let defaultValue = CommandCenterLayout.metrics(forWindowWidth: 1100)
 }
@@ -225,214 +73,132 @@ extension EnvironmentValues {
     }
 }
 
-/// Home dashboard showing todos grouped by due date. Mirrors
-/// web/src/components/HomeDashboard.tsx.
 struct HomeDashboardView: View {
     @Environment(\.commandCenterLayout) private var layout
-    @AppStorage("noteai.commandCenterPanelOrder.v2") private var commandCenterPanelOrderRaw = ""
     @AppStorage("noteai.setupChecklistCollapsed") private var setupChecklistCollapsed = false
-    @State private var draggedDashboardPanelID: DashboardPanelID?
-    @State private var dashboardDropTargetID: DashboardPanelID?
     @ObservedObject var meetingManager: MeetingManager
-    let onSelectTodo: (UUID) -> Void
+    let onSelectMeeting: (UUID) -> Void
+    let onOpenHistory: () -> Void
+    let onStartMeeting: () -> Void
     let onOnboardingAction: (OnboardingChecklistItem) -> Void
 
-    private var snapshot: CommandCenterSnapshot {
-        CommandCenterSnapshot(todos: meetingManager.todos)
+    private var recentMeetings: [Meeting] {
+        Array(LibraryListOrdering.meetings(meetingManager.filteredMeetings).prefix(5))
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: layout.dashboardSpacing + 4) {
+            VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
                 header
-                dashboardPanels
+                capturePanel
+                recentMeetingsPanel
+                onboardingPanel
             }
-            .padding(.horizontal, round(28 * layout.scale))
-            .padding(.vertical, round(22 * layout.scale))
             .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.pagePadding)
+            .padding(.vertical, 32)
         }
         .background(Theme.notionWindowBG)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Command Center")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Meeting workspace")
                 .font(.system(size: layout.tinyFontSize + 1, weight: .bold))
                 .foregroundStyle(Theme.textTertiary)
                 .textCase(.uppercase)
-            Text("Today's workspace")
+            Text("Your meetings")
                 .font(.system(size: layout.titleFontSize, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
-            Text("Keep meetings, notes, todos, and T5T follow-ups moving from one place.")
+            Text("Capture conversations, revisit transcripts, and get help from AI Solutions Architect.")
                 .font(.system(size: layout.bodyFontSize + 1))
                 .foregroundStyle(Theme.textTertiary)
         }
     }
 
-    private var dashboardPanels: some View {
-        let snapshot = snapshot
-        let orderedIDs = orderedDashboardPanelIDs(for: snapshot)
-        let rows = CommandCenterPanelOrder.rows(for: orderedIDs)
-        return VStack(alignment: .leading, spacing: layout.dashboardSpacing) {
-            ForEach(rows, id: \.self) { row in
-                dashboardPanelRow(row, snapshot: snapshot, orderedIDs: orderedIDs)
-            }
-        }
-        .animation(.easeInOut(duration: 0.16), value: commandCenterPanelOrderRaw)
-    }
-
-    @ViewBuilder
-    private func dashboardPanelRow(
-        _ row: [DashboardPanelID],
-        snapshot: CommandCenterSnapshot,
-        orderedIDs: [DashboardPanelID]
-    ) -> some View {
-        if row.count == 1 {
-            dashboardPanelCard(row[0], snapshot: snapshot, orderedIDs: orderedIDs)
-        } else {
-            HStack(alignment: .top, spacing: layout.dashboardSpacing) {
-                ForEach(row, id: \.self) { id in
-                    dashboardPanelCard(id, snapshot: snapshot, orderedIDs: orderedIDs)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
-            }
-        }
-    }
-
-    private func availableDashboardPanelIDs(for snapshot: CommandCenterSnapshot) -> [DashboardPanelID] {
-        DashboardPanelID.defaultOrder.filter { id in
-            id != .recentlyCompleted || !snapshot.completed.isEmpty
-        }
-    }
-
-    private func orderedDashboardPanelIDs(for snapshot: CommandCenterSnapshot) -> [DashboardPanelID] {
-        CommandCenterPanelOrder.orderedIDs(
-            availableIDs: availableDashboardPanelIDs(for: snapshot),
-            rawValue: commandCenterPanelOrderRaw
-        )
-    }
-
-    @ViewBuilder
-    private func dashboardPanelCard(
-        _ id: DashboardPanelID,
-        snapshot: CommandCenterSnapshot,
-        orderedIDs: [DashboardPanelID]
-    ) -> some View {
-        dashboardPanelContent(id, snapshot: snapshot)
-            .contentShape(Rectangle())
-            .frame(minHeight: dashboardPanelMinimumHeight(for: id), alignment: .topLeading)
-            .opacity(draggedDashboardPanelID == id ? 0.65 : 1)
-            .overlay {
-                if dashboardDropTargetID == id {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.accent, lineWidth: 2)
-                        .padding(-3)
-                }
-            }
-            .onDrop(
-                of: [UTType.plainText],
-                delegate: DashboardPanelDropDelegate(
-                    targetID: id,
-                    orderedIDs: orderedIDs,
-                    orderRawValue: $commandCenterPanelOrderRaw,
-                    draggedID: $draggedDashboardPanelID,
-                    activeTargetID: $dashboardDropTargetID
-                )
-            )
-    }
-
-    private func dashboardPanelMinimumHeight(for id: DashboardPanelID) -> CGFloat {
-        switch id {
-        case .operationalSnapshot, .suggestedNextMove:
-            return round(126 * layout.scale)
-        case .focusQueue, .upcoming:
-            return round(124 * layout.scale)
-        case .recentlyCompleted:
-            return round(196 * layout.scale)
-        case .setupChecklist:
-            return round(96 * layout.scale)
-        }
-    }
-
-    @ViewBuilder
-    private func dashboardPanelContent(_ id: DashboardPanelID, snapshot: CommandCenterSnapshot) -> some View {
-        switch id {
-        case .operationalSnapshot:
-            operationalSnapshotPanel(snapshot, id: id)
-        case .suggestedNextMove:
-            suggestedNextMovePanel(snapshot, id: id)
-        case .setupChecklist:
-            onboardingPanel(for: id)
-        case .focusQueue:
-            focusQueuePanel(snapshot, id: id)
-        case .upcoming:
-            upcomingPanel(snapshot, id: id)
-        case .recentlyCompleted:
-            recentlyCompletedPanel(snapshot, id: id)
-        }
-    }
-
-    private func operationalSnapshotPanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
+    private var capturePanel: some View {
         CommandCenterPanel {
             DashboardPanelHeader(
-                title: "Operational snapshot",
-                subtitle: "\(snapshot.pendingCount) pending\(snapshot.completed.isEmpty ? "" : " - \(snapshot.completed.count) completed")",
-                tone: .neutralAccent
-            ) {
-                dashboardPanelDragHandle(for: id)
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: layout.metricMinimumCardWidth), spacing: 10)], spacing: 10) {
-                MetricTile(icon: "waveform.path.ecg", label: "Focus queue", value: snapshot.focusCount)
-                MetricTile(icon: "checklist", label: "Open todos", value: snapshot.pendingCount)
-                MetricTile(icon: "checkmark.square", label: "Completed", value: snapshot.completed.count)
-                MetricTile(icon: "clock", label: "Upcoming", value: snapshot.upcoming.count)
-            }
-            .padding(.top, 14)
-        }
-    }
-
-    private func suggestedNextMovePanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
-        CommandCenterPanel {
-            DashboardPanelHeader(
-                title: "Suggested next move",
-                subtitle: snapshot.nextTodo == nil ? "Nothing needs attention" : "Highest-priority todo",
+                title: AppEnvironment.usesTranscriptImportPrimaryFlow ? "Import a meeting" : "Meeting capture",
+                subtitle: AppEnvironment.usesTranscriptImportPrimaryFlow
+                    ? "Bring a Teams transcript into your meeting history."
+                    : "AI Solutions Architect follows the live transcript and answers your questions.",
                 tone: .accent
             ) {
-                dashboardPanelDragHandle(for: id)
+                EmptyView()
             }
 
-            if let nextTodo = snapshot.nextTodo {
-                Button {
-                    onSelectTodo(nextTodo.id)
-                } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(nextTodo.title.isEmpty ? "Untitled todo" : nextTodo.title)
-                            .font(.system(size: layout.bodyFontSize + 1, weight: .bold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(2)
-                        Text(nextTodo.dueDateLabel ?? "No due date")
-                            .font(.system(size: layout.smallFontSize))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(Theme.notionSurfaceBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 10)
-            } else {
-                Text("No pending todos. The workspace is clear.")
-                    .font(.system(size: layout.bodyFontSize + 1))
+            Button(action: onStartMeeting) {
+                Label(
+                    AppEnvironment.usesTranscriptImportPrimaryFlow
+                        ? "Import Teams transcript"
+                        : meetingManager.state == .recording
+                            ? "Open live transcript"
+                            : meetingManager.recordingReadiness.primaryActionTitle,
+                    systemImage: AppEnvironment.usesTranscriptImportPrimaryFlow ? "text.badge.plus" : "waveform"
+                )
+                .font(.system(size: layout.bodyFontSize, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 14)
+                .frame(height: layout.actionButtonHeight)
+                .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.accent.opacity(0.32), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var recentMeetingsPanel: some View {
+        CommandCenterPanel {
+            DashboardPanelHeader(
+                title: "Recent meetings",
+                subtitle: "\(meetingManager.filteredMeetings.count) meetings in your history",
+                tone: .neutralAccent
+            ) {
+                Button("View all", action: onOpenHistory)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+            }
+
+            if recentMeetings.isEmpty {
+                Text(meetingManager.searchQuery.isEmpty
+                    ? "Record or import a meeting to start your history."
+                    : "No meetings match your search.")
+                    .font(.system(size: layout.bodyFontSize))
                     .foregroundStyle(Theme.textTertiary)
-                    .padding(.top, 14)
+                    .padding(.vertical, 16)
+            } else {
+                ForEach(recentMeetings) { meeting in
+                    Button {
+                        onSelectMeeting(meeting.id)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: LibraryListPresentation.SidebarItemKind.meeting.icon)
+                                .foregroundStyle(LibraryListPresentation.SidebarItemKind.meeting.tint)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(meeting.title)
+                                    .font(.system(size: layout.bodyFontSize, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .lineLimit(1)
+                                Text("\(meeting.date.formatted(date: .abbreviated, time: .shortened)) • \(meeting.formattedDuration)")
+                                    .font(.system(size: layout.smallFontSize))
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: layout.smallFontSize, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
 
-    private func onboardingPanel(for id: DashboardPanelID) -> some View {
+    private var onboardingPanel: some View {
         let checklist = meetingManager.onboardingChecklist
         let isCollapsed = setupChecklistCollapsed && checklist.canCollapse
         return CommandCenterPanel {
@@ -466,7 +232,6 @@ struct HomeDashboardView: View {
                     .buttonStyle(.plain)
                     .help(isCollapsed ? "Expand setup checklist" : "Collapse setup checklist")
                 }
-                dashboardPanelDragHandle(for: id)
             }
 
             if !isCollapsed {
@@ -542,102 +307,6 @@ struct HomeDashboardView: View {
         .help(item.status == .complete || item.actionTarget == nil ? "" : "Open setup action")
     }
 
-    private func focusQueuePanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
-        TodoColumn(title: "Focus Queue", subtitle: "Overdue and due today", tone: .danger) {
-            dashboardPanelDragHandle(for: id)
-        } content: {
-            ForEach(snapshot.overdue + snapshot.today) { todo in
-                commandCenterTodoRow(todo)
-            }
-            if snapshot.focusCount == 0 {
-                EmptyColumn(text: "No urgent todos")
-            }
-        }
-    }
-
-    private func upcomingPanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
-        TodoColumn(title: "Upcoming", subtitle: "Next work to prepare", tone: .accent) {
-            dashboardPanelDragHandle(for: id)
-        } content: {
-            ForEach(Array((snapshot.upcoming.prefix(8) + snapshot.noDueDate.prefix(4)))) { todo in
-                commandCenterTodoRow(todo)
-            }
-            if snapshot.upcoming.isEmpty && snapshot.noDueDate.isEmpty {
-                EmptyColumn(text: "No upcoming todos")
-            }
-        }
-    }
-
-    private func recentlyCompletedPanel(_ snapshot: CommandCenterSnapshot, id: DashboardPanelID) -> some View {
-        TodoColumn(title: "Recently Completed", subtitle: "Latest closed loops", tone: .done) {
-            dashboardPanelDragHandle(for: id)
-        } content: {
-            ForEach(Array(snapshot.completed.prefix(6))) { todo in
-                commandCenterTodoRow(todo)
-            }
-        }
-    }
-
-    private func dashboardPanelDragHandle(for id: DashboardPanelID) -> some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: layout.smallFontSize, weight: .bold))
-            .foregroundStyle(Theme.textSecondary)
-            .frame(width: 24, height: 24)
-            .background(Theme.notionSurfaceBG.opacity(0.85), in: Circle())
-            .overlay(Circle().stroke(Theme.rowBorder.opacity(0.85), lineWidth: 1))
-            .help("Drag panel")
-            .onDrag {
-                draggedDashboardPanelID = id
-                return NSItemProvider(object: id.rawValue as NSString)
-            }
-    }
-
-    private func commandCenterTodoRow(_ todo: TodoItem) -> some View {
-        Button {
-            onSelectTodo(todo.id)
-        } label: {
-            HStack(spacing: 12) {
-                Button {
-                    meetingManager.toggleTodoCompletion(todo)
-                } label: {
-                    Image(systemName: todo.completed ? "checkmark.square.fill" : "square")
-                        .font(.system(size: layout.bodyFontSize + 5, weight: .medium))
-                        .foregroundStyle(todo.completed ? Theme.success : Theme.textTertiary)
-                }
-                .buttonStyle(.plain)
-
-                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
-                    .font(.system(size: layout.bodyFontSize + 1, weight: .semibold))
-                    .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
-                    .strikethrough(todo.completed)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if let label = todo.dueDateLabel {
-                    Label(label, systemImage: "calendar")
-                        .font(.system(size: layout.tinyFontSize + 1, weight: .medium))
-                        .foregroundStyle(dueLabelColor(for: todo))
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.rowBorder, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button(todo.completed ? "Mark pending" : "Mark complete") {
-                meetingManager.toggleTodoCompletion(todo)
-            }
-            Divider()
-            Button("Delete", role: .destructive) {
-                meetingManager.deleteTodo(todo)
-            }
-        }
-    }
-
     private func onboardingIcon(for status: OnboardingItemStatus) -> String {
         switch status {
         case .complete:
@@ -660,57 +329,6 @@ struct HomeDashboardView: View {
         }
     }
 
-    private func dueLabelColor(for todo: TodoItem) -> Color {
-        switch todo.dueGroup {
-        case .overdue:
-            return Theme.danger
-        case .today:
-            return Theme.warning
-        case .upcoming:
-            return Color(hex: "60A5FA")
-        case .noDueDate, .completed:
-            return Theme.textTertiary
-        }
-    }
-}
-
-private struct DashboardPanelDropDelegate: DropDelegate {
-    let targetID: DashboardPanelID
-    let orderedIDs: [DashboardPanelID]
-    @Binding var orderRawValue: String
-    @Binding var draggedID: DashboardPanelID?
-    @Binding var activeTargetID: DashboardPanelID?
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func dropEntered(info: DropInfo) {
-        activeTargetID = targetID
-        guard let draggedID,
-              draggedID != targetID else {
-            return
-        }
-
-        let movedIDs = CommandCenterPanelOrder.moveForDrop(draggedID, onto: targetID, in: orderedIDs)
-        guard movedIDs != orderedIDs else {
-            return
-        }
-
-        orderRawValue = CommandCenterPanelOrder.rawValue(for: movedIDs)
-    }
-
-    func dropExited(info: DropInfo) {
-        if activeTargetID == targetID {
-            activeTargetID = nil
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        activeTargetID = nil
-        draggedID = nil
-        return true
-    }
 }
 
 private struct CommandCenterPanel<Content: View>: View {
@@ -794,87 +412,5 @@ private struct DashboardPanelHeader<Accessory: View>: View {
             }
         }
         .padding(.bottom, 12)
-    }
-}
-
-private struct MetricTile: View {
-    @Environment(\.commandCenterLayout) private var layout
-    let icon: String
-    let label: String
-    let value: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: layout.bodyFontSize + 1, weight: .medium))
-                Text(label)
-                    .font(.system(size: layout.smallFontSize, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .foregroundStyle(Theme.textTertiary)
-
-            Text("\(value)")
-                .font(.system(size: layout.metricValueFontSize, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-        }
-        .padding(round(12 * layout.scale))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.notionSurfaceBG.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border, lineWidth: 1))
-    }
-}
-
-private struct TodoColumn<Accessory: View, Content: View>: View {
-    @Environment(\.commandCenterLayout) private var layout
-
-    let title: String
-    let subtitle: String
-    let tone: DashboardPanelTone
-    let accessory: Accessory
-    let content: Content
-
-    init(
-        title: String,
-        subtitle: String,
-        tone: DashboardPanelTone,
-        @ViewBuilder accessory: () -> Accessory,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.tone = tone
-        self.accessory = accessory()
-        self.content = content()
-    }
-
-    var body: some View {
-        CommandCenterPanel {
-            DashboardPanelHeader(title: title, subtitle: subtitle, tone: tone) {
-                accessory
-            }
-
-            VStack(spacing: 8) {
-                content
-            }
-        }
-    }
-}
-
-private struct EmptyColumn: View {
-    @Environment(\.commandCenterLayout) private var layout
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: layout.bodyFontSize + 1))
-            .foregroundStyle(Theme.textTertiary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, round(28 * layout.scale))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-            )
     }
 }

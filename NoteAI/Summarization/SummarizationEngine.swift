@@ -147,26 +147,6 @@ final class SummarizationEngine {
         throw lastError ?? SummarizationError.apiError(statusCode: 0, message: "No model response")
     }
 
-    private func chat(messages: [(role: String, content: String)], context: LLMRequestContext) async throws -> String {
-        let models = LLMFallbackPolicy.candidateModels(provider: context.provider, primaryModel: context.model)
-        var lastError: Error?
-
-        for (index, model) in models.enumerated() {
-            do {
-                return try await context.client.chat(messages: messages, model: model)
-            } catch {
-                lastError = error
-                let hasFallback = index < models.count - 1
-                guard hasFallback, LLMFallbackPolicy.shouldRetry(error, provider: context.provider) else {
-                    throw error
-                }
-                print("[SummarizationEngine] \(context.provider.displayName) chat model \(model) failed with retryable error: \(error.localizedDescription). Trying \(models[index + 1]).")
-            }
-        }
-
-        throw lastError ?? SummarizationError.apiError(statusCode: 0, message: "No chat response")
-    }
-
     private func selectedProvider() -> LLMProviderType {
         let raw = UserDefaults.standard.string(forKey: "llmProvider") ?? "openrouter"
         return LLMProviderType(rawValue: raw) ?? .openRouter
@@ -271,45 +251,6 @@ final class SummarizationEngine {
         """
     }
 
-    // MARK: - Chat
-
-    /// Multi-turn chat with the configured LLM provider.
-    func chat(messages: [(role: String, content: String)]) async throws -> String {
-        let request = try buildRequestContext()
-        return try await chat(messages: messages, context: request)
-    }
-
-    // MARK: - T5T Generation
-
-    /// Generates a T5T (Top 5 Things) report from durable task records in a reporting period.
-    func generateT5T(meetings: [Meeting], notes: [Note] = [], tasks: [TaskItem] = [], config: T5TConfig, periodStart: Date, periodEnd: Date) async throws -> T5TSections {
-        let request = try buildRequestContext()
-        let prompt = T5TPrompt.buildPrompt(
-            tasks: tasks,
-            config: config,
-            periodStart: periodStart,
-            periodEnd: periodEnd
-        )
-
-        let responseText = try await complete(prompt: prompt, context: request)
-        return try AITasks.parseT5TSections(responseText)
-    }
-
-    // MARK: - Helpers
-
-    private func formatSummaryForPrompt(_ summary: MeetingSummary) -> String {
-        AITasks.formatSummaryForPrompt(summary)
-    }
-
-    // MARK: - Response parsing
-
-    private func parseSummary(from text: String) throws -> MeetingSummary {
-        try AITasks.parseMeetingSummary(text)
-    }
-
-    private func extractJSON(from text: String) -> String {
-        AITasks.extractJSON(from: text)
-    }
 }
 
 enum SummarizationError: LocalizedError {

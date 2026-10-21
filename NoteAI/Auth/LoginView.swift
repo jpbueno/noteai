@@ -18,7 +18,7 @@ struct LoginView: View {
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
 
-                Text("AI-powered meeting notes.\nRecord, transcribe, and summarize automatically.")
+                Text("Meeting transcription and AI Solutions Architect.\nCapture conversations and get live technical guidance.")
                     .font(.system(size: 15))
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)

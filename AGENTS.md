@@ -62,12 +62,12 @@ All NoteAI improvements and new features managed in Linear must explicitly follo
 
 ## Project Overview
 
-Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
+NoteAI 7 is a macOS meeting transcription and live AI Solutions Architect app. The web source is retained for local/CI use and its public deployment remains retired under JPB-191.
 
 1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB (SQLite) persistence
 2. **Web app** — Next.js 16 SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
 
-Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The macOS app retains meeting capture/transcription, transcript import, summaries, speaker context, meeting history/search/export, TTS, and the live AI SA with interactive questions. Standalone notes, T5T, tasks, todos, and the general assistant are retired from macOS. Keep existing SQLite tables and rows untouched; do not restore their startup migrations or CRUD paths. The web descriptions below document its separate legacy source.
 
 ## Storage Source of Truth
 
@@ -94,9 +94,9 @@ NoteAI/
   Transcription/    # WhisperKit engine (actor-based, hallucination filtering)
   Summarization/    # LLM abstraction (OpenRouter, Anthropic, OpenAI, NVIDIA)
   MeetingDetection/ # Auto-detect Teams/browser audio activity
-  Storage/          # GRDB persistence, models (Meeting, Note, TaskItem, T5TReport, ChatMessage)
+  Storage/          # Meeting-only GRDB persistence and meeting/coach models
   Auth/             # Google OAuth 2.0 + PKCE, Keychain, API key management
-  Delivery/         # Export (Markdown/JSON), Notion import, notifications
+  Delivery/         # Meeting export and notifications
   UI/               # SwiftUI views organized by feature area
 ```
 
@@ -105,7 +105,7 @@ NoteAI/
 - **TranscriptionEngine** (`Transcription/TranscriptionEngine.swift`) — Actor, WhisperKit with hallucination filtering
 - **SummarizationEngine** (`Summarization/SummarizationEngine.swift`) — Multi-provider LLM, template-based prompts
 - **MeetingStore** (`Storage/MeetingStore.swift`) — GRDB persistence layer, CRUD for all models
-- **ChatManager** (`UI/Chat/ChatManager.swift`) — Chat orchestrator with JSON action parsing
+- **LiveCoachSession** (`Summarization/LiveCoachSession.swift`) — Session-safe live AI SA orchestration
 - **AudioCaptureManager** (`Audio/AudioCaptureManager.swift`) — Coordinates ProcessTap + ScreenCaptureKit + mic
 
 ### macOS Data Flow
@@ -239,7 +239,7 @@ Deployed on **Vercel**. Cloudflare tunnel origins allowed for dev (`*.trycloudfl
 
 ## Shared Domain Models
 
-Both platforms use the same data model (Swift `Codable` / TypeScript interfaces):
+The macOS app uses Swift `Codable` Meeting and CoachInsight models. Legacy entity models in the table below apply only to the unchanged web source; do not recreate their macOS workflows:
 
 | Model | Key Fields |
 |-------|------------|
@@ -268,7 +268,7 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 
 ### TypeScript (Web)
 - All components are `"use client"` — this is a client-rendered SPA
-- Types defined in `lib/types.ts` — keep in sync with Swift models
+- Types defined in `lib/types.ts` — retained meeting/transcription fields remain compatible with Swift models; retired web entities have no macOS counterparts
 - Data access via `lib/db.ts` wrapper → API routes → `lib/server-db.ts` → Turso
 - External API calls (LLM, TTS, transcription) always proxied through API routes — never call from client
 - Custom hooks in `lib/hooks.ts` for data fetching (2s polling pattern)
@@ -304,5 +304,5 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - API proxy pattern: all external calls (LLM, TTS, Whisper) go through `/api/*` routes
 
 ## Test Coverage
-- macOS: minimal — `NoteAITests/MeetingStoreTests.swift` (CRUD + export formatting)
+- macOS: Xcode scheme tests cover meeting persistence/export and archived-data preservation, recording/audio diagnostics, onboarding, Teams detection, local capture helper, meeting shell, summary parsing, and session-safe AI SA behavior. Persistence tests must use temporary stores rather than the live app database.
 - Web: no tests yet

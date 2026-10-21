@@ -3,7 +3,6 @@ import UserNotifications
 
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab
-    @State private var hasChanges = false
     @ObservedObject private var authManager: GoogleAuthManager
     @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
 
@@ -13,9 +12,7 @@ struct SettingsView: View {
         case appearance = "Appearance"
         case ai = "AI"
         case markdown = "Markdown"
-        case importData = "Import"
         case privacy = "Privacy"
-        case t5t = "T5T"
         case about = "About"
 
         var id: String { rawValue }
@@ -27,9 +24,7 @@ struct SettingsView: View {
             case .appearance: return "paintpalette"
             case .ai: return "brain"
             case .markdown: return "doc.text"
-            case .importData: return "square.and.arrow.down"
             case .privacy: return "lock.shield"
-            case .t5t: return "list.bullet.rectangle"
             case .about: return "info.circle"
             }
         }
@@ -101,9 +96,7 @@ struct SettingsView: View {
                     case .appearance: AppearanceSettingsView()
                     case .ai: AISettingsView()
                     case .markdown: MarkdownSettingsView()
-                    case .importData: ImportSettingsView()
                     case .privacy: PrivacySettingsView()
-                    case .t5t: T5TSettingsView()
                     case .about: AboutSettingsView()
                     }
                 }
@@ -159,7 +152,6 @@ struct AboutSettingsView: View {
 
 struct AccountSettingsView: View {
     @ObservedObject var authManager: GoogleAuthManager
-    @StateObject private var aipimSources = AIPIMAccountSourceModel()
 
     var body: some View {
         Form {
@@ -214,86 +206,10 @@ struct AccountSettingsView: View {
                 }
             }
 
-            Section("Work Activity Sources") {
-                ForEach(AIPIMSource.allCases, id: \.self) { source in
-                    aipimSourceRow(source)
-                }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("ai-pim-utils \(AIPIMInstallHelp.minimumOutlookCLIVersion) or later is required for Outlook, Slack, and Teams work activity.")
-                    ForEach(AIPIMInstallHelp.commands, id: \.self) { command in
-                        Text(command)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                    Text("Authentication is managed externally by ai-pim-utils and macOS Keychain. NoteAI never stores tokens.")
-                    Text("Teams coverage includes chats only. Teams channels are not included.")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
         .padding()
-        .task {
-            await aipimSources.refreshAll()
-        }
     }
-
-    @ViewBuilder
-    private func aipimSourceRow(_ source: AIPIMSource) -> some View {
-        let status = aipimSources.status(for: source)
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(source.displayName)
-                    .font(.system(size: 14, weight: .medium))
-                Text(aipimStatusLabel(status))
-                    .font(.caption)
-                    .foregroundStyle(status.state == .failed ? .red : .secondary)
-            }
-
-            Spacer()
-
-            Button(aipimSources.actionTitle(for: source)) {
-                Task { await aipimSources.connect(source) }
-            }
-            .disabled(!status.installed || aipimSources.busySource != nil)
-
-            Button {
-                Task { await aipimSources.refresh(source) }
-            } label: {
-                if aipimSources.busySource == source {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            .buttonStyle(.borderless)
-            .disabled(aipimSources.busySource != nil)
-            .help("Refresh \(source.displayName) status")
-        }
-    }
-
-    private func aipimStatusLabel(_ status: AIPIMSourceStatus) -> String {
-        if !status.installed {
-            return "Not installed"
-        }
-        if status.authenticated {
-            return "Installed, authenticated"
-        }
-        switch status.state {
-        case .authenticationRequired:
-            return "Installed, sign-in required"
-        case .failed:
-            return "Installed, status check failed"
-        case .available:
-            return "Installed, authenticated"
-        case .unavailable:
-            return "Not installed"
-        }
-    }
-
 }
 
 // MARK: - General Settings
@@ -400,8 +316,8 @@ struct AppearanceSettingsView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section("Command Center") {
-                Picker("Dashboard layout", selection: $commandCenterLayoutPresetRaw) {
+            Section("Meetings") {
+                Picker("Meeting layout", selection: $commandCenterLayoutPresetRaw) {
                     ForEach(CommandCenterLayoutPreset.allCases) { preset in
                         Text(preset.displayName).tag(preset.rawValue)
                     }
@@ -912,7 +828,7 @@ struct AISettingsView: View {
     private func previewVoice() {
         previewTTS.stop()
         isPreviewingVoice = true
-        let sample = "Hi, I'm the \(ttsVoice) voice. This is how I sound when reading your notes and reports in NoteAI."
+        let sample = "Hi, I'm the \(ttsVoice) voice. This is how I sound when reading your meeting summaries in NoteAI."
         previewTTS.speak(sample)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             isPreviewingVoice = false
@@ -966,7 +882,7 @@ struct MarkdownSettingsView: View {
                         .font(.caption)
                 }
 
-                Text("Meeting notes will be saved as individual .md files in this directory. Works great with Obsidian, iA Writer, or any Markdown-based notes app.")
+                Text("Meetings will be saved as individual .md files in this directory. Open them with Obsidian, iA Writer, or any Markdown editor.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -986,24 +902,6 @@ struct MarkdownSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-    }
-}
-
-// MARK: - T5T Settings
-
-struct T5TSettingsView: View {
-    @State private var config: T5TConfig = .empty
-    private let store = MeetingStore()
-
-    var body: some View {
-        T5TConfigEditor(config: $config) { newConfig in
-            try? store.saveT5TConfig(newConfig)
-        }
-        .formStyle(.grouped)
-        .padding()
-        .onAppear {
-            config = (try? store.loadT5TConfig()) ?? .empty
-        }
     }
 }
 
@@ -1049,126 +947,5 @@ struct PrivacySettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-    }
-}
-
-// MARK: - Import Settings
-
-struct ImportSettingsView: View {
-    @EnvironmentObject private var manager: MeetingManager
-    @State private var importPath = ""
-    @State private var isImporting = false
-    @State private var importResult: NotionImporter.ImportResult?
-    @State private var importError: String?
-
-    var body: some View {
-        Form {
-            Section("Import from Notion") {
-                Text("Export your Notion workspace as **Markdown & CSV**, unzip the download, then select the exported folder below.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    TextField("Notion export folder", text: $importPath)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(true)
-
-                    Button("Choose...") {
-                        let panel = NSOpenPanel()
-                        panel.canChooseDirectories = true
-                        panel.canChooseFiles = false
-                        panel.message = "Select your unzipped Notion export folder"
-                        if panel.runModal() == .OK, let url = panel.url {
-                            importPath = url.path
-                        }
-                    }
-                }
-
-                Button {
-                    performImport()
-                } label: {
-                    if isImporting {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Importing...")
-                        }
-                    } else {
-                        Label("Import Notes", systemImage: "square.and.arrow.down")
-                    }
-                }
-                .disabled(importPath.isEmpty || isImporting)
-            }
-
-            if let result = importResult {
-                Section("Import Results") {
-                    Label("\(result.imported.count) notes imported", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-
-                    if !result.skipped.isEmpty {
-                        Label("\(result.skipped.count) files skipped", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-
-                        ForEach(result.skipped, id: \.self) { name in
-                            Text(name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Text("\(result.totalFilesFound) Markdown files found in directory")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if let error = importError {
-                Section("Error") {
-                    Label(error, systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                }
-            }
-
-            Section("How to Export from Notion") {
-                VStack(alignment: .leading, spacing: 6) {
-                    step(1, "Open Notion and go to **Settings & members**")
-                    step(2, "Click **Settings** in the sidebar")
-                    step(3, "Scroll to **Export all workspace content**")
-                    step(4, "Choose **Markdown & CSV** format")
-                    step(5, "Download and unzip the file")
-                    step(6, "Select the unzipped folder above")
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-
-    @ViewBuilder
-    private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 16, alignment: .trailing)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func performImport() {
-        isImporting = true
-        importResult = nil
-        importError = nil
-
-        let url = URL(fileURLWithPath: importPath)
-        do {
-            let result = try manager.importNotesFromNotion(directoryURL: url)
-            importResult = result
-        } catch {
-            importError = error.localizedDescription
-        }
-        isImporting = false
     }
 }

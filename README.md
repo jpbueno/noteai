@@ -1,20 +1,18 @@
 # NoteAI
 
-Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
+NoteAI 7 focuses the macOS app on meeting transcription and the live AI Solutions Architect.
 
-1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB persistence
-2. **Web app** — Next.js SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
+The SwiftUI menu bar app captures microphone and system audio, transcribes with on-device WhisperKit, and stores meetings locally with GRDB. The web source remains available for local/CI use; its public deployment remains retired and is unchanged by this macOS release.
 
-Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+Standalone notes, T5T reports, tasks, to dos, and the general AI assistant are retired from the macOS app. Existing records remain in their original database tables; this update neither deletes them nor runs the old todo-to-task migration. Meeting history, the primary app identity, and Keychain credentials are preserved.
 
 ## Features
 
 - Record and transcribe meetings (mic + system audio capture)
 - Structured AI summaries with decisions, action items, topics, and open questions
-- Rich text notes with markdown, tags, and meeting linking
-- Task management with AI summarization
-- T5T (Top 5 Things) report generation from meetings, notes, and tasks
-- AI chat sidebar for querying meeting content
+- Live AI Solutions Architect insights and interactive questions during recording
+- Automatic meeting detection, transcript import, and post-meeting speaker context
+- Meeting history, search, summary editing, and Markdown/PDF export
 - Text-to-speech playback
 - Configurable LLM backends (OpenRouter, Anthropic, OpenAI, NVIDIA)
 
@@ -24,7 +22,7 @@ Both support: meeting recording/transcription, LLM summarization, notes, tasks, 
 NoteAI/                   macOS app source (SwiftUI + GRDB + WhisperKit)
   App/                    App entry, MeetingManager, meeting capture workflow
   Storage/                GRDB store, typed repositories, library operations
-  Summarization/          LLM provider clients and AI task parsing/formatting
+  Summarization/          Meeting summary parsing, LLM clients, and session-safe AI SA
 NoteAITests/              macOS unit tests
 web/                      Web app source (Next.js + Turso)
   src/
@@ -42,7 +40,7 @@ scripts/                  Repository and migration helper scripts
 
 The app keeps UI orchestration thin by pushing reusable behavior into deeper domain modules:
 
-- **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns search/range/default-title behavior; `AITasks` owns JSON extraction, prompt formatting, and summary/T5T parsing; repository protocols document the persistence seams around `MeetingStore`.
+- **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns meeting search/range behavior; `AITasks` owns structured summary parsing; `LiveCoachSession` owns recording-scoped AI SA work. `MeetingStore` and `MeetingRepository` expose only meeting persistence and leave archived tables untouched.
 - **Web**: `recording-workflow.ts` owns recording completion and fallback behavior; `library.ts` owns entity drafts, search, source selection, and delete-selection rules; `ai-tasks.ts` owns prompt construction and response parsing; `assistant-actions.ts` owns AI action parsing/execution; `repositories.ts` provides typed persistence adapters over `db.ts`.
 
 ## Tech Stack
@@ -69,14 +67,14 @@ Live recording shows speaker labels without asking you to identify speakers. Aft
 ### Build & Run
 
 ```bash
-xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug -derivedDataPath .xcode-build build
 open .xcode-build/Build/Products/Debug/NoteAI.app
 ```
 
 ### Deploy to /Applications
 
 ```bash
-xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug -derivedDataPath .xcode-build build
 ditto ".xcode-build/Build/Products/Debug/NoteAI.app" "/Applications/NoteAI.app"
 ```
 

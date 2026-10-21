@@ -60,20 +60,6 @@ enum AITasks {
         }
     }
 
-    static func parseT5TSections(_ text: String) throws -> T5TSections {
-        let jsonString = extractJSON(from: text)
-        guard let jsonData = jsonString.data(using: .utf8) else {
-            throw SummarizationError.parseError
-        }
-
-        let raw = try JSONDecoder().decode(RawT5TSections.self, from: jsonData)
-        return T5TSections(
-            insights: (raw.insights ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) },
-            accountUpdates: (raw.accountUpdates ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) },
-            futurePlans: (raw.futurePlans ?? []).map { T5TEntry(headline: $0.headline, explanation: $0.explanation) }
-        )
-    }
-
     static func formatSummaryForPrompt(_ summary: MeetingSummary) -> String {
         var parts: [String] = []
         if !summary.decisions.isEmpty {
@@ -139,15 +125,4 @@ private struct RawActionItem: Decodable {
     let task: String
     let owner: String?
     let deadline: String?
-}
-
-private struct RawT5TSections: Decodable {
-    let insights: [RawT5TEntry]?
-    let accountUpdates: [RawT5TEntry]?
-    let futurePlans: [RawT5TEntry]?
-}
-
-private struct RawT5TEntry: Decodable {
-    let headline: String
-    let explanation: String
 }

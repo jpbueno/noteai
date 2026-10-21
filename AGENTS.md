@@ -23,10 +23,10 @@ Default main/deployment workflow:
 - `main` is the source of truth for completed NoteAI work. Completed and tested work should not remain only on a Codex, feature, or temporary branch.
 - Always commit and push important implementation, configuration, documentation, and process-rule updates to the GitHub repo before treating the work as complete.
 - Before marking a Linear issue `Done`, verify the relevant changes are committed, pushed to `main`, and visible on the remote.
-- Run the relevant local checks for the touched modules before pushing. For web changes, include lint, typecheck, regression tests, and build. For Swift/macOS changes, include `swift test` or the appropriate Xcode build/test when available.
+- Run the relevant local checks for the touched modules before pushing. For Swift/macOS changes, include `swift test` or the appropriate Xcode build/test when available. Run repository CI and hygiene checks for workflow or documentation changes.
 - Push completed work to `main` unless the user explicitly asks for a PR-only flow. If branch protection blocks direct push, open the PR, merge it, and then verify `main`.
-- After `main` updates, confirm GitHub Actions ran for the push and that the Cloudflare deployment workflow completed successfully for web-affecting changes.
-- If tests, push, CI, or Cloudflare deployment fails, keep the Linear issue active, document the failure clearly in Linear and chat, and create or link follow-up issues instead of silently leaving the work on a branch.
+- After `main` updates, confirm the applicable GitHub Actions checks ran successfully.
+- If tests, push, or CI fails, keep the Linear issue active, document the failure clearly in Linear and chat, and create or link follow-up issues instead of silently leaving the work on a branch.
 - Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
 
 After work:
@@ -43,9 +43,9 @@ Delivery gate before `Done`:
   - required CI checks pass on the pull request;
   - the pull request is merged into `main`;
   - post-merge `main` checks are green, or no post-merge checks are applicable;
-  - for web or deployment-impacting changes, the Cloudflare deploy workflow succeeds and the live app smoke check passes.
+  - for native distribution changes, the applicable build and app smoke checks pass.
 - If no repository changes are required, the Linear update must explicitly say `No repository changes required` and explain why.
-- If Linear updates are blocked by connector or credential handling, still complete the git, CI, merge, and deployment path first, then provide the exact manual Linear update text for the user to paste.
+- If Linear updates are blocked by connector or credential handling, still complete the git, CI, merge, and applicable native verification path first, then provide the exact manual Linear update text for the user to paste.
 
 Standing Linear anchor:
 - `JPB-24` records this operating rule.
@@ -62,22 +62,20 @@ All NoteAI improvements and new features managed in Linear must explicitly follo
 
 ## Project Overview
 
-Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
+Meeting intelligence platform for macOS — SwiftUI menu bar app, on-device WhisperKit transcription, and local GRDB (SQLite) persistence.
 
-1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB (SQLite) persistence
-2. **Web app** — Next.js 16 SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
+The app supports: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
 
-Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
 ## Storage Source of Truth
 
 Use `docs/storage-source-of-truth.md` as the canonical storage rule before adding, importing, repairing, or migrating NoteAI data.
 
 - The macOS app currently uses local GRDB-backed SQLite through `NoteAI/Storage/MeetingStore.swift`. This is the correct production storage adapter for the native app until a deliberate profile-backed cloud sync migration replaces it.
-- The web/cloud app uses Turso through `web/src/lib/server-db.ts` and the API/repository layer. Turso is hosted SQLite/libSQL, so "SQLite" can be technically accurate but must not be used ambiguously in task instructions.
-- Codex must not manually write user data directly into `.sqlite` files, Turso, or ad hoc scripts unless the user explicitly requests a data repair or migration and the work includes backup, verification, and Linear documentation.
-- App and assistant features must write through the approved application interfaces: macOS through `MeetingStore`/repository abstractions, web through `/api/data/*`, `/api/settings`, and `web/src/lib/db.ts`.
-- Do not fake profile-backed persistence by writing macOS data into web/Turso tables or web data into the macOS local database. Cross-device/profile storage requires a separate sync design.
+- Codex must not manually write user data directly into `.sqlite` files or through ad hoc scripts unless the user explicitly requests a data repair or migration and the work includes backup, verification, and Linear documentation.
+- App and assistant features must write through `MeetingStore` and the native repository abstractions.
+- Google login does not make native data cloud-backed. Cross-device/profile storage requires a separate sync design.
 
 ---
 
@@ -101,7 +99,7 @@ NoteAI/
 ```
 
 ### Key Components
-- **MeetingManager** (`App/MeetingManager.swift`) — Central state orchestrator (~650 lines), coordinates all services
+- **MeetingManager** (`App/MeetingManager.swift`) — Central state orchestrator, coordinates all services
 - **TranscriptionEngine** (`Transcription/TranscriptionEngine.swift`) — Actor, WhisperKit with hallucination filtering
 - **SummarizationEngine** (`Summarization/SummarizationEngine.swift`) — Multi-provider LLM, template-based prompts
 - **MeetingStore** (`Storage/MeetingStore.swift`) — GRDB persistence layer, CRUD for all models
@@ -144,102 +142,9 @@ Project is managed via `project.yml` (XcodeGen). Regenerate Xcode project with `
 
 ---
 
-## Web App (`web/`)
+## Domain Models
 
-**Stack**: Next.js 16.2.1 | React 19 | TypeScript 5 | Tailwind CSS 4 | Tiptap | Turso
-
-### Architecture: Single-Page Client App + API Routes
-
-```
-web/src/
-  app/
-    layout.tsx         # Root layout (dark theme, Geist fonts)
-    page.tsx           # Main SPA shell — all UI state lives here
-    globals.css        # Tailwind + dark theme vars + markdown styling
-    api/
-      chat/route.ts    # LLM chat proxy (OpenRouter, Anthropic, OpenAI, NVIDIA)
-      data/[table]/route.ts  # Generic CRUD for all entity tables
-      settings/route.ts      # Settings key-value store
-      transcribe/route.ts    # Whisper transcription proxy
-      tts/route.ts           # TTS audio generation proxy
-  components/
-    Sidebar.tsx        # Navigation, search, recording controls
-    MeetingDetail.tsx  # Meeting viewer (summary/transcript/raw tabs)
-    NoteEditor.tsx     # Tiptap rich text editor with markdown toggle
-    TaskDetail.tsx     # Task editor with AI summarization
-    T5TComposer.tsx    # T5T report builder with AI generation
-    ChatPanel.tsx      # AI chat sidebar
-    Settings.tsx       # 6-tab settings (AI, General, Export, Privacy, T5T, About)
-    LiveTranscript.tsx # Real-time transcript during recording
-    EditorToolbar.tsx  # Rich text formatting toolbar
-    TTSPlayer.tsx      # Text-to-speech player
-    extensions/
-      ResizableImage.tsx  # Tiptap node extension for resizable images
-  lib/
-    types.ts           # All TypeScript interfaces (mirrors Swift models)
-    db.ts              # Client-side API wrapper (REST calls to Next.js routes)
-    server-db.ts       # Turso HTTP client (server-side only)
-    hooks.ts           # Data fetching hooks (2s polling), recording, search
-    ai.ts              # LLM integration (summarize, chat, transcribe)
-    audio.ts           # Browser Web Audio API + Speech Recognition
-    tts.ts             # TTS with chunking + prefetching
-    content-utils.ts   # Markdown <-> HTML (marked + Turndown)
-```
-
-### Key Components
-- **page.tsx** — SPA shell, manages selection state, layout (sidebar + content + chat panel)
-- **Sidebar** — Navigation sections (T5T, Notes, Tasks, Meetings), search, record button
-- **NoteEditor** — Tiptap editor with markdown source view, image drag-drop, tags
-- **T5TComposer** — 3-section report builder (Insights, Account Updates, Future Plans) with source selection
-- **Settings** — 6 tabs: AI provider/model/key, General, Export/Import, Privacy, T5T defaults, About
-
-### Web Data Flow
-1. Recording: Browser Web Audio API + SpeechRecognition → live transcript segments
-2. On stop: audio blob → `/api/transcribe` (Whisper proxy) → full transcript
-3. Summarization: transcript → `/api/chat` (LLM proxy) → structured JSON summary
-4. Persistence: all data → `/api/data/[table]` → Turso SQLite (server-side)
-5. Polling: `useRefreshable` hooks poll every 2s, `triggerRefresh()` for immediate updates
-
-### Web Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| next 16.2.1 | App framework (App Router) |
-| react 19.2.4 | UI framework |
-| @tiptap/* | Rich text editor + extensions |
-| marked | Markdown → HTML |
-| turndown | HTML → Markdown |
-| react-markdown + remark-gfm | Markdown rendering |
-| lucide-react | Icons |
-| uuid | ID generation |
-| @tailwindcss/postcss | Styling |
-
-### Build & Run (Web)
-
-```bash
-cd web
-
-# Install
-npm install
-
-# Dev server
-npm run dev
-
-# Production build
-npm run build && npm start
-```
-
-### Web Environment Variables
-- `TURSO_DATABASE_URL` — Turso database URL
-- `TURSO_AUTH_TOKEN` — Turso auth token
-
-Deployed on **Vercel**. Cloudflare tunnel origins allowed for dev (`*.trycloudflare.com`).
-
----
-
-## Shared Domain Models
-
-Both platforms use the same data model (Swift `Codable` / TypeScript interfaces):
+The native app uses Swift `Codable` models:
 
 | Model | Key Fields |
 |-------|------------|
@@ -266,22 +171,12 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Prefer `async/await` over Combine for new async work
 - Secrets go in Keychain via `KeychainHelper`, never UserDefaults
 
-### TypeScript (Web)
-- All components are `"use client"` — this is a client-rendered SPA
-- Types defined in `lib/types.ts` — keep in sync with Swift models
-- Data access via `lib/db.ts` wrapper → API routes → `lib/server-db.ts` → Turso
-- External API calls (LLM, TTS, transcription) always proxied through API routes — never call from client
-- Custom hooks in `lib/hooks.ts` for data fetching (2s polling pattern)
-- Mutation pattern: call `db.*`, then `triggerRefresh()` for immediate UI update
-
-### UI (Both platforms)
-- Dark mode Notion-like palette (macOS: `UI/Theme.swift`, web: `globals.css` CSS vars)
+### UI (macOS)
+- Dark mode Notion-like palette (`UI/Theme.swift`)
 - macOS: MenuBarExtra + Settings scene, modal sheets for creation/config
-- Web: fixed sidebar + content area + optional chat panel, keyboard shortcuts (Cmd+Shift+R, Cmd+Shift+C, Cmd+K)
 
 ### Storage
 - macOS: GRDB `DatabaseQueue`, JSON encoding for complex nested types
-- Web: Turso HTTP v2 pipeline API, schema auto-created on first query, JSON columns for complex types
 
 ---
 
@@ -295,14 +190,6 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Google OAuth uses a localhost HTTP server for callback — port conflicts possible
 - API keys migrated from UserDefaults to Keychain — migration code in KeychainHelper
 
-### Web
-- Single `page.tsx` holds all app state — no route-based navigation
-- Browser Speech Recognition is the primary transcription (no local Whisper) — quality varies by browser
-- Turso is the only persistence — no IndexedDB fallback, no offline mode
-- 2-second polling for data refresh — `triggerRefresh()` forces immediate update after mutations
-- TTS uses chunked text (~250 chars) with 2-chunk prefetch for smooth playback
-- API proxy pattern: all external calls (LLM, TTS, Whisper) go through `/api/*` routes
-
 ## Test Coverage
-- macOS: minimal — `NoteAITests/MeetingStoreTests.swift` (CRUD + export formatting)
-- Web: no tests yet
+- macOS: `NoteAITests/` covers storage, architecture, AI coach admission, recording diagnostics, chat context, onboarding, helper authorization, integrations, and Teams call state.
+- Preserve `SharedTests/coach-admission-contract-v1.json`; native AI coach tests load this fixture.

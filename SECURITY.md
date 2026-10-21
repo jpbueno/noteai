@@ -31,7 +31,7 @@ If you discover a security issue:
 When Gitleaks or manual review confirms that a real credential was committed:
 
 1. Revoke or rotate the leaked credential at the issuing service before treating the repository fix as complete.
-2. Update the active runtime location for the replacement secret, such as GitHub repository secrets, Cloudflare Worker secrets, local Keychain entries, or a developer-only `.env` file.
+2. Update the active runtime location for the replacement secret, such as GitHub environment/repository secrets, local Keychain entries, or a developer-only `.env` file.
 3. Search the current tree and relevant git history for the exposed value or provider-specific token fingerprint.
 4. Remove the secret from source, logs, artifacts, and documentation. If history must retain a grandfathered finding, add only the reviewed Gitleaks finding to `.gitleaks.baseline.json`.
 5. Rerun the secret scan workflow or local Gitleaks command (`gitleaks git --config=.gitleaks.toml --baseline-path .gitleaks.baseline.json .`) and save the result on the Linear issue.

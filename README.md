@@ -1,11 +1,10 @@
 # NoteAI
 
-Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
+Meeting intelligence app for macOS — SwiftUI menu bar app, on-device WhisperKit transcription, and local GRDB persistence.
 
-1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB persistence
-2. **Web app** — Next.js SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
+Features include: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
 
-Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
 ## Features
 
@@ -26,16 +25,12 @@ NoteAI/                   macOS app source (SwiftUI + GRDB + WhisperKit)
   Storage/                GRDB store, typed repositories, library operations
   Summarization/          LLM provider clients and AI task parsing/formatting
 NoteAITests/              macOS unit tests
-web/                      Web app source (Next.js + Turso)
-  src/
-    app/                  Pages, API routes
-    components/           React components
-    lib/                  Domain modules, hooks, audio, AI, typed repositories
-  public/                 Static assets
 NoteAI.xcodeproj/         Xcode project
 Package.swift             Swift Package manifest
 docs/                     Architecture, CI, release, storage, and security runbooks
-scripts/                  Repository and migration helper scripts
+SharedTests/              Fixtures used by native tests
+tools/work_activity/      Work activity tooling and approval automation
+scripts/                  Repository CI and hygiene checks
 ```
 
 ### Architecture Notes
@@ -43,7 +38,6 @@ scripts/                  Repository and migration helper scripts
 The app keeps UI orchestration thin by pushing reusable behavior into deeper domain modules:
 
 - **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns search/range/default-title behavior; `AITasks` owns JSON extraction, prompt formatting, and summary/T5T parsing; repository protocols document the persistence seams around `MeetingStore`.
-- **Web**: `recording-workflow.ts` owns recording completion and fallback behavior; `library.ts` owns entity drafts, search, source selection, and delete-selection rules; `ai-tasks.ts` owns prompt construction and response parsing; `assistant-actions.ts` owns AI action parsing/execution; `repositories.ts` provides typed persistence adapters over `db.ts`.
 
 ## Tech Stack
 
@@ -52,13 +46,6 @@ The app keeps UI orchestration thin by pushing reusable behavior into deeper dom
 - GRDB (SQLite persistence)
 - WhisperKit (on-device transcription via Apple Neural Engine)
 - ProcessTap / ScreenCaptureKit for system audio capture
-
-### Web App
-- Next.js 16 + React 19 + TypeScript 5
-- Tailwind CSS 4
-- Tiptap (rich text editor)
-- Turso (hosted SQLite)
-- Local/CI only. The public Cloudflare Worker deployment was decommissioned in JPB-191 because NoteAI is currently used through the macOS app.
 
 ---
 
@@ -87,65 +74,9 @@ ditto ".xcode-build/Build/Products/Debug/NoteAI.app" "/Applications/NoteAI.app"
 
 ---
 
-## Web App
-
-### Local Development
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Open http://localhost:3000.
-
-### Environment Variables
-
-Create `web/.env.local`:
-
-```
-TURSO_DATABASE_URL=libsql://your-db.turso.io
-TURSO_AUTH_TOKEN=your-turso-token
-NOTEAI_AUTH_SECRET=any-random-string
-GOOGLE_CLIENT_ID=your-google-oauth-client-id
-GOOGLE_ALLOWED_EMAILS=you@example.com
-NOTEAI_API_KEY_HASHES=base64-sha256-of-programmatic-api-key
-```
-
-### Public Web Deployment
-
-The public web app is intentionally not deployed. Do not recreate a Cloudflare Worker, Pages project, or other public web runtime unless a new security review and Linear issue explicitly approve it.
-
-### API Access
-
-The web app exposes a REST API for programmatic access (agents, scripts, etc.). Authenticate with a Bearer token whose SHA-256 digest is listed in `NOTEAI_API_KEY_HASHES`.
-
-Generate a key locally, store only its base64 SHA-256 digest in `NOTEAI_API_KEY_HASHES`, and keep the raw key in your agent or script secret store:
-
-```bash
-printf '%s' 'your-long-random-api-key' | openssl dgst -sha256 -binary | openssl base64
-```
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/data/notes` | List all notes |
-| POST | `/api/data/notes` | Create/update a note |
-| GET | `/api/data/tasks` | List all tasks |
-| POST | `/api/data/tasks` | Create/update a task |
-| GET | `/api/data/meetings` | List all meetings |
-| GET | `/api/data/t5tReports` | List all T5T reports |
-| POST | `/api/data/t5tReports` | Create/update a report |
-
-All entity endpoints support `GET ?id=<id>` for single items and `DELETE ?id=<id>` for deletion.
-
----
-
 ## Security Notes
 
 - **macOS**: LLM API keys stored in macOS Keychain, never UserDefaults
-- **Web**: API keys stay server-side in environment/configuration stores, never exposed to the browser
-- **Web**: Google OAuth with HMAC-signed session cookies
-- **Web**: Bearer token auth for programmatic API access using server-side SHA-256 hashes
 - Do not commit `.env*` files or build artifacts
 
 ## Repository Hygiene
@@ -154,7 +85,7 @@ This repository should contain source, tests, docs, and reviewed configuration o
 
 - `output/` is for generated reports, decks, QR cards, and other throwaway exports.
 - `scratch/` is for local investigation artifacts, screenshots, previews, and temporary analysis output.
-- `.xcode-build/`, `.build/`, `DerivedData/`, `web/.next/`, `web/node_modules/`, logs, local databases, and `.env*` files are ignored.
+- `.xcode-build/`, `.build/`, `DerivedData/`, logs, local databases, and `.env*` files are ignored.
 
 Run the lightweight hygiene check before sharing a cleanup PR:
 
@@ -167,10 +98,6 @@ node --test scripts/repository-hygiene.test.mjs
 ```bash
 swift test
 node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs
-cd web
-npm run lint
-npx tsc --noEmit --pretty false
-npm run build
 ```
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the full pre-release checklist and release notes template.

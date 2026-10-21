@@ -1,5 +1,7 @@
 # NoteAI Teams Helper Capture Control Implementation Plan
 
+> Historical native/helper design record. JPB-191 permanently retired the web client. Web paths, commands, and unfinished steps below describe the original design and must not be executed or implemented as current work. The native helper Implementation and tests are preserved unchanged.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Enable the web Teams Desktop source to start/stop a visible local macOS helper recording session and persist the final helper transcript into the web app.

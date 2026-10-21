@@ -1,5 +1,7 @@
 # NoteAI Local Capture Helper Lifecycle Definition
 
+> Historical native/helper design record. JPB-191 permanently retired the web client. Web paths, commands, and unfinished steps below describe the original design and must not be executed or implemented as current work. The native helper Implementation and tests are preserved unchanged.
+
 Issue: JPB-70, "Follow-up: define durable local helper launch/install/update lifecycle"
 Date: 2026-05-01
 Status: Definition for implementation

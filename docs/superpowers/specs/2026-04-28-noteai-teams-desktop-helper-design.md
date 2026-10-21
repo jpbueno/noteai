@@ -1,5 +1,7 @@
 # NoteAI Teams Desktop Capture Helper Design
 
+> Historical native/helper design record. JPB-191 permanently retired the web client. Web paths, commands, and unfinished steps below describe the original design and must not be executed or implemented as current work. The native helper Implementation and tests are preserved unchanged.
+
 Issue: JPB-49, "Design first-class macOS Teams meeting capture"
 Date: 2026-04-28
 Status: Draft for review

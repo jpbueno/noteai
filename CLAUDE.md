@@ -2,12 +2,11 @@
 
 ## Project Overview
 
-Meeting intelligence platform — captures, transcribes, and summarizes meetings with AI. Two clients sharing the same feature set:
+Meeting intelligence platform for macOS — SwiftUI menu bar app, on-device WhisperKit transcription, and local GRDB (SQLite) persistence.
 
-1. **macOS native app** — SwiftUI menu bar app, on-device WhisperKit transcription, GRDB (SQLite) persistence
-2. **Web app** — Next.js 16 SPA, browser Web Audio + Speech Recognition, Turso (hosted SQLite) persistence
+The app supports: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
 
-Both support: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
 ---
 
@@ -78,107 +77,9 @@ Project is managed via `project.yml` (XcodeGen). Regenerate Xcode project with `
 
 ---
 
-## Web App (`web/`)
+## Domain Models
 
-**Stack**: Next.js 16.2.1 | React 19 | TypeScript 5 | Tailwind CSS 4 | Tiptap | Turso
-
-### Architecture: Single-Page Client App + API Routes
-
-```
-web/src/
-  app/
-    layout.tsx         # Root layout (dark theme, Geist fonts)
-    page.tsx           # Main SPA shell — selection/layout orchestration
-    globals.css        # Tailwind + dark theme vars + markdown styling
-    api/
-      chat/route.ts    # LLM chat proxy (OpenRouter, Anthropic, OpenAI, NVIDIA)
-      data/[table]/route.ts  # Generic CRUD for all entity tables
-      settings/route.ts      # Settings key-value store
-      transcribe/route.ts    # Whisper transcription proxy
-      tts/route.ts           # TTS audio generation proxy
-  components/
-    Sidebar.tsx        # Navigation, search, recording controls
-    MeetingDetail.tsx  # Meeting viewer (summary/transcript/raw tabs)
-    NoteEditor.tsx     # Tiptap rich text editor with markdown toggle
-    TaskDetail.tsx     # Task editor with AI summarization
-    T5TComposer.tsx    # T5T report builder with AI generation
-    ChatPanel.tsx      # AI chat sidebar
-    Settings.tsx       # 6-tab settings (AI, General, Export, Privacy, T5T, About)
-    LiveTranscript.tsx # Real-time transcript during recording
-    EditorToolbar.tsx  # Rich text formatting toolbar
-    TTSPlayer.tsx      # Text-to-speech player
-    extensions/
-      ResizableImage.tsx  # Tiptap node extension for resizable images
-  lib/
-    types.ts           # All TypeScript interfaces (mirrors Swift models)
-    db.ts              # Client-side API wrapper (REST calls to Next.js routes)
-    server-db.ts       # Turso HTTP client (server-side only)
-    hooks.ts           # Data fetching hooks and recording hook
-    library.ts         # Entity drafts, library search, source selection, selection clearing
-    recording-workflow.ts # Recording completion, fallback transcription/summary behavior
-    ai.ts              # LLM transport-facing helpers
-    ai-tasks.ts        # Prompt construction and response parsing for AI tasks
-    assistant-actions.ts # AI chat action parsing/execution
-    repositories.ts    # Typed persistence adapters over db.ts
-    audio.ts           # Browser Web Audio API + Speech Recognition
-    tts.ts             # TTS with chunking + prefetching
-    content-utils.ts   # Markdown <-> HTML (marked + Turndown)
-```
-
-### Key Components
-- **page.tsx** — SPA shell, manages selection state, layout (sidebar + content + chat panel)
-- **Sidebar** — Navigation sections (T5T, Notes, Tasks, Meetings), search, record button
-- **NoteEditor** — Tiptap editor with markdown source view, image drag-drop, tags
-- **T5TComposer** — 3-section report builder (Insights, Account Updates, Future Plans) with source selection
-- **Settings** — 6 tabs: AI provider/model/key, General, Export/Import, Privacy, T5T defaults, About
-
-### Web Data Flow
-1. Recording: Browser Web Audio API + SpeechRecognition → live transcript segments
-2. On stop: audio blob → `/api/transcribe` (Whisper proxy) → full transcript
-3. Summarization: transcript → `/api/chat` (LLM proxy) → structured JSON summary
-4. Persistence: all data → `/api/data/[table]` → Turso SQLite (server-side)
-5. Refresh: `useRefreshable` fetches on mount and after `triggerRefresh()` mutations
-
-### Web Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| next 16.2.1 | App framework (App Router) |
-| react 19.2.4 | UI framework |
-| @tiptap/* | Rich text editor + extensions |
-| marked | Markdown → HTML |
-| turndown | HTML → Markdown |
-| react-markdown + remark-gfm | Markdown rendering |
-| lucide-react | Icons |
-| uuid | ID generation |
-| @tailwindcss/postcss | Styling |
-
-### Build & Run (Web)
-
-```bash
-cd web
-
-# Install
-npm install
-
-# Dev server
-npm run dev
-
-# Production build
-npm run build && npm start
-```
-
-### Web Environment Variables
-- `TURSO_DATABASE_URL` — Turso database URL
-- `TURSO_AUTH_TOKEN` — Turso auth token
-
-Deployed on **Cloudflare Workers** via OpenNext at `https://noteai-web.noteai-jp.workers.dev`.
-
----
-
-## Shared Domain Models
-
-Both platforms use the same data model (Swift `Codable` / TypeScript interfaces):
+The native app uses Swift `Codable` models:
 
 | Model | Key Fields |
 |-------|------------|
@@ -206,23 +107,12 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Secrets go in Keychain via `KeychainHelper`, never UserDefaults
 - Put reusable workflow/search/AI parsing behavior in `MeetingCaptureWorkflow`, `LibraryOperations`, or `AITasks` instead of growing `MeetingManager`
 
-### TypeScript (Web)
-- All components are `"use client"` — this is a client-rendered SPA
-- Types defined in `lib/types.ts` — keep in sync with Swift models
-- Data access via `lib/db.ts` wrapper → API routes → `lib/server-db.ts` → Turso
-- External API calls (LLM, TTS, transcription) always proxied through API routes — never call from client
-- Custom hooks in `lib/hooks.ts` for data fetching and recording state
-- Mutation pattern: call `db.*`, then `triggerRefresh()` for immediate UI update
-- Prefer `lib/library.ts`, `lib/recording-workflow.ts`, `lib/ai-tasks.ts`, and `lib/assistant-actions.ts` for reusable domain behavior instead of embedding prompts/workflows in React components
-
-### UI (Both platforms)
-- Dark mode Notion-like palette (macOS: `UI/Theme.swift`, web: `globals.css` CSS vars)
+### UI (macOS)
+- Dark mode Notion-like palette (`UI/Theme.swift`)
 - macOS: MenuBarExtra + Settings scene, modal sheets for creation/config
-- Web: fixed sidebar + content area + optional chat panel, keyboard shortcuts (Cmd+Shift+R, Cmd+Shift+C, Cmd+K)
 
 ### Storage
 - macOS: GRDB `DatabaseQueue`, JSON encoding for complex nested types
-- Web: Turso HTTP v2 pipeline API, schema auto-created on first query, JSON columns for complex types
 
 ---
 
@@ -236,14 +126,6 @@ Both platforms use the same data model (Swift `Codable` / TypeScript interfaces)
 - Google OAuth uses a localhost HTTP server for callback — port conflicts possible
 - API keys migrated from UserDefaults to Keychain — migration code in KeychainHelper
 
-### Web
-- Single `page.tsx` holds all app state — no route-based navigation
-- Browser Speech Recognition is the primary transcription (no local Whisper) — quality varies by browser
-- Turso is the only persistence — no IndexedDB fallback, no offline mode
-- Data refresh is fetch-on-mount plus `triggerRefresh()` after mutations
-- TTS uses chunked text (~250 chars) with 2-chunk prefetch for smooth playback
-- API proxy pattern: all external calls (LLM, TTS, Whisper) go through `/api/*` routes
-
 ## Test Coverage
-- macOS: `NoteAITests/MeetingStoreTests.swift` and `NoteAITests/ArchitectureModuleTests.swift`
-- Web: no dedicated test runner yet; use `npm run lint`, `npx tsc --noEmit --pretty false`, and `npm run build`
+- macOS: `NoteAITests/` includes storage, architecture, AI coach, recording, helper, integration, and Teams call tests.
+- Preserve `SharedTests/coach-admission-contract-v1.json`; native AI coach tests load this fixture.

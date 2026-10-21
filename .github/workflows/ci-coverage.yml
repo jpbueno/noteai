@@ -11,7 +11,7 @@ on:
       - "docs/ci-security-followups.md"
       - "scripts/ci-coverage-parity.test.mjs"
       - "scripts/repository-hygiene.test.mjs"
-      - "web/*.test.mjs"
+      - "web/**"
       - "NoteAITests/**"
   push:
     branches:
@@ -25,7 +25,7 @@ on:
       - "docs/ci-security-followups.md"
       - "scripts/ci-coverage-parity.test.mjs"
       - "scripts/repository-hygiene.test.mjs"
-      - "web/*.test.mjs"
+      - "web/**"
       - "NoteAITests/**"
   workflow_dispatch:
 

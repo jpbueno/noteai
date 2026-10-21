@@ -1,5 +1,7 @@
 # NoteAI Teams Helper Capture Control Design
 
+> Historical native/helper design record. JPB-191 permanently retired the web client. Web paths, commands, and unfinished steps below describe the original design and must not be executed or implemented as current work. The native helper Implementation and tests are preserved unchanged.
+
 ## Goal
 
 Make the web app's **Teams Desktop** recording source start and stop a transparent local macOS helper recording session. The flow must be one-click after pairing, but never hidden: the helper/native app must expose a visible recording state, use macOS permissions, and refuse unpaired or non-loopback control.

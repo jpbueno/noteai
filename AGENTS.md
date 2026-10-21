@@ -62,9 +62,9 @@ All NoteAI improvements and new features managed in Linear must explicitly follo
 
 ## Project Overview
 
-Meeting intelligence platform for macOS — SwiftUI menu bar app, on-device WhisperKit transcription, and local GRDB (SQLite) persistence.
+NoteAI 7 is a macOS meeting transcription and live AI Solutions Architect app, built with SwiftUI, on-device WhisperKit transcription, and local GRDB persistence.
 
-The app supports: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The app retains meeting capture/transcription, transcript import, summaries, speaker context, meeting history/search/export, TTS, and live AI SA questions. Standalone notes, T5T, tasks, todos, and the general assistant are retired. Keep existing SQLite tables and rows untouched; do not restore their startup migrations or CRUD paths.
 
 The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
@@ -92,9 +92,9 @@ NoteAI/
   Transcription/    # WhisperKit engine (actor-based, hallucination filtering)
   Summarization/    # LLM abstraction (OpenRouter, Anthropic, OpenAI, NVIDIA)
   MeetingDetection/ # Auto-detect Teams/browser audio activity
-  Storage/          # GRDB persistence, models (Meeting, Note, TaskItem, T5TReport, ChatMessage)
+  Storage/          # Meeting-only GRDB persistence and meeting/coach models
   Auth/             # Google OAuth 2.0 + PKCE, Keychain, API key management
-  Delivery/         # Export (Markdown/JSON), Notion import, notifications
+  Delivery/         # Meeting export and notifications
   UI/               # SwiftUI views organized by feature area
 ```
 
@@ -103,7 +103,7 @@ NoteAI/
 - **TranscriptionEngine** (`Transcription/TranscriptionEngine.swift`) — Actor, WhisperKit with hallucination filtering
 - **SummarizationEngine** (`Summarization/SummarizationEngine.swift`) — Multi-provider LLM, template-based prompts
 - **MeetingStore** (`Storage/MeetingStore.swift`) — GRDB persistence layer, CRUD for all models
-- **ChatManager** (`UI/Chat/ChatManager.swift`) — Chat orchestrator with JSON action parsing
+- **LiveCoachSession** (`Summarization/LiveCoachSession.swift`) — Session-safe live AI SA orchestration
 - **AudioCaptureManager** (`Audio/AudioCaptureManager.swift`) — Coordinates ProcessTap + ScreenCaptureKit + mic
 
 ### macOS Data Flow
@@ -149,10 +149,7 @@ The native app uses Swift `Codable` models:
 | Model | Key Fields |
 |-------|------------|
 | **Meeting** | id, title, date, duration, transcript: TranscriptSegment[], summary: MeetingSummary |
-| **Note** | id, title, content (markdown), tags[], sourceMeetingID? |
-| **TaskItem** | id, title, description, rawInput, status (pending/completed), sourceMeetingID? |
-| **T5TReport** | id, title, periodStart/End, sections (insights/accountUpdates/futurePlans), status (draft/finalized) |
-| **ChatMessage** | id, role (user/assistant/system), content, timestamp |
+| **CoachInsight** | id, sessionID, content, evidence, lifecycle, role |
 
 **MeetingSummary**: decisions[], actionItems[] (task, owner, deadline, isCompleted), topics[], openQuestions[]
 
@@ -191,5 +188,5 @@ The native app uses Swift `Codable` models:
 - API keys migrated from UserDefaults to Keychain — migration code in KeychainHelper
 
 ## Test Coverage
-- macOS: `NoteAITests/` covers storage, architecture, AI coach admission, recording diagnostics, chat context, onboarding, helper authorization, integrations, and Teams call state.
+- macOS: Xcode scheme tests cover meeting persistence/export and archived-data preservation, recording/audio diagnostics, onboarding, Teams detection, local capture helper, meeting shell, summary parsing, and session-safe AI SA behavior. Persistence tests must use temporary stores rather than the live app database.
 - Preserve `SharedTests/coach-admission-contract-v1.json`; native AI coach tests load this fixture.

@@ -1,8 +1,10 @@
 # NoteAI
 
-Meeting intelligence app for macOS — SwiftUI menu bar app, on-device WhisperKit transcription, and local GRDB persistence.
+NoteAI 7 focuses the macOS app on meeting transcription and the live AI Solutions Architect.
 
-Features include: meeting recording/transcription, LLM summarization, notes, tasks, T5T reports, AI chat, TTS playback.
+The SwiftUI menu bar app captures microphone and system audio, transcribes with on-device WhisperKit, and stores meetings locally with GRDB.
+
+Standalone notes, T5T reports, tasks, to dos, and the general AI assistant are retired from the macOS app. Existing records remain in their original database tables; this update neither deletes them nor runs the old todo-to-task migration. Meeting history, the primary app identity, and Keychain credentials are preserved.
 
 The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
@@ -10,10 +12,9 @@ The web version was permanently retired in JPB-191. NoteAI is a macOS applicatio
 
 - Record and transcribe meetings (mic + system audio capture)
 - Structured AI summaries with decisions, action items, topics, and open questions
-- Rich text notes with markdown, tags, and meeting linking
-- Task management with AI summarization
-- T5T (Top 5 Things) report generation from meetings, notes, and tasks
-- AI chat sidebar for querying meeting content
+- Live AI Solutions Architect insights and interactive questions during recording
+- Automatic meeting detection, transcript import, and post-meeting speaker context
+- Meeting history, search, summary editing, and Markdown/PDF export
 - Text-to-speech playback
 - Configurable LLM backends (OpenRouter, Anthropic, OpenAI, NVIDIA)
 
@@ -23,7 +24,7 @@ The web version was permanently retired in JPB-191. NoteAI is a macOS applicatio
 NoteAI/                   macOS app source (SwiftUI + GRDB + WhisperKit)
   App/                    App entry, MeetingManager, meeting capture workflow
   Storage/                GRDB store, typed repositories, library operations
-  Summarization/          LLM provider clients and AI task parsing/formatting
+  Summarization/          Meeting summary parsing, LLM clients, and session-safe AI SA
 NoteAITests/              macOS unit tests
 NoteAI.xcodeproj/         Xcode project
 Package.swift             Swift Package manifest
@@ -37,7 +38,7 @@ scripts/                  Repository CI and hygiene checks
 
 The app keeps UI orchestration thin by pushing reusable behavior into deeper domain modules:
 
-- **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns search/range/default-title behavior; `AITasks` owns JSON extraction, prompt formatting, and summary/T5T parsing; repository protocols document the persistence seams around `MeetingStore`.
+- **macOS**: `MeetingCaptureWorkflow` owns transcript formatting and meeting completion helpers; `LibraryOperations` owns meeting search/range behavior; `AITasks` owns structured summary parsing; `LiveCoachSession` owns recording-scoped AI SA work. `MeetingStore` and `MeetingRepository` expose only meeting persistence and leave archived tables untouched.
 
 ## Tech Stack
 
@@ -56,14 +57,14 @@ Live recording shows speaker labels without asking you to identify speakers. Aft
 ### Build & Run
 
 ```bash
-xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug -derivedDataPath .xcode-build build
 open .xcode-build/Build/Products/Debug/NoteAI.app
 ```
 
 ### Deploy to /Applications
 
 ```bash
-xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug build
+xcodebuild -project NoteAI.xcodeproj -scheme NoteAI -configuration Debug -derivedDataPath .xcode-build build
 ditto ".xcode-build/Build/Products/Debug/NoteAI.app" "/Applications/NoteAI.app"
 ```
 

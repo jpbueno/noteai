@@ -79,20 +79,10 @@ struct NotionPageView: View {
 
                 Spacer()
 
-                if let manager = meetingManager {
+                if meetingManager != nil {
                     if selectedTab == .summary, !meeting.summary.isEmpty {
                         summaryRegenerateButton
                     }
-
-                    Button {
-                        let note = manager.createNoteFromMeeting(meeting)
-                        NotificationCenter.default.post(name: .navigateToNote, object: note.id)
-                    } label: {
-                        Label("Save to Note", systemImage: "note.text.badge.plus")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textSecondary)
 
                     ReadAloudButton(tts: ttsService, text: meetingSummaryText)
                 }

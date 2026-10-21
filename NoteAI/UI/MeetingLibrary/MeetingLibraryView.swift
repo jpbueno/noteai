@@ -2,28 +2,14 @@ import AVFoundation
 import AppKit
 import CoreGraphics
 import SwiftUI
-import UniformTypeIdentifiers
 
 enum SidebarSelection: Hashable {
     case home
-    case t5tList
-    case notesList
-    case tasksList
-    case todosList
     case meetingsList
     case meeting(UUID)
-    case t5tReport(UUID)
-    case newT5T
-    case note(UUID)
-    case task(UUID)
-    case todo(UUID)
 }
 
 private enum SidebarSectionID: Hashable {
-    case t5t
-    case notes
-    case tasks
-    case todos
     case meetings
 }
 
@@ -58,19 +44,15 @@ enum SidebarListLimiter {
 struct MeetingLibraryView: View {
     @ObservedObject var meetingManager: MeetingManager
     @ObservedObject var authManager: GoogleAuthManager
-    @ObservedObject var chatManager: ChatManager
     @ObservedObject var ttsService: TextToSpeechService
     @State private var selection: SidebarSelection? = .home
     @State private var settingsWindow: NSWindow?
-    @State private var showChatDrawer = false
     @State private var sidebarWidth: CGFloat = 0
     @State private var sidebarDragStartWidth: CGFloat?
     @State private var sidebarCollapsed = false
     @State private var collapsedSections: Set<SidebarSectionID> = []
     @State private var openTabs: [SidebarSelection] = [.home]
     @State private var sidebarSearchExpanded = false
-    @State private var targetedNoteSpace: String?
-    @State private var draggingNoteID: UUID?
     @State private var showTranscriptImport = false
     @FocusState private var searchFocused: Bool
     @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
@@ -104,14 +86,6 @@ struct MeetingLibraryView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    if showChatDrawer {
-                        Rectangle().fill(Theme.border).frame(width: 1)
-                        ChatPanelView(chatManager: chatManager, onClose: {
-                            withAnimation(.easeInOut(duration: 0.2)) { showChatDrawer = false }
-                        })
-                        .frame(width: min(420, max(340, round(340 * layout.scale))))
-                        .transition(.move(edge: .trailing))
-                    }
                 }
 
                 if !sidebarCollapsed {
@@ -122,31 +96,8 @@ struct MeetingLibraryView: View {
             .environment(\.commandCenterLayout, layout)
         }
         .background(Theme.notionWindowBG)
-        .animation(.easeInOut(duration: 0.2), value: showChatDrawer)
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToNote)) { notification in
-            if let noteID = notification.object as? UUID {
-                selection = .note(noteID)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToSource)) { notification in
-            guard let urlString = notification.object as? String,
-                  let link = ChatSourceLink(urlString: urlString)
-            else { return }
-            switch link.kind {
-            case .meeting:
-                selection = .meeting(link.id)
-            case .note:
-                selection = .note(link.id)
-            case .t5t:
-                selection = .t5tReport(link.id)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleChatPanel)) { _ in
-            showChatDrawer.toggle()
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             meetingManager.refreshOnboardingChecklistState()
-            meetingManager.refreshTasksFromStore()
         }
         .onChange(of: selection) { _, newSelection in
             if let newSelection {
@@ -250,21 +201,6 @@ struct MeetingLibraryView: View {
 
             topBarRecordingControl(layout: layout)
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    showChatDrawer.toggle()
-                }
-            } label: {
-                Image(systemName: "message")
-                    .font(.system(size: layout.smallFontSize, weight: .bold))
-                    .foregroundStyle(Theme.accent.opacity(showChatDrawer ? 1.0 : 0.95))
-                    .frame(width: round(34 * layout.scale), height: round(34 * layout.scale))
-                    .background(Color.clear, in: Capsule())
-                    .overlay(Capsule().stroke(Theme.accent.opacity(0.42), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("AI copilot"))
-            .help("AI copilot")
         }
         .padding(.leading, sidebarCollapsed ? round(10 * layout.scale) : round(18 * layout.scale))
         .padding(.trailing, round(18 * layout.scale))
@@ -356,33 +292,14 @@ struct MeetingLibraryView: View {
     }
 
     private func notionTabTitle(for tab: SidebarSelection?) -> String {
-        guard let tab else { return meetingManager.state == .recording ? "Live Recording" : "Today" }
-
+        guard let tab else { return meetingManager.state == .recording ? "Live Recording" : "Meetings" }
         switch tab {
         case .home:
-            return "Today"
-        case .t5tList:
-            return "T5T Reports"
-        case .notesList:
-            return "Notes"
-        case .tasksList:
-            return "Tasks"
-        case .todosList:
-            return "Todos"
+            return "Overview"
         case .meetingsList:
             return "Meetings"
         case .meeting(let id):
             return meetingManager.meetings.first(where: { $0.id == id })?.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams") ?? "Meeting"
-        case .t5tReport(let id):
-            return meetingManager.t5tReports.first(where: { $0.id == id })?.title ?? "T5T Report"
-        case .newT5T:
-            return "New T5T"
-        case .note(let id):
-            return meetingManager.notes.first(where: { $0.id == id })?.title ?? "Note"
-        case .task(let id):
-            return meetingManager.tasks.first(where: { $0.id == id })?.title ?? "Task"
-        case .todo(let id):
-            return meetingManager.todos.first(where: { $0.id == id })?.title ?? "Todo"
         }
     }
 
@@ -392,18 +309,9 @@ struct MeetingLibraryView: View {
 
     private func notionTabIcon(for tab: SidebarSelection?) -> String {
         guard let tab else { return meetingManager.state == .recording ? "waveform" : "house" }
-
         switch tab {
         case .home:
-            return "house"
-        case .t5tList, .t5tReport, .newT5T:
-            return LibraryListPresentation.SidebarItemKind.t5tReport.icon
-        case .notesList, .note:
-            return LibraryListPresentation.SidebarItemKind.note.icon
-        case .tasksList, .task:
-            return LibraryListPresentation.SidebarItemKind.task.icon
-        case .todosList, .todo:
-            return LibraryListPresentation.SidebarItemKind.todo.icon
+            return LibraryListPresentation.SidebarItemKind.home.icon
         case .meetingsList, .meeting:
             return LibraryListPresentation.SidebarItemKind.meeting.icon
         }
@@ -415,18 +323,9 @@ struct MeetingLibraryView: View {
 
     private func notionTabAccent(for tab: SidebarSelection?) -> Color {
         guard let tab else { return meetingManager.state == .recording ? Theme.danger : Theme.notionIconAccent }
-
         switch tab {
         case .home:
             return LibraryListPresentation.SidebarItemKind.home.tint
-        case .t5tList, .t5tReport, .newT5T:
-            return LibraryListPresentation.SidebarItemKind.t5tReport.tint
-        case .notesList, .note:
-            return LibraryListPresentation.SidebarItemKind.note.tint
-        case .tasksList, .task:
-            return LibraryListPresentation.SidebarItemKind.task.tint
-        case .todosList, .todo:
-            return LibraryListPresentation.SidebarItemKind.todo.tint
         case .meetingsList, .meeting:
             return LibraryListPresentation.SidebarItemKind.meeting.tint
         }
@@ -516,90 +415,6 @@ struct MeetingLibraryView: View {
                     homeSidebarRow(layout: layout)
 
                     sidebarSection(
-                        .t5t,
-                        title: "T5T Reports",
-                        kind: .t5tReport,
-                        selectionTarget: .t5tList,
-                        action: createNewT5T,
-                        layout: layout
-                    ) {
-                        sidebarLimitedContent(
-                            visibleT5TReports,
-                            expansionID: sidebarExpansionID(for: .t5t),
-                            layout: layout
-                        ) { report in
-                            t5tSidebarRow(report: report, layout: layout)
-                        }
-                        if visibleT5TReports.isEmpty {
-                            emptyHint("No T5T reports yet", layout: layout)
-                        }
-                    }
-
-                    notesSidebarSection(selectionTarget: .notesList, layout: layout) {
-                        ForEach(
-                            NoteSpaceOrganizer.groups(
-                                for: visibleNotes,
-                                explicitSpaces: meetingManager.noteSpaces,
-                                includeEmptyUnassigned: !meetingManager.noteSpaces.isEmpty
-                            )
-                        ) { group in
-                            VStack(alignment: .leading, spacing: 0) {
-                                noteSpaceHeader(group: group, layout: layout)
-                                sidebarLimitedContent(
-                                    group.notes,
-                                    expansionID: sidebarExpansionID(forNoteSpace: group.title),
-                                    layout: layout
-                                ) { note in
-                                    noteSidebarRow(note: note, layout: layout)
-                                }
-                            }
-                        }
-                        if visibleNotes.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No notes yet", layout: layout)
-                        }
-                    }
-
-                    sidebarSection(
-                        .tasks,
-                        title: "Tasks",
-                        kind: .task,
-                        selectionTarget: .tasksList,
-                        action: createNewTask,
-                        layout: layout
-                    ) {
-                        sidebarLimitedContent(
-                            visibleTasks,
-                            expansionID: sidebarExpansionID(for: .tasks),
-                            layout: layout
-                        ) { task in
-                            taskSidebarRow(task: task, layout: layout)
-                        }
-                        if visibleTasks.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No tasks yet", layout: layout)
-                        }
-                    }
-
-                    sidebarSection(
-                        .todos,
-                        title: "Todos",
-                        kind: .todo,
-                        selectionTarget: .todosList,
-                        action: createNewTodo,
-                        layout: layout
-                    ) {
-                        sidebarLimitedContent(
-                            visibleTodos,
-                            expansionID: sidebarExpansionID(for: .todos),
-                            layout: layout
-                        ) { todo in
-                            todoSidebarRow(todo: todo, layout: layout)
-                        }
-                        if visibleTodos.isEmpty && meetingManager.searchQuery.isEmpty {
-                            emptyHint("No todos yet", layout: layout)
-                        }
-                    }
-
-                    sidebarSection(
                         .meetings,
                         title: "Meetings",
                         kind: .meeting,
@@ -665,16 +480,8 @@ struct MeetingLibraryView: View {
 
     private func sidebarExpansionID(for section: SidebarSectionID) -> String {
         switch section {
-        case .t5t: return "t5t"
-        case .notes: return "notes"
-        case .tasks: return "tasks"
-        case .todos: return "todos"
         case .meetings: return "meetings"
         }
-    }
-
-    private func sidebarExpansionID(forNoteSpace title: String) -> String {
-        "notespace:" + title.unicodeScalars.map { String($0.value, radix: 16) }.joined(separator: "-")
     }
 
     @ViewBuilder
@@ -770,7 +577,7 @@ struct MeetingLibraryView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Search workspace")
+            .help("Search meetings")
         }
         .padding(.leading, layout.sidebarBrandLeadingInset)
         .padding(.trailing, layout.sidebarBrandLeadingInset)
@@ -786,7 +593,7 @@ struct MeetingLibraryView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: layout.smallFontSize))
                     .foregroundStyle(Theme.textTertiary)
-                TextField("Search workspace...", text: $meetingManager.searchQuery)
+                TextField("Search meetings...", text: $meetingManager.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: layout.bodyFontSize))
                     .focused($searchFocused)
@@ -866,66 +673,6 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func notesSidebarSection<Content: View>(
-        selectionTarget: SidebarSelection,
-        layout: CommandCenterLayout,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Button {
-                    toggleSection(.notes)
-                } label: {
-                    Image(systemName: collapsedSections.contains(.notes) ? "chevron.right" : "chevron.down")
-                        .font(.system(size: layout.tinyFontSize - 1, weight: .bold))
-                        .foregroundStyle(Theme.sectionHeader)
-                        .frame(width: round(12 * layout.scale), height: round(18 * layout.scale))
-                }
-                .buttonStyle(.plain)
-                .help(collapsedSections.contains(.notes) ? "Expand Notes" : "Collapse Notes")
-
-                sidebarSectionHeaderButton(
-                    title: "Notes",
-                    kind: .note,
-                    selectionTarget: selectionTarget,
-                    layout: layout
-                )
-
-                Spacer()
-
-                Menu {
-                    Button {
-                        createNewNote()
-                    } label: {
-                        Label("New Note", systemImage: "note.text")
-                    }
-                    Button {
-                        createNewSpace()
-                    } label: {
-                        Label("New Space", systemImage: "folder.badge.plus")
-                    }
-                } label: {
-                    Label("New", systemImage: "plus")
-                        .font(.system(size: layout.tinyFontSize + 1, weight: .semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.horizontal, round(7 * layout.scale))
-                        .padding(.vertical, round(4 * layout.scale))
-                        .background(Theme.notionHoverBG, in: RoundedRectangle(cornerRadius: 6))
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Create a note or note space")
-            }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.top, round(14 * layout.scale))
-            .padding(.bottom, round(5 * layout.scale))
-
-            if !collapsedSections.contains(.notes) {
-                content()
-            }
-        }
-    }
-
     private func sidebarSectionHeaderButton(
         title: String,
         kind: LibraryListPresentation.SidebarItemKind,
@@ -968,94 +715,6 @@ struct MeetingLibraryView: View {
             .padding(.vertical, round(5 * layout.scale))
     }
 
-    private func noteSpaceHeader(group: NoteSpaceGroup, layout: CommandCenterLayout) -> some View {
-        let dropTargetID = group.title
-        let targetSpace = group.isUnassigned ? nil : group.title
-        let isTargeted = targetedNoteSpace == dropTargetID
-
-        return HStack(spacing: 8) {
-            Text(group.title)
-                .font(.system(size: max(9, layout.tinyFontSize), weight: .bold))
-                .foregroundStyle(Theme.textTertiary)
-                .textCase(.uppercase)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 4)
-            Text("\(group.notes.count)")
-                .font(.system(size: max(9, layout.tinyFontSize), weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-        }
-        .padding(.horizontal, round(18 * layout.scale))
-        .padding(.top, round(7 * layout.scale))
-        .padding(.bottom, round(2 * layout.scale))
-        .background(
-            isTargeted ? Theme.accent.opacity(0.12) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6)
-        )
-        .contentShape(Rectangle())
-        .contextMenu {
-            if !group.isUnassigned {
-                Button {
-                    renameNoteSpace(group.title)
-                } label: {
-                    Label("Rename Space", systemImage: "pencil")
-                }
-
-                Button(role: .destructive) {
-                    deleteNoteSpace(group.title)
-                } label: {
-                    Label("Delete Space", systemImage: "trash")
-                }
-            }
-        }
-        .onDrop(
-            of: [.text],
-            isTargeted: Binding(
-                get: { targetedNoteSpace == dropTargetID },
-                set: { targetedNoteSpace = $0 ? dropTargetID : nil }
-            )
-        ) { providers in
-            handleNoteDrop(providers, toSpace: targetSpace)
-        }
-        .help(group.isUnassigned ? "Drop a note here to remove it from a space" : "Drop a note here to move it to \(group.title)")
-    }
-
-    private func t5tSidebarRow(report: T5TReport, layout: CommandCenterLayout) -> some View {
-        Button {
-            selection = .t5tReport(report.id)
-        } label: {
-            HStack(spacing: 8) {
-                sidebarItemIcon(
-                    LibraryListPresentation.SidebarItemKind.t5tReport,
-                    tint: report.status == .draft ? LibraryListPresentation.SidebarItemKind.t5tReport.tint : Theme.textTertiary,
-                    layout: layout
-                )
-                Text("\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.vertical, round(6 * layout.scale))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selection == .t5tReport(report.id)
-                    ? Theme.notionSelectedBG
-                    : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-        .contextMenu {
-            Button("Delete", role: .destructive) {
-                if selection == .t5tReport(report.id) { selection = nil }
-                meetingManager.deleteT5TReport(report)
-            }
-        }
-    }
-
     private func sidebarRow(meeting: Meeting, layout: CommandCenterLayout) -> some View {
         Button {
             selection = .meeting(meeting.id)
@@ -1085,10 +744,6 @@ struct MeetingLibraryView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 4)
         .contextMenu {
-            Button("Save to Note") {
-                let note = meetingManager.createNoteFromMeeting(meeting)
-                selection = .note(note.id)
-            }
             Button("Export as Markdown") { exportMeeting(meeting) }
             Button("Export as PDF") { exportMeetingPDF(meeting) }
             Divider()
@@ -1099,45 +754,6 @@ struct MeetingLibraryView: View {
         }
     }
 
-    private func noteSidebarRow(note: Note, layout: CommandCenterLayout) -> some View {
-        Button {
-            selection = .note(note.id)
-        } label: {
-            HStack(spacing: 8) {
-                sidebarItemIcon(LibraryListPresentation.SidebarItemKind.note, layout: layout)
-                Text("\(datePrefix(note.createdDate)) \(note.title)")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.vertical, round(6 * layout.scale))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selection == .note(note.id)
-                    ? Theme.notionSelectedBG
-                    : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-        .contextMenu {
-            Button("Delete", role: .destructive) {
-                if selection == .note(note.id) { selection = nil }
-                meetingManager.deleteNote(note)
-            }
-        }
-        .onDrag {
-            draggingNoteID = note.id
-            return NSItemProvider(object: note.id.uuidString as NSString)
-        }
-        .help("Drag into a note space")
-    }
-
-    // MARK: - Home + Todos sidebar
-
     private func homeSidebarRow(layout: CommandCenterLayout) -> some View {
         Button {
             selection = .home
@@ -1146,19 +762,10 @@ struct MeetingLibraryView: View {
                 Image(systemName: "rectangle.grid.2x2")
                     .font(.system(size: layout.smallFontSize))
                     .foregroundStyle(Theme.textTertiary)
-                Text("Today")
+                Text("Overview")
                     .font(.system(size: layout.bodyFontSize, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
-                let pending = meetingManager.todos.filter { !$0.completed }.count
-                if pending > 0 {
-                    Text("\(pending)")
-                        .font(.system(size: layout.tinyFontSize, weight: .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Theme.notionHoverBG, in: Capsule())
-                }
             }
             .padding(.horizontal, round(14 * layout.scale))
             .padding(.vertical, round(6 * layout.scale))
@@ -1173,143 +780,8 @@ struct MeetingLibraryView: View {
         .padding(.top, round(4 * layout.scale))
     }
 
-    private var visibleTodos: [TodoItem] {
-        LibraryListOrdering.todos(meetingManager.filteredTodos)
-    }
-
-    private var visibleTasks: [TaskItem] {
-        LibraryListOrdering.tasks(meetingManager.filteredTasks)
-    }
-
-    private var visibleNotes: [Note] {
-        LibraryListOrdering.notes(meetingManager.filteredNotes)
-    }
-
     private var visibleMeetings: [Meeting] {
         LibraryListOrdering.meetings(meetingManager.filteredMeetings)
-    }
-
-    private var visibleT5TReports: [T5TReport] {
-        LibraryListOrdering.t5tReports(meetingManager.t5tReports)
-    }
-
-    private func todoSidebarRow(todo: TodoItem, layout: CommandCenterLayout) -> some View {
-        Button {
-            selection = .todo(todo.id)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: todo.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(todo.completed ? Theme.success : LibraryListPresentation.SidebarItemKind.todo.tint)
-                Text(todo.title.isEmpty ? "Untitled todo" : todo.title)
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(todo.completed ? Theme.textTertiary : Theme.textPrimary)
-                    .strikethrough(todo.completed)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer()
-                if let label = todo.dueDateLabel, !todo.completed {
-                    Text(label)
-                        .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
-                        .foregroundStyle(dueLabelColor(for: todo))
-                }
-            }
-            .padding(.horizontal, round(14 * layout.scale))
-            .padding(.vertical, round(6 * layout.scale))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                selection == .todo(todo.id) ? Theme.notionSelectedBG : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 4)
-        .contextMenu {
-            Button(todo.completed ? "Mark pending" : "Mark complete") {
-                meetingManager.toggleTodoCompletion(todo)
-            }
-            Divider()
-            Button("Delete", role: .destructive) {
-                if selection == .todo(todo.id) { selection = nil }
-                meetingManager.deleteTodo(todo)
-            }
-        }
-    }
-
-    private func taskSidebarRow(task: TaskItem, layout: CommandCenterLayout) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Button {
-                meetingManager.toggleTaskCompletion(task)
-            } label: {
-                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: layout.bodyFontSize))
-                    .foregroundStyle(task.isCompleted ? Theme.success : LibraryListPresentation.SidebarItemKind.task.tint)
-                    .padding(.top, 1)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(task.isCompleted ? "Mark task open" : "Mark task complete")
-            .help(task.isCompleted ? "Mark task open" : "Mark task complete")
-
-            sidebarItemIcon(LibraryListPresentation.SidebarItemKind.task, layout: layout)
-                .padding(.top, 1)
-
-            Button {
-                selection = .task(task.id)
-            } label: {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(LibraryListPresentation.taskTitle(task))
-                            .font(.system(size: layout.bodyFontSize))
-                            .foregroundStyle(task.isCompleted ? Theme.textTertiary : Theme.textPrimary)
-                            .strikethrough(task.isCompleted)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        if !task.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(task.description.replacingOccurrences(of: "\n", with: " "))
-                                .font(.system(size: layout.tinyFontSize))
-                                .foregroundStyle(Theme.textTertiary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    Text(task.isCompleted ? "Done" : "Open")
-                        .font(.system(size: layout.tinyFontSize - 1, weight: .medium))
-                        .foregroundStyle(task.isCompleted ? Theme.success : Theme.textTertiary)
-                        .padding(.top, 1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, round(14 * layout.scale))
-        .padding(.vertical, round(6 * layout.scale))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            selection == .task(task.id) ? Theme.notionSelectedBG : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6)
-        )
-        .padding(.horizontal, 4)
-        .contextMenu {
-            Button(task.isCompleted ? "Mark open" : "Mark complete") {
-                meetingManager.toggleTaskCompletion(task)
-            }
-            Divider()
-            Button("Delete", role: .destructive) {
-                if selection == .task(task.id) { selection = nil }
-                meetingManager.deleteTask(task)
-            }
-        }
-    }
-
-    private func dueLabelColor(for todo: TodoItem) -> Color {
-        switch todo.dueGroup {
-        case .overdue: return Theme.danger
-        case .today: return Theme.warning
-        case .upcoming: return Color(hex: "60A5FA")
-        case .noDueDate, .completed: return Theme.textTertiary
-        }
     }
 
     private func sidebarItemIcon(
@@ -1346,54 +818,8 @@ struct MeetingLibraryView: View {
     private var detail: some View {
         if meetingManager.state == .processing {
             processingView
-        } else if case .home = selection {
-            HomeDashboardView(
-                meetingManager: meetingManager,
-                onSelectTodo: { id in selection = .todo(id) },
-                onOnboardingAction: handleOnboardingAction
-            )
-        } else if case .t5tList = selection {
-            t5tReportsListPage
-        } else if case .notesList = selection {
-            notesListPage
-        } else if case .tasksList = selection {
-            tasksListPage
-        } else if case .todosList = selection {
-            todosListPage
         } else if case .meetingsList = selection {
             meetingsListPage
-        } else if case .todo(let id) = selection,
-                  let index = meetingManager.todos.firstIndex(where: { $0.id == id }) {
-            TodoDetailView(
-                todo: $meetingManager.todos[index],
-                meetingManager: meetingManager
-            )
-            .id(id)
-        } else if case .task(let id) = selection,
-                  let index = meetingManager.tasks.firstIndex(where: { $0.id == id }) {
-            TaskDetailView(
-                task: $meetingManager.tasks[index],
-                meetingManager: meetingManager
-            )
-            .id(id)
-        } else if case .t5tReport(let id) = selection,
-                  let index = meetingManager.t5tReports.firstIndex(where: { $0.id == id }) {
-            T5TComposerView(
-                meetingManager: meetingManager,
-                report: $meetingManager.t5tReports[index],
-                ttsService: ttsService
-            )
-            .id(id)
-        } else if case .newT5T = selection {
-            newT5TPlaceholder
-        } else if case .note(let id) = selection,
-                  let index = meetingManager.notes.firstIndex(where: { $0.id == id }) {
-            NotePageView(
-                note: $meetingManager.notes[index],
-                meetingManager: meetingManager,
-                ttsService: ttsService
-            )
-            .id(id)
         } else if case .meeting(let id) = selection,
                   let meeting = meetingManager.meetings.first(where: { $0.id == id }) {
             NotionPageView(meeting: meeting, summarizationStatus: meetingManager.summarizationStatus, meetingManager: meetingManager, ttsService: ttsService)
@@ -1404,118 +830,20 @@ struct MeetingLibraryView: View {
         } else {
             HomeDashboardView(
                 meetingManager: meetingManager,
-                onSelectTodo: { id in selection = .todo(id) },
+                onSelectMeeting: { id in selection = .meeting(id) },
+                onOpenHistory: { selection = .meetingsList },
+                onStartMeeting: {
+                    if AppEnvironment.usesTranscriptImportPrimaryFlow {
+                        showTranscriptImport = true
+                    } else {
+                        selection = nil
+                        if meetingManager.state == .idle {
+                            meetingManager.startRecording()
+                        }
+                    }
+                },
                 onOnboardingAction: handleOnboardingAction
             )
-        }
-    }
-
-    private var tasksListPage: some View {
-        collectionListPage(
-            eyebrow: "Tasks",
-            title: "Tasks",
-            subtitle: "\(visibleTasks.filter { !$0.isCompleted }.count) open • \(visibleTasks.filter(\.isCompleted).count) completed",
-            isEmpty: visibleTasks.isEmpty,
-            emptyTitle: meetingManager.searchQuery.isEmpty ? "No tasks yet" : "No matching tasks",
-            emptySubtitle: meetingManager.searchQuery.isEmpty
-                ? "Create durable work records for T5T from the sidebar when a todo becomes report-worthy."
-                : "Try a different search term or clear the workspace search."
-        ) {
-            ForEach(visibleTasks) { task in
-                collectionListRow(
-                    icon: task.isCompleted ? "checkmark.circle.fill" : LibraryListPresentation.SidebarItemKind.task.icon,
-                    tint: task.isCompleted ? Theme.success : LibraryListPresentation.SidebarItemKind.task.tint,
-                    title: LibraryListPresentation.taskTitle(task),
-                    metadata: taskStatusMetadata(task),
-                    detail: task.description.isEmpty ? nil : task.description
-                ) {
-                    selection = .task(task.id)
-                }
-            }
-        }
-    }
-
-    private var t5tReportsListPage: some View {
-        collectionListPage(
-            eyebrow: "T5T reports",
-            title: "T5T Reports",
-            subtitle: "\(visibleT5TReports.count) reports",
-            isEmpty: visibleT5TReports.isEmpty,
-            emptyTitle: "No T5T reports yet",
-            emptySubtitle: "Create a T5T report from the sidebar when you are ready to prepare an update."
-        ) {
-            ForEach(visibleT5TReports) { report in
-                collectionListRow(
-                    icon: LibraryListPresentation.SidebarItemKind.t5tReport.icon,
-                    tint: report.status == .draft ? LibraryListPresentation.SidebarItemKind.t5tReport.tint : Theme.textTertiary,
-                    title: "\(datePrefix(report.createdDate)) T5T - \(report.periodLabel)",
-                    metadata: "\(report.status.rawValue.capitalized) • \(report.meetingIDs.count) meetings",
-                    detail: report.title
-                ) {
-                    selection = .t5tReport(report.id)
-                }
-            }
-        }
-    }
-
-    private var notesListPage: some View {
-        let groups = NoteSpaceOrganizer.groups(
-            for: visibleNotes,
-            explicitSpaces: meetingManager.noteSpaces,
-            includeEmptyUnassigned: !meetingManager.noteSpaces.isEmpty
-        ).filter { !$0.notes.isEmpty }
-
-        return collectionListPage(
-            eyebrow: "Notes",
-            title: "Notes",
-            subtitle: "\(visibleNotes.count) notes",
-            isEmpty: visibleNotes.isEmpty,
-            emptyTitle: meetingManager.searchQuery.isEmpty ? "No notes yet" : "No matching notes",
-            emptySubtitle: meetingManager.searchQuery.isEmpty
-                ? "Create a note from the sidebar to start capturing reusable context."
-                : "Try a different search term or clear the workspace search."
-        ) {
-            ForEach(groups) { group in
-                if groups.count > 1 {
-                    collectionGroupHeader(group.title, count: group.notes.count)
-                }
-                ForEach(group.notes) { note in
-                    collectionListRow(
-                        icon: LibraryListPresentation.SidebarItemKind.note.icon,
-                        tint: LibraryListPresentation.SidebarItemKind.note.tint,
-                        title: "\(datePrefix(note.createdDate)) \(note.title)",
-                        metadata: "Modified \(note.formattedModifiedDate)",
-                        detail: notePreview(note)
-                    ) {
-                        selection = .note(note.id)
-                    }
-                }
-            }
-        }
-    }
-
-    private var todosListPage: some View {
-        collectionListPage(
-            eyebrow: "Todos",
-            title: "Todos",
-            subtitle: "\(visibleTodos.filter { !$0.completed }.count) open • \(visibleTodos.filter(\.completed).count) completed",
-            isEmpty: visibleTodos.isEmpty,
-            emptyTitle: meetingManager.searchQuery.isEmpty ? "No todos yet" : "No matching todos",
-            emptySubtitle: meetingManager.searchQuery.isEmpty
-                ? "Create a todo from the sidebar when work needs a clear next action."
-                : "Try a different search term or clear the workspace search."
-        ) {
-            ForEach(visibleTodos) { todo in
-                collectionListRow(
-                    icon: todo.completed ? "checkmark.circle.fill" : LibraryListPresentation.SidebarItemKind.todo.icon,
-                    tint: todo.completed ? Theme.success : LibraryListPresentation.SidebarItemKind.todo.tint,
-                    title: todo.title.isEmpty ? "Untitled todo" : todo.title,
-                    metadata: todo.completed ? "Completed" : (todo.dueDateLabel ?? "No due date"),
-                    detail: todo.description.isEmpty ? nil : todo.description
-                ) {
-                    selection = .todo(todo.id)
-                }
-            }
         }
     }
 
@@ -1528,7 +856,7 @@ struct MeetingLibraryView: View {
             emptyTitle: meetingManager.searchQuery.isEmpty ? "No meetings yet" : "No matching meetings",
             emptySubtitle: meetingManager.searchQuery.isEmpty
                 ? "Record a meeting to start building your meeting library."
-                : "Try a different search term or clear the workspace search."
+                : "Try a different search term or clear the meeting search."
         ) {
             ForEach(visibleMeetings) { meeting in
                 collectionListRow(
@@ -1555,16 +883,27 @@ struct MeetingLibraryView: View {
     ) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(eyebrow.uppercased())
-                        .font(.system(size: Theme.smallSize, weight: .bold))
-                        .foregroundStyle(Theme.sectionHeader)
-                    Text(title)
-                        .font(.system(size: Theme.pageTitleSize, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(subtitle)
-                        .font(.system(size: Theme.bodySize))
-                        .foregroundStyle(Theme.textTertiary)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(eyebrow.uppercased())
+                            .font(.system(size: Theme.smallSize, weight: .bold))
+                            .foregroundStyle(Theme.sectionHeader)
+                        Text(title)
+                            .font(.system(size: Theme.pageTitleSize, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(subtitle)
+                            .font(.system(size: Theme.bodySize))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        showTranscriptImport = true
+                    } label: {
+                        Label("Import transcript", systemImage: "text.badge.plus")
+                    }
+                    .disabled(meetingManager.state != .idle)
                 }
 
                 if isEmpty {
@@ -1580,20 +919,6 @@ struct MeetingLibraryView: View {
             .padding(.vertical, 42)
         }
         .background(Theme.notionWindowBG)
-    }
-
-    private func collectionGroupHeader(_ title: String, count: Int) -> some View {
-        HStack(spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: Theme.smallSize, weight: .bold))
-                .foregroundStyle(Theme.textTertiary)
-            Text("\(count)")
-                .font(.system(size: Theme.smallSize, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-            Spacer()
-        }
-        .padding(.top, 8)
-        .padding(.bottom, 2)
     }
 
     private func collectionListRow(
@@ -1659,29 +984,6 @@ struct MeetingLibraryView: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border.opacity(0.70), lineWidth: 1))
     }
 
-    private func notePreview(_ note: Note) -> String? {
-        let preview = note.content
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return preview.isEmpty ? nil : preview
-    }
-
-    private func taskStatusMetadata(_ task: TaskItem) -> String {
-        LibraryListPresentation.taskMetadata(task)
-    }
-
-    private var newT5TPlaceholder: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Creating T5T report...")
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.notionWindowBG)
-    }
-
     private var processingView: some View {
         VStack(spacing: 20) {
             ProgressView()
@@ -1737,147 +1039,6 @@ struct MeetingLibraryView: View {
             let replacementIndex = min(index, openTabs.count - 1)
             selection = openTabs[replacementIndex]
         }
-    }
-
-    // MARK: - Actions
-
-    private func createNewT5T() {
-        let end = Date()
-        let start = Calendar.current.date(byAdding: .day, value: -14, to: end)!
-        let tasksInRange = meetingManager.tasksInRange(start: start, end: end)
-
-        let report = T5TReport(
-            id: UUID(),
-            title: meetingManager.t5tDefaultTitle,
-            createdDate: Date(),
-            periodStart: start,
-            periodEnd: end,
-            meetingIDs: [],
-            noteIDs: [],
-            taskIDs: tasksInRange.map(\.id),
-            todoIDs: tasksInRange.map(\.id),
-            sections: .empty,
-            status: .draft
-        )
-
-        meetingManager.addT5TReport(report)
-        selection = .t5tReport(report.id)
-    }
-
-    private func createNewTodo() {
-        let todo = meetingManager.createTodo()
-        selection = .todo(todo.id)
-    }
-
-    private func createNewTask() {
-        let task = meetingManager.createTask()
-        selection = .task(task.id)
-    }
-
-    private func createNewNote() {
-        let note = meetingManager.createNote()
-        selection = .note(note.id)
-    }
-
-    private func createNewSpace() {
-        guard let rawName = promptForNoteSpaceName(
-            title: "New Note Space",
-            informativeText: "Create a space to group notes by project or theme.",
-            actionTitle: "Create",
-            placeholder: "Project or theme name"
-        ),
-              meetingManager.createNoteSpace(rawName) != nil
-        else { return }
-        collapsedSections.remove(.notes)
-        meetingManager.searchQuery = ""
-    }
-
-    private func renameNoteSpace(_ currentName: String) {
-        guard let rawName = promptForNoteSpaceName(
-            title: "Rename Note Space",
-            informativeText: "Rename this space and keep its notes grouped together.",
-            actionTitle: "Rename",
-            placeholder: "Project or theme name",
-            initialValue: currentName
-        ) else { return }
-
-        if meetingManager.renameNoteSpace(currentName, to: rawName) {
-            meetingManager.searchQuery = ""
-        }
-    }
-
-    private func deleteNoteSpace(_ name: String) {
-        guard confirmDeleteNoteSpace(name) else { return }
-
-        if meetingManager.deleteNoteSpace(name) {
-            meetingManager.searchQuery = ""
-        }
-    }
-
-    private func promptForNoteSpaceName(
-        title: String,
-        informativeText: String,
-        actionTitle: String,
-        placeholder: String,
-        initialValue: String = ""
-    ) -> String? {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = informativeText
-        alert.addButton(withTitle: actionTitle)
-        alert.addButton(withTitle: "Cancel")
-
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        textField.placeholderString = placeholder
-        textField.stringValue = initialValue
-        alert.accessoryView = textField
-        alert.window.initialFirstResponder = textField
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        return textField.stringValue
-    }
-
-    private func confirmDeleteNoteSpace(_ name: String) -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Delete Note Space?"
-        alert.informativeText = "Notes in \"\(name)\" will move to Unassigned. No notes will be deleted."
-        alert.addButton(withTitle: "Delete Space")
-        alert.addButton(withTitle: "Cancel")
-
-        return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    private func handleNoteDrop(_ providers: [NSItemProvider], toSpace space: String?) -> Bool {
-        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.text.identifier) }) else {
-            return false
-        }
-
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            guard let rawValue = stringValue(from: item),
-                  let noteID = UUID(uuidString: rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
-            else { return }
-
-            Task { @MainActor in
-                meetingManager.assignNote(noteID, toSpace: space)
-                draggingNoteID = nil
-                targetedNoteSpace = nil
-            }
-        }
-        return true
-    }
-
-    private func stringValue(from item: NSSecureCoding?) -> String? {
-        if let value = item as? String {
-            return value
-        }
-        if let value = item as? NSString {
-            return value as String
-        }
-        if let data = item as? Data {
-            return String(data: data, encoding: .utf8)
-        }
-        return nil
     }
 
     private var recordButtonLabel: String {

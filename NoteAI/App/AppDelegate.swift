@@ -6,7 +6,6 @@ import UserNotifications
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let meetingManager = MeetingManager()
     let authManager = GoogleAuthManager()
-    let chatManager = ChatManager()
     let ttsService = TextToSpeechService()
     private var mainWindow: NSWindow?
     private var localCaptureHelperServer: LocalCaptureHelperServer?
@@ -15,7 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !ProcessInfo.processInfo.isRunningXCTest else { return }
 
-        chatManager.meetingManager = meetingManager
         APIKeyStore.migrateLegacyKeysFromUserDefaults()
         requestNotificationPermission()
         registerGlobalShortcut()
@@ -62,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let contentView = RootView(
             meetingManager: meetingManager,
             authManager: authManager,
-            chatManager: chatManager,
             ttsService: ttsService
         )
         .frame(minWidth: 900, minHeight: 600)
@@ -132,9 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
 extension Notification.Name {
     static let toggleRecording = Notification.Name("toggleRecording")
-    static let navigateToNote = Notification.Name("navigateToNote")
-    static let navigateToSource = Notification.Name("navigateToSource")
-    static let toggleChatPanel = Notification.Name("toggleChatPanel")
 }
 
 extension ProcessInfo {
@@ -147,14 +141,13 @@ extension ProcessInfo {
 struct RootView: View {
     @ObservedObject var meetingManager: MeetingManager
     @ObservedObject var authManager: GoogleAuthManager
-    @ObservedObject var chatManager: ChatManager
     @ObservedObject var ttsService: TextToSpeechService
     @AppStorage("noteai.appearanceMode") private var appearanceModeRaw = NoteAIAppearanceMode.system.rawValue
 
     var body: some View {
         Group {
             if authManager.isAuthenticated || UserDefaults.standard.bool(forKey: "skippedAuth") {
-                MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, chatManager: chatManager, ttsService: ttsService)
+                MeetingLibraryView(meetingManager: meetingManager, authManager: authManager, ttsService: ttsService)
             } else {
                 LoginView(authManager: authManager)
             }

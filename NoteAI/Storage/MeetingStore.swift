@@ -5,19 +5,21 @@ import GRDB
 final class MeetingStore {
     private let dbQueue: DatabaseQueue
 
-    init(namespace: String = AppEnvironment.storageNamespace) {
+    convenience init(namespace: String = AppEnvironment.storageNamespace) {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dbDir = appSupport.appendingPathComponent(namespace, isDirectory: true)
+        let directory = appSupport.appendingPathComponent(namespace, isDirectory: true)
 
-        try? FileManager.default.createDirectory(at: dbDir, withIntermediateDirectories: true)
-
-        let dbPath = dbDir.appendingPathComponent("meetings.sqlite").path
         do {
-            dbQueue = try DatabaseQueue(path: dbPath)
-            try createTablesIfNeeded()
+            try self.init(directoryURL: directory)
         } catch {
             fatalError("Failed to initialize database: \(error)")
         }
+    }
+
+    init(directoryURL: URL) throws {
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        dbQueue = try DatabaseQueue(path: directoryURL.appendingPathComponent("meetings.sqlite").path)
+        try createTablesIfNeeded()
     }
 
     func save(meeting: Meeting) throws {
@@ -125,214 +127,9 @@ final class MeetingStore {
         }
     }
 
-    // MARK: - T5T Reports
-
-    func saveT5TReport(_ report: T5TReport) throws {
-        let jsonData = try JSONEncoder().encode(report)
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT OR REPLACE INTO t5t_reports (id, created_date, period_start, period_end, status, json_data)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    report.id.uuidString,
-                    report.createdDate.timeIntervalSince1970,
-                    report.periodStart.timeIntervalSince1970,
-                    report.periodEnd.timeIntervalSince1970,
-                    report.status.rawValue,
-                    String(data: jsonData, encoding: .utf8)
-                ]
-            )
-        }
-    }
-
-    func fetchAllT5TReports() throws -> [T5TReport] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM t5t_reports ORDER BY created_date DESC"
-            )
-            return rows.compactMap { row -> T5TReport? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(T5TReport.self, from: data)
-            }
-        }
-    }
-
-    func deleteT5TReport(id: UUID) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM t5t_reports WHERE id = ?",
-                arguments: [id.uuidString]
-            )
-        }
-    }
-
-    // MARK: - T5T Config (singleton)
-
-    func saveT5TConfig(_ config: T5TConfig) throws {
-        let jsonData = try JSONEncoder().encode(config)
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "INSERT OR REPLACE INTO t5t_config (id, json_data) VALUES (1, ?)",
-                arguments: [String(data: jsonData, encoding: .utf8)]
-            )
-        }
-    }
-
-    func loadT5TConfig() throws -> T5TConfig? {
-        try dbQueue.read { db in
-            let row = try Row.fetchOne(db, sql: "SELECT json_data FROM t5t_config WHERE id = 1")
-            guard let jsonString: String = row?["json_data"],
-                  let data = jsonString.data(using: .utf8) else { return nil }
-            return try? JSONDecoder().decode(T5TConfig.self, from: data)
-        }
-    }
-
-    // MARK: - Notes
-
-    func saveNote(_ note: Note) throws {
-        let jsonData = try JSONEncoder().encode(note)
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT OR REPLACE INTO notes (id, title, created_date, modified_date, json_data)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    note.id.uuidString,
-                    note.title,
-                    note.createdDate.timeIntervalSince1970,
-                    note.modifiedDate.timeIntervalSince1970,
-                    String(data: jsonData, encoding: .utf8)
-                ]
-            )
-        }
-    }
-
-    func fetchAllNotes() throws -> [Note] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM notes ORDER BY modified_date DESC"
-            )
-            return rows.compactMap { row -> Note? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(Note.self, from: data)
-            }
-        }
-    }
-
-    func deleteNote(id: UUID) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM notes WHERE id = ?",
-                arguments: [id.uuidString]
-            )
-        }
-    }
-
-    func fetchNotes(from start: Date, to end: Date) throws -> [Note] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM notes WHERE modified_date >= ? AND modified_date <= ? ORDER BY modified_date DESC",
-                arguments: [start.timeIntervalSince1970, end.timeIntervalSince1970]
-            )
-            return rows.compactMap { row -> Note? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(Note.self, from: data)
-            }
-        }
-    }
-
-    // MARK: - Todos
-
-    func saveTodo(_ todo: TodoItem) throws {
-        let jsonData = try JSONEncoder().encode(todo)
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT OR REPLACE INTO todos (id, title, created_date, modified_date, completed, due_date, json_data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    todo.id.uuidString,
-                    todo.title,
-                    todo.createdDate.timeIntervalSince1970,
-                    todo.modifiedDate.timeIntervalSince1970,
-                    todo.completed ? 1 : 0,
-                    todo.dueDate?.timeIntervalSince1970,
-                    String(data: jsonData, encoding: .utf8)
-                ]
-            )
-        }
-    }
-
-    func fetchAllTodos() throws -> [TodoItem] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM todos ORDER BY created_date DESC"
-            )
-            return rows.compactMap { row -> TodoItem? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(TodoItem.self, from: data)
-            }
-        }
-    }
-
-    func deleteTodo(id: UUID) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM todos WHERE id = ?",
-                arguments: [id.uuidString]
-            )
-        }
-    }
-
-    // MARK: - Tasks
-
-    func saveTask(_ task: TaskItem) throws {
-        let jsonData = try JSONEncoder().encode(task)
-        try dbQueue.write { db in
-            try saveTask(task, jsonData: jsonData, in: db)
-        }
-    }
-
-    func fetchAllTasks() throws -> [TaskItem] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT json_data FROM tasks ORDER BY COALESCE(completed_date, work_date, modified_date, created_date) DESC"
-            )
-            return rows.compactMap { row -> TaskItem? in
-                guard let jsonString: String = row["json_data"],
-                      let data = jsonString.data(using: .utf8) else { return nil }
-                return try? JSONDecoder().decode(TaskItem.self, from: data)
-            }
-        }
-    }
-
-    func deleteTask(id: UUID) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "DELETE FROM tasks WHERE id = ?",
-                arguments: [id.uuidString]
-            )
-        }
-    }
-
-    // MARK: - Private
-
     private func createTablesIfNeeded() throws {
-        try dbQueue.write { db in
-            try db.execute(sql: """
+        try dbQueue.write { database in
+            try database.execute(sql: """
                 CREATE TABLE IF NOT EXISTS meetings (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -341,124 +138,6 @@ final class MeetingStore {
                     json_data TEXT NOT NULL
                 )
                 """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS t5t_reports (
-                    id TEXT PRIMARY KEY,
-                    created_date REAL NOT NULL,
-                    period_start REAL NOT NULL,
-                    period_end REAL NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'draft',
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS t5t_config (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS notes (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    created_date REAL NOT NULL,
-                    modified_date REAL NOT NULL,
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS todos (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    created_date REAL NOT NULL,
-                    modified_date REAL NOT NULL,
-                    completed INTEGER NOT NULL DEFAULT 0,
-                    due_date REAL,
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    created_date REAL NOT NULL,
-                    modified_date REAL NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'open',
-                    work_date REAL,
-                    completed_date REAL,
-                    source_meeting_id TEXT,
-                    source_action_item_id TEXT,
-                    source_note_id TEXT,
-                    json_data TEXT NOT NULL
-                )
-                """)
-            try addMissingTaskColumnsIfNeeded(in: db)
-            try migrateLegacyTodosToTasks(in: db)
         }
-    }
-
-    private func addMissingTaskColumnsIfNeeded(in db: Database) throws {
-        let rows = try Row.fetchAll(db, sql: "PRAGMA table_info(tasks)")
-        let columnNames = Set(rows.compactMap { row -> String? in row["name"] })
-        let columns: [(name: String, definition: String)] = [
-            ("status", "TEXT NOT NULL DEFAULT 'open'"),
-            ("work_date", "REAL"),
-            ("completed_date", "REAL"),
-            ("source_meeting_id", "TEXT"),
-            ("source_action_item_id", "TEXT"),
-            ("source_note_id", "TEXT"),
-        ]
-
-        for column in columns where !columnNames.contains(column.name) {
-            try db.execute(sql: "ALTER TABLE tasks ADD COLUMN \(column.name) \(column.definition)")
-        }
-    }
-
-    private func migrateLegacyTodosToTasks(in db: Database) throws {
-        let rows = try Row.fetchAll(db, sql: "SELECT id, json_data FROM todos")
-        let todos = rows.compactMap { row -> TodoItem? in
-            guard let jsonString: String = row["json_data"],
-                  let data = jsonString.data(using: .utf8) else { return nil }
-            return try? JSONDecoder().decode(TodoItem.self, from: data)
-        }
-        guard !todos.isEmpty else { return }
-
-        let split = TaskTodoClassifier.splitLegacyTodos(todos)
-        guard !split.tasks.isEmpty else { return }
-
-        let existingTaskIDs = Set(try String.fetchAll(db, sql: "SELECT id FROM tasks"))
-        for task in split.tasks where !existingTaskIDs.contains(task.id.uuidString) {
-            let jsonData = try JSONEncoder().encode(task)
-            try saveTask(task, jsonData: jsonData, in: db)
-        }
-
-        for task in split.tasks {
-            try db.execute(
-                sql: "DELETE FROM todos WHERE id = ?",
-                arguments: [task.id.uuidString]
-            )
-        }
-    }
-
-    private func saveTask(_ task: TaskItem, jsonData: Data, in db: Database) throws {
-        try db.execute(
-            sql: """
-                INSERT OR REPLACE INTO tasks (id, title, created_date, modified_date, status, work_date, completed_date, source_meeting_id, source_action_item_id, source_note_id, json_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-            arguments: [
-                task.id.uuidString,
-                task.title,
-                task.createdDate.timeIntervalSince1970,
-                task.modifiedDate.timeIntervalSince1970,
-                task.status.rawValue,
-                task.workDate?.timeIntervalSince1970,
-                task.completedDate?.timeIntervalSince1970,
-                task.sourceMeetingID?.uuidString,
-                task.sourceActionItemID,
-                task.sourceNoteID?.uuidString,
-                String(data: jsonData, encoding: .utf8)
-            ]
-        )
     }
 }

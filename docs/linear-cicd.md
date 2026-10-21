@@ -7,7 +7,7 @@ This runbook describes the NoteAI workflow for Linear-managed development, zero-
 - Linear is the planning and completion source of truth.
 - GitHub is the source-control and CI orchestration layer for the current remote.
 - GitHub Actions runs CI on pull requests and `main`.
-- The web app is local/CI-only unless a future security review explicitly approves a public runtime.
+- NoteAI ships as a native macOS app. The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 - `main` is the source of truth for completed NoteAI work. Completed and tested work should not remain only on Codex, feature, or temporary branches.
 - The current NoteAI remote is GitHub. If the repository moves to GitLab later, update this runbook and the automation references before relying on the same workflow names.
 
@@ -18,8 +18,8 @@ Do not mark a NoteAI Linear issue as `Done` just because local work is complete 
 For any task with repository changes, `Done` requires all of this evidence:
 
 - The work is committed with the Linear issue ID in the commit message.
-- The commit is pushed to the remote `main` branch, unless branch protection requires a PR-only flow.
-- If branch protection requires a PR, the PR references the Linear issue ID, required checks pass, and the PR is merged into `main`.
+- The commit is pushed to `origin` on a branch.
+- A pull request references the Linear issue ID, required checks pass, and the PR is merged into `main`.
 - Post-push or post-merge GitHub Actions ran for `main`, or the task is in a path that intentionally does not trigger checks.
 - For deployment-impacting changes, the relevant runtime verification succeeds after `main` updates.
 - Linear has a completion comment with the remote commit, verification commands/results, deployment status, affected files/modules, branch cleanup, and any follow-ups.
@@ -48,21 +48,19 @@ With the GitHub integration enabled, Linear links branches, commits, and pull re
 
 Required checks for branch protection:
 
-- `Web CI / Lint, build, and security regression`
 - `macOS CI / Xcode build and test`
 - `CI Coverage Staleness / Coverage parity cleanup check`
 - `Secret Scan / Gitleaks git history scan`
 
 ## CI Coverage Matrix
 
-JPB-32 tracks parity between the web and Swift/macOS verification gates. The first parity slice is a staleness/cleanup check: keep workflow triggers, branch-protection names, documentation, and lightweight regression tests aligned before expanding runner-heavy native coverage.
+JPB-32 tracks the CI coverage staleness/cleanup check: keep workflow triggers, branch-protection names, documentation, and lightweight regression tests aligned with the native verification gates. The historical check name remains stable after web retirement.
 
 | Area | Workflow check | Runner | Current gate | Cleanup guard |
 | --- | --- | --- | --- | --- |
-| Web app | `Web CI / Lint, build, and security regression` | Ubuntu with Node.js 22 | `npm ci`, ESLint, `tsc --noEmit`, every checked-in `web/*.test.mjs`, production dependency audit, and Next.js build | `CI Coverage Staleness / Coverage parity cleanup check` fails if a checked-in web regression test is not invoked by web CI. |
 | Swift/macOS | `macOS CI / Xcode build and test` | GitHub-hosted `macos-15` | Xcode package resolution, app build, and test suite with code signing disabled | `CI Coverage Staleness / Coverage parity cleanup check` records the current Swift gate and keeps native CI docs visible. |
 | Secrets | `Secret Scan / Gitleaks git history scan` | Ubuntu | Full-history Gitleaks scan with the reviewed baseline and uploaded SARIF report | `scripts/secret-scanning-workflow.test.mjs` keeps the secret-scan workflow and docs aligned. |
-| CI parity docs and repository hygiene | `CI Coverage Staleness / Coverage parity cleanup check` | Ubuntu | `node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs` | Runs on workflow, CI documentation, contributor documentation, ignore-rule, web regression test, and macOS test changes. |
+| CI parity docs and repository hygiene | `CI Coverage Staleness / Coverage parity cleanup check` | Ubuntu | `node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs` | Runs on workflow, CI documentation, contributor documentation, ignore-rule, and macOS test changes. |
 
 Recommended branch protection for `main`:
 
@@ -75,27 +73,13 @@ Recommended branch protection for `main`:
 - Add `Secret Scan / Gitleaks git history scan` to required checks after the first scheduled run is stable and any reviewed baseline entries are committed.
 - Add `CI Coverage Staleness / Coverage parity cleanup check` to required checks after the first run is stable so CI drift is caught before merge.
 
-This keeps automatic deploys predictable: production changes only after `main` contains the completed, verified work.
+Completed work reaches `main` only after its applicable checks pass.
 
-## Web Runtime
+## Web Retirement
 
-The public Cloudflare Worker deployment was decommissioned in JPB-191 because NoteAI is currently distributed and used through the macOS app. There is no automatic public web deployment from `main`, and agents must not recreate a Cloudflare Worker, Pages project, Vercel deployment, or other public web runtime without an explicit security review and new Linear issue.
+The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
-The workflow `.github/workflows/web-migrate-turso.yml` runs production Turso schema/data migrations manually from `main` before a deploy that needs database shape changes. It uses the GitHub `production` environment and the `TURSO_MIGRATION_AUTH_TOKEN` environment secret so normal request-time reads do not need schema or data-migration privileges.
-
-Do not use or recreate the legacy `NOTEAI_API_KEY` Worker secret. Programmatic API access uses `NOTEAI_API_KEY_HASHES` if the web API is run in a controlled local or private environment.
-
-Turso restore/cutover steps live in `docs/security/turso-restore-runbook.md`. Restore operations must update `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the approved runtime secret store without committing or printing values.
-
-Turso token rotation policy lives in `docs/security/turso-token-scope-rotation.md`. Schema creation, historical column migrations, and encrypted settings migration now run through `npm run migrate:turso` or the manual `Web Turso Migration` workflow, not normal request-time reads. Configure these GitHub `production` environment secrets before running the workflow:
-
-- `TURSO_DATABASE_URL`
-- `TURSO_MIGRATION_AUTH_TOKEN`
-- `NOTEAI_AUTH_SECRET`
-
-The runtime `TURSO_AUTH_TOKEN` can be split into read/write tokens in a later slice because schema work now sits behind a separate migration Adapter.
-
-Historical Cloudflare policy and hardening documents remain in `docs/security/` as audit records, but they are not an approval to redeploy the public web app.
+The public Cloudflare Worker was decommissioned earlier in JPB-191. Retirement also removes the remaining local web source, dependency manifests, CI, migration tooling, and operational web instructions. Native source, storage, helper code, project files, and tests remain intact. Repository deletion does not delete retained remote data or revoke credentials; any external cleanup needs separate verification.
 
 ## macOS Deployment
 
@@ -110,10 +94,10 @@ When Codex completes a NoteAI task:
 1. Update the Linear issue to `In Progress` or `In Review`.
 2. Run the relevant local verification commands.
 3. Commit only the files changed for that task and include the Linear issue ID in the commit message.
-4. Push completed and tested work to `main` so `main` remains the source of truth. If branch protection blocks direct push, push a branch, open a PR with the Linear issue ID in the title, merge it, and then verify `main`.
+4. Push the branch to `origin`, open a PR with the Linear issue ID in the title, confirm required checks pass, merge it, and then verify `main`.
 5. Confirm the commit is visible on the remote `main` branch.
 6. Confirm GitHub Actions ran for the `main` push.
-7. For web-affecting changes, confirm web CI completed successfully. Do not perform a public web deploy unless a new security review explicitly approves it.
+7. For native distribution changes, complete the relevant app smoke check. There is no web deployment gate.
 8. Delete obsolete local and remote branches only after confirming their useful commits are included in `main` by ancestry or patch equivalence.
 9. Update Linear with changed files, verification results, remote commit, deployment status, branch cleanup, and follow-ups.
 
@@ -123,7 +107,7 @@ Do not mark a Linear item `Done` while its completed implementation exists only 
 
 - Keep the repository public if unlimited standard GitHub-hosted runner usage is required.
 - If the repository is private, stay within GitHub Free's included Actions minutes and artifact storage.
-- Avoid running macOS CI on web-only changes.
+- Run macOS CI when native source, tests, project files, or its workflow change.
 - Avoid storing large build artifacts.
 - Prefer GitHub environment/repository secrets and approved platform secret stores over paid secret-management services unless the threat model requires otherwise.
 - Use manual `workflow_dispatch` reruns when debugging expensive CI failures.

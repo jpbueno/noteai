@@ -1,53 +1,21 @@
 # NoteAI Release Checklist
 
-Use this checklist before shipping macOS or web changes.
+Use this checklist before shipping macOS or repository tooling changes.
 
 ## Required Verification
 
-- Run `swift test`.
-- From `web/`, run `npm run lint`.
-- From `web/`, run `npx tsc --noEmit --pretty false`.
-- From `web/`, run `npm run build`.
-- Confirm no public web deployment is being created unless a new security review and Linear issue explicitly approve it.
-- Confirm the Turso production token rotation date has not passed.
-- If a web change affects Turso schema or stored encrypted settings format, run `Web Turso Migration` from `main` before using the updated code against production data.
+- Run `swift test` for native changes, or the appropriate Xcode build/test.
+- Run `node --test scripts/ci-coverage-parity.test.mjs scripts/repository-hygiene.test.mjs scripts/secret-scanning-workflow.test.mjs` for repository CI and documentation changes.
+- Confirm applicable pull-request checks pass before merge and post-merge checks pass on `main`.
+- For native distribution changes, verify the app's affected user flow.
+- Keep provider credentials and Google OAuth tokens in macOS Keychain.
+- Confirm no user data, secrets, or local build artifacts are included.
 
-## Web Runtime Configuration
+## Retired Web Product
 
-Required server-side runtime values when the web app is run in a controlled local or private environment:
+The web version was permanently retired in JPB-191. NoteAI is a macOS application; there is no supported web client, web API, web deployment, or Turso migration workflow. Reintroducing a web product requires a new explicit product decision and security review.
 
-- `TURSO_DATABASE_URL`
-- `TURSO_AUTH_TOKEN`
-- `NOTEAI_AUTH_SECRET`
-- `GOOGLE_CLIENT_ID`
-
-Optional secrets:
-
-- `GOOGLE_ALLOWED_EMAILS`
-- `NOTEAI_API_KEY_HASHES`
-
-Provider API keys are stored through the app settings API and must remain write-only from browser reads.
-
-Do not configure the legacy `NOTEAI_API_KEY` Worker secret. Programmatic REST access uses `NOTEAI_API_KEY_HASHES`.
-
-Public web deployments are intentionally disabled. Do not create preview or production web deployments that target production Turso.
-
-Turso schema/data migrations are explicit. Use `npm run migrate:turso` locally or the `Web Turso Migration` workflow in production with `TURSO_MIGRATION_AUTH_TOKEN`; normal request-time reads should not create tables, alter columns, or encrypt legacy plaintext settings.
-
-Historical Cloudflare Access/WAF/rate-limit notes remain in `docs/security/`, but they are audit records, not approval to expose the web app again.
-
-## Security Headers
-
-The web release should include these headers on application routes:
-
-- `Content-Security-Policy`
-- `Strict-Transport-Security`
-- `X-Content-Type-Options`
-- `X-Frame-Options`
-- `Referrer-Policy`
-- `Permissions-Policy`
-
-The current CSP allows same-origin app assets, Google Identity Services frames and scripts, image data URLs, font data URLs, and the configured server-side provider origins documented in `web/next.config.ts`.
+The retirement does not change the native application, its permissions, local database, or packaged helper. No web deployment or database migration is part of a macOS release.
 
 ## Release Notes Template
 

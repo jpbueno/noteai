@@ -2,7 +2,7 @@
 
 ## Intent and scope
 
-JP uses NoteAI for meeting transcription and AI Solutions Architect. Update the existing macOS app only. Keep the public web app retired, as recorded in JPB-191. Track this session in JPB-26 because Linear rejected dedicated issue creation at the workspace issue limit.
+JP uses NoteAI for meeting transcription and AI Solutions Architect. Update the existing macOS app only. Preserve the permanent web-source and deployment retirement in JPB-191, integrated from main during delivery. Track this session in JPB-26 because Linear rejected dedicated issue creation at the workspace issue limit.
 
 Keep recording and automatic detection, transcription and transcript import, meeting history/search, speaker context, meeting summaries and their editing, meeting export/read-aloud, and the live AI Solutions Architect with interactive questions. Preserve the current capture and session-safe coach behavior from main.
 
@@ -18,7 +18,7 @@ Keep the primary bundle identity, storage namespace, and Keychain service so the
 
 ## Delivery and verification
 
-Build the macOS app and run relevant automated tests, including capture/coach regressions, meeting persistence/export, and legacy-table preservation. Update the Xcode project from project.yml after source deletions. Deliver a commit referencing JPB-26 through a green PR to main, verify post-merge checks, and record evidence in Linear. Web code and deployment stay unchanged.
+Build the macOS app and run relevant automated tests, including capture/coach regressions, meeting persistence/export, and legacy-table preservation. Update the Xcode project from project.yml after source deletions. Deliver a commit referencing JPB-26 through a green PR to main, verify post-merge checks, and record evidence in Linear. Do not restore retired web code or deployment.
 
 ## Implementation calls
 

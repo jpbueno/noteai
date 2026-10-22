@@ -492,8 +492,8 @@ private struct RecordingDiagnosticsRow: View {
 // MARK: - AI Settings
 
 struct AISettingsView: View {
-    @AppStorage("llmProvider") private var providerRaw = "openrouter"
-    @AppStorage("llmModel") private var selectedModelID = "anthropic/claude-sonnet-4"
+    @AppStorage("llmProvider") private var providerRaw = LLMSelection.current().provider.rawValue
+    @AppStorage("llmModel") private var selectedModelID = LLMSelection.current().modelID
     @AppStorage("whisperModel") private var whisperModel = "distil-large-v3"
     @AppStorage("meetingTemplate") private var templateRaw = "auto"
 
@@ -509,7 +509,7 @@ struct AISettingsView: View {
     @State private var fetchError: String?
 
     private var provider: LLMProviderType {
-        LLMProviderType(rawValue: providerRaw) ?? .openRouter
+        LLMProviderType(rawValue: providerRaw) ?? LLMSelection.current().provider
     }
 
     @AppStorage("ttsVoice") private var ttsVoice = "nova"
@@ -578,7 +578,7 @@ struct AISettingsView: View {
             }
 
             // Provider selection
-            Section("Summarization Provider") {
+            Section("Text AI Provider") {
                 Picker("Provider", selection: $providerRaw) {
                     ForEach(LLMProviderType.allCases) { p in
                         Text(p.displayName).tag(p.rawValue)
@@ -586,7 +586,7 @@ struct AISettingsView: View {
                 }
                 .onChange(of: providerRaw) { _, newValue in
                     // Reset model to first available when switching providers
-                    let p = LLMProviderType(rawValue: newValue) ?? .openRouter
+                    let p = LLMProviderType(rawValue: newValue) ?? LLMSelection.current().provider
                     let models = OpenRouterModels.models(for: p)
                     if let first = models.first {
                         selectedModelID = first.id
@@ -621,6 +621,9 @@ struct AISettingsView: View {
             // Model selection
             Section("Model") {
                 modelSelectionView
+                Text("Used for transcript summaries, summary regeneration, follow-up drafts, and AI Solutions Architect insights and questions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -661,7 +664,7 @@ struct AISettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .nvidia:
-            Text("NVIDIA Enterprise Inference Hub — access Claude Opus, Nemotron, Llama, and more via inference.nvidia.com.")
+            Text("NVIDIA Enterprise Inference Hub — access GPT-6.1 Sol, Claude, Nemotron, and more via inference.nvidia.com.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

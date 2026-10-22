@@ -37,10 +37,11 @@ final class AICoachEngine: AICoachGenerating, @unchecked Sendable {
     """
 
     func generateInsights(for request: CoachAnalysisRequest) async throws -> CoachGenerationResult {
-        let client = try buildClient()
+        let selection = LLMSelection.current()
+        let client = try buildClient(for: selection.provider)
         let response = try await client.chat(
             messages: try Self.makeAnalysisMessages(request: request),
-            model: selectedModelID()
+            model: selection.modelID
         )
         return Self.parseAnalysisResponse(
             response,
@@ -49,10 +50,11 @@ final class AICoachEngine: AICoachGenerating, @unchecked Sendable {
     }
 
     func answerQuestion(_ request: CoachQuestionRequest) async throws -> String {
-        let client = try buildClient()
+        let selection = LLMSelection.current()
+        let client = try buildClient(for: selection.provider)
         return try await client.chat(
             messages: try Self.makeInteractiveMessages(request: request),
-            model: selectedModelID()
+            model: selection.modelID
         )
     }
 
@@ -115,8 +117,7 @@ final class AICoachEngine: AICoachGenerating, @unchecked Sendable {
         )
     }
 
-    private func buildClient() throws -> LLMClient {
-        let provider = selectedProvider()
+    private func buildClient(for provider: LLMProviderType) throws -> LLMClient {
         let apiKey = APIKeyStore.key(for: provider)
         guard !apiKey.isEmpty else { throw SummarizationError.noAPIKey }
 
@@ -130,15 +131,6 @@ final class AICoachEngine: AICoachGenerating, @unchecked Sendable {
         case .nvidia:
             return OpenRouterClient(apiKey: apiKey, baseURL: LLMProviderType.nvidia.baseURL)
         }
-    }
-
-    private func selectedProvider() -> LLMProviderType {
-        let raw = UserDefaults.standard.string(forKey: "llmProvider") ?? "openrouter"
-        return LLMProviderType(rawValue: raw) ?? .openRouter
-    }
-
-    private func selectedModelID() -> String {
-        UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
     }
 
     private static func analysisTranscriptContext(

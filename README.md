@@ -54,6 +54,8 @@ The app keeps UI orchestration thin by pushing reusable behavior into deeper dom
 
 Live recording shows speaker labels without asking you to identify speakers. After the meeting, edit speaker details in the transcript and regenerate the summary to use the updated context.
 
+Text AI defaults to GPT-6.1 Sol through NVIDIA Inference Hub. Settings > AI uses one provider/model selection for transcript summaries, section regeneration, follow-up drafts, and AI Solutions Architect insights and questions. Existing saved selections are preserved. Audio transcription uses on-device WhisperKit, and read-aloud uses its separate speech model.
+
 ### Build & Run
 
 ```bash

@@ -52,6 +52,76 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertLessThan(opus47Index, opus46Index)
     }
 
+    func testTextAISelectionDefaultsToSelectableNVIDIAGPT61Sol() throws {
+        let suite = "NoteAI.llm-selection.default.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let selection = LLMSelection.current(defaults: defaults)
+        let model = try XCTUnwrap(OpenRouterModels.models(for: selection.provider)
+            .first { $0.id == selection.modelID })
+
+        XCTAssertEqual(selection.provider, .nvidia)
+        XCTAssertEqual(selection.modelID, "azure/openai/gpt-6.1-sol")
+        XCTAssertEqual(model.displayName, "GPT-6.1 Sol")
+        XCTAssertEqual(OpenRouterModels.models(for: .nvidia).first?.id, selection.modelID)
+        XCTAssertNil(defaults.object(forKey: "llmProvider"))
+        XCTAssertNil(defaults.object(forKey: "llmModel"))
+    }
+
+    func testTextAISelectionPreservesSavedCustomProviderModel() throws {
+        let suite = "NoteAI.llm-selection.saved.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("openrouter", forKey: "llmProvider")
+        defaults.set("custom/my-selected-model", forKey: "llmModel")
+
+        let selection = LLMSelection.current(defaults: defaults)
+
+        XCTAssertEqual(selection.provider, .openRouter)
+        XCTAssertEqual(selection.modelID, "custom/my-selected-model")
+    }
+
+    func testTextAISelectionPreservesLegacyModelWithoutSavedProvider() throws {
+        let suite = "NoteAI.llm-selection.legacy.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("custom/legacy-openrouter-model", forKey: "llmModel")
+
+        let selection = LLMSelection.current(defaults: defaults)
+
+        XCTAssertEqual(selection.provider, .openRouter)
+        XCTAssertEqual(selection.modelID, "custom/legacy-openrouter-model")
+        XCTAssertNil(defaults.object(forKey: "llmProvider"))
+    }
+
+    func testTextAISelectionUsesChosenProvidersModelWhenSavedModelIsBlank() throws {
+        let suite = "NoteAI.llm-selection.blank.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("anthropic", forKey: "llmProvider")
+        defaults.set(" \n ", forKey: "llmModel")
+
+        let selection = LLMSelection.current(defaults: defaults)
+
+        XCTAssertEqual(selection.provider, .anthropic)
+        XCTAssertEqual(selection.modelID, "claude-sonnet-4-20250514")
+    }
+
+    func testTextAISelectionReadsPreferenceChangesForNextRequest() throws {
+        let suite = "NoteAI.llm-selection.changes.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(LLMSelection.current(defaults: defaults).modelID, "azure/openai/gpt-6.1-sol")
+        defaults.set("openai", forKey: "llmProvider")
+        defaults.set("gpt-4o", forKey: "llmModel")
+
+        let changed = LLMSelection.current(defaults: defaults)
+        XCTAssertEqual(changed.provider, .openAI)
+        XCTAssertEqual(changed.modelID, "gpt-4o")
+    }
+
     func testProcessTapProviderTranslatesPIDToCoreAudioProcessObjectID() throws {
         let source = try String(contentsOf: repositoryRoot()
             .appendingPathComponent("NoteAI/Audio/ProcessTapProvider.swift"))
@@ -748,6 +818,47 @@ final class ArchitectureModuleTests: XCTestCase {
 
         XCTAssertEqual(summary.decisions, ["Proceed"])
         XCTAssertEqual(requestCount, 2)
+    }
+
+    func testGPT61SolSummaryRetriesSameModelThroughAlternateHubRoute() async throws {
+        let client = SequencedLLMClient(results: [
+            .failure(.apiError(statusCode: 503, message: "Temporarily unavailable")),
+            .success("""
+            {"decisions":["Proceed"],"actionItems":[],"topics":["Inference"],"openQuestions":[]}
+            """),
+        ])
+        let engine = SummarizationEngine(
+            client: client,
+            provider: .nvidia,
+            model: "azure/openai/gpt-6.1-sol"
+        )
+
+        let summary = try await engine.summarize(transcript: "We decided to proceed.")
+        let models = await client.recordedModels()
+
+        XCTAssertEqual(summary.decisions, ["Proceed"])
+        XCTAssertEqual(models, ["azure/openai/gpt-6.1-sol", "openai/openai/gpt-6.1-sol"])
+    }
+
+    func testGPT61SolSummaryReportsFailureAfterBothSameModelRoutesFail() async throws {
+        let client = SequencedLLMClient(results: [
+            .failure(.apiError(statusCode: 503, message: "Temporarily unavailable")),
+            .failure(.apiError(statusCode: 503, message: "Temporarily unavailable")),
+        ])
+        let engine = SummarizationEngine(
+            client: client,
+            provider: .nvidia,
+            model: "azure/openai/gpt-6.1-sol"
+        )
+
+        do {
+            _ = try await engine.summarize(transcript: "We decided to proceed.")
+            XCTFail("Expected the unavailable GPT-6.1 routes to report failure")
+        } catch {
+            XCTAssertEqual((error as? SummarizationError)?.statusCode, 503)
+        }
+        let models = await client.recordedModels()
+        XCTAssertEqual(models, ["azure/openai/gpt-6.1-sol", "openai/openai/gpt-6.1-sol"])
     }
 
     func testOpenRouterCompletionParserReturnsCompletedContent() throws {
@@ -1477,6 +1588,7 @@ final class ArchitectureModuleTests: XCTestCase {
 private actor SequencedLLMClient: LLMClient {
     private var results: [Result<String, SummarizationError>]
     private(set) var prompts: [String] = []
+    private var models: [String] = []
 
     init(responses: [String]) {
         results = responses.map(Result.success)
@@ -1489,9 +1601,11 @@ private actor SequencedLLMClient: LLMClient {
     var requestCount: Int { prompts.count }
 
     func recordedPrompts() -> [String] { prompts }
+    func recordedModels() -> [String] { models }
 
     func complete(prompt: String, model: String) async throws -> String {
         prompts.append(prompt)
+        models.append(model)
         guard !results.isEmpty else {
             throw SummarizationError.apiError(statusCode: 500, message: "No stub response")
         }

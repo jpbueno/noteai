@@ -105,8 +105,9 @@ final class SummarizationEngine {
             return requestContextOverride
         }
 
-        let provider = selectedProvider()
-        let model = selectedModelID()
+        let selection = LLMSelection.current()
+        let provider = selection.provider
+        let model = selection.modelID
         let apiKey = resolveAPIKey(for: provider)
 
         guard !apiKey.isEmpty else {
@@ -145,15 +146,6 @@ final class SummarizationEngine {
         }
 
         throw lastError ?? SummarizationError.apiError(statusCode: 0, message: "No model response")
-    }
-
-    private func selectedProvider() -> LLMProviderType {
-        let raw = UserDefaults.standard.string(forKey: "llmProvider") ?? "openrouter"
-        return LLMProviderType(rawValue: raw) ?? .openRouter
-    }
-
-    private func selectedModelID() -> String {
-        UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
     }
 
     private func selectedTemplate() -> MeetingTemplate {
@@ -303,6 +295,7 @@ enum SummarizationError: LocalizedError {
 }
 
 enum LLMFallbackPolicy {
+    static let nvidiaGPT61SolAlternate = "openai/openai/gpt-6.1-sol"
     static let nvidiaOpus47 = "aws/anthropic/bedrock-claude-opus-4-7"
     static let nvidiaOpus46 = "azure/anthropic/claude-opus-4-6"
     static let nvidiaNemotronSuper = "nvcf/nvidia/llama-3.3-nemotron-super-49b-v1.5"
@@ -311,7 +304,11 @@ enum LLMFallbackPolicy {
         guard provider == .nvidia else { return [primaryModel] }
 
         let fallbacks: [String]
-        if primaryModel == nvidiaOpus47 {
+        if primaryModel == LLMSelection.defaultModelID {
+            fallbacks = [nvidiaGPT61SolAlternate]
+        } else if primaryModel == nvidiaGPT61SolAlternate {
+            fallbacks = [LLMSelection.defaultModelID]
+        } else if primaryModel == nvidiaOpus47 {
             fallbacks = [nvidiaOpus46, nvidiaNemotronSuper]
         } else {
             fallbacks = [nvidiaNemotronSuper]

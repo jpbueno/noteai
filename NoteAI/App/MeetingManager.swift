@@ -222,8 +222,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
 
     var onboardingChecklist: OnboardingChecklist {
         let permissions = recordingDiagnostics.permissions
-        let providerRaw = UserDefaults.standard.string(forKey: "llmProvider") ?? LLMProviderType.openRouter.rawValue
-        let provider = LLMProviderType(rawValue: providerRaw) ?? .openRouter
+        let provider = LLMSelection.current().provider
 
         return OnboardingChecklist.build(
             provider: provider,
@@ -473,7 +472,7 @@ final class MeetingManager: ObservableObject, CoachInsightLifecycleMutating {
             speakerProfiles: speakerProfiles
         )
 
-        let modelName = UserDefaults.standard.string(forKey: "llmModel") ?? "deepseek/deepseek-chat-v3"
+        let modelName = LLMSelection.current().modelID
         summarizationStatus = .summarizing(model: modelName)
 
         let summary: MeetingSummary

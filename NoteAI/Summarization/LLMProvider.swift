@@ -45,6 +45,29 @@ enum LLMProviderType: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Shared text-AI selection for summaries, follow-up drafts, and live AI SA.
+struct LLMSelection: Equatable {
+    static let defaultProvider: LLMProviderType = .nvidia
+    static let defaultModelID = "azure/openai/gpt-6.1-sol"
+
+    let provider: LLMProviderType
+    let modelID: String
+
+    static func current(defaults: UserDefaults = .standard) -> LLMSelection {
+        let savedModel = defaults.string(forKey: "llmModel")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let nonemptyModel = savedModel.flatMap { $0.isEmpty ? nil : $0 }
+        // Older Settings could save an OpenRouter model without its default provider.
+        let missingProvider: LLMProviderType = nonemptyModel == nil ? defaultProvider : .openRouter
+        let provider = defaults.string(forKey: "llmProvider")
+            .flatMap(LLMProviderType.init(rawValue:)) ?? missingProvider
+        let modelID = nonemptyModel
+            ?? OpenRouterModels.models(for: provider).first?.id
+            ?? defaultModelID
+        return LLMSelection(provider: provider, modelID: modelID)
+    }
+}
+
 /// A model available through a provider.
 struct LLMModel: Identifiable, Hashable, Codable {
     let id: String
@@ -116,6 +139,8 @@ enum OpenRouterModels {
 
     /// Models available via NVIDIA Enterprise Inference Hub (inference-api.nvidia.com)
     static let nvidiaNIM: [LLMModel] = [
+        // Preferred text model; leave unverified limits and rates unspecified.
+        LLMModel(id: LLMSelection.defaultModelID, name: "GPT-6.1 Sol", provider: .nvidia, contextWindow: nil, costPer1MInput: nil, costPer1MOutput: nil),
         // Anthropic (via Azure/AWS)
         LLMModel(id: "aws/anthropic/bedrock-claude-opus-4-7", name: "Claude Opus 4.7", provider: .nvidia, contextWindow: 1_000_000, costPer1MInput: nil, costPer1MOutput: nil),
         LLMModel(id: "azure/anthropic/claude-opus-4-6", name: "Claude Opus 4.6", provider: .nvidia, contextWindow: 200_000, costPer1MInput: nil, costPer1MOutput: nil),

@@ -15,7 +15,7 @@ The web version was permanently retired in JPB-191. NoteAI is a macOS applicatio
 - Live AI Solutions Architect insights and interactive questions during recording
 - Automatic meeting detection, transcript import, and post-meeting speaker context
 - Meeting history, search, summary editing, and Markdown/PDF export
-- Text-to-speech playback
+- Read to Me: paste text and listen with an AI voice, plus meeting read-aloud
 - Configurable LLM backends (OpenRouter, Anthropic, OpenAI, NVIDIA)
 
 ## Project Layout
@@ -55,6 +55,14 @@ The app keeps UI orchestration thin by pushing reusable behavior into deeper dom
 Live recording shows speaker labels without asking you to identify speakers. After the meeting, edit speaker details in the transcript and regenerate the summary to use the updated context.
 
 Text AI defaults to GPT-6.1 Sol through NVIDIA Inference Hub. Settings > AI uses one provider/model selection for transcript summaries, section regeneration, follow-up drafts, and AI Solutions Architect insights and questions. Existing saved selections are preserved. Audio transcription uses on-device WhisperKit, and read-aloud uses its separate speech model.
+
+### Read to Me
+
+Open **Read to Me** in the sidebar, paste or type text, choose a voice, and press **Read to Me**. Playback supports pause, resume, and stop. Long text is read in consecutive parts without discarding the rest of the draft.
+
+Speech uses your selected NVIDIA or OpenAI connection when available, otherwise a saved NVIDIA or OpenAI speech connection. An optional TTS key in **Settings > AI** uses OpenAI directly. The reader displays the speech connection and its dedicated speech model; text-only models are not used to generate audio.
+
+Clipboard access happens when you press **Paste**. The draft stays in memory for the app session, including when you switch pages. Text is sent to the displayed speech provider only when you start reading, and returned audio is played from memory.
 
 ### Build & Run
 

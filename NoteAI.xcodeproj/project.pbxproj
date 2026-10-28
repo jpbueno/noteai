@@ -157,6 +157,7 @@
 		F44607AB9DE3D2FF56E8787F /* TeamsCallStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8BFD226BD5E0EB6F4486055 /* TeamsCallStateMachine.swift */; };
 		F4B0261DED79B4D795E8728A /* RichMarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4105A44A031B9FB0F12D52B9 /* RichMarkdownEditor.swift */; };
 		F9E4BF3F19ABD2A299BA9593 /* AICoachEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 161E870D01B1967F0967FCC4 /* AICoachEngine.swift */; };
+		FAF69A846D7E261C8D6E4778 /* TextToSpeechServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176740494F055E8EBF4E3EA5 /* TextToSpeechServiceTests.swift */; };
 		FDED86602EACB889FD5F5A42 /* MeetingSpeakerSuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0550638EC3FD7315D671CE /* MeetingSpeakerSuggestion.swift */; };
 /* End PBXBuildFile section */
 
@@ -177,6 +178,7 @@
 		146E8758C5F2E3C7211F4B39 /* MeetingNamePromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNamePromptView.swift; sourceTree = "<group>"; };
 		14DF413488049795A1F51901 /* CoachAdmissionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachAdmissionPolicy.swift; sourceTree = "<group>"; };
 		161E870D01B1967F0967FCC4 /* AICoachEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICoachEngine.swift; sourceTree = "<group>"; };
+		176740494F055E8EBF4E3EA5 /* TextToSpeechServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToSpeechServiceTests.swift; sourceTree = "<group>"; };
 		17A23C0E2DE38D00AA7095E5 /* NoteAIv6.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteAIv6.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FED0F8E1FB46C2798DA0565 /* TeamsCallUIEvidenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamsCallUIEvidenceProvider.swift; sourceTree = "<group>"; };
 		20A2936958A2188902476039 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -542,6 +544,7 @@
 				9DB43B513D3EFF5BBB74EC81 /* OnboardingChecklistTests.swift */,
 				EFB36C6105D57E388C20B6A5 /* RecordingDiagnosticsTests.swift */,
 				D54E65C0F9BEE30EF39394B0 /* TeamsCallStateMachineTests.swift */,
+				176740494F055E8EBF4E3EA5 /* TextToSpeechServiceTests.swift */,
 			);
 			path = NoteAITests;
 			sourceTree = "<group>";
@@ -553,13 +556,6 @@
 				5F306AEB27BF4A3F39466E3B /* Meeting.swift */,
 			);
 			path = Models;
-			sourceTree = "<group>";
-		};
-		"TEMP_1602839C-E6B7-4389-A098-594E3182D342" /* Integrations */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Integrations;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -852,6 +848,7 @@
 				7939BD467F4A555D2235634F /* OnboardingChecklistTests.swift in Sources */,
 				BD1FAFAC2C9CAE41803E027E /* RecordingDiagnosticsTests.swift in Sources */,
 				E1DFDFB5D6BB7BD8AEF209BF /* TeamsCallStateMachineTests.swift in Sources */,
+				FAF69A846D7E261C8D6E4778 /* TextToSpeechServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

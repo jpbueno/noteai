@@ -547,7 +547,7 @@ struct AISettingsView: View {
                     }
                 HStack(spacing: 4) {
                     Image(systemName: "info.circle")
-                    Text("Uses your NVIDIA API key by default. Or paste an OpenAI key here to use OpenAI directly.")
+                    Text("Uses your selected NVIDIA or OpenAI connection when available, otherwise a saved NVIDIA or OpenAI speech connection. The optional TTS key uses OpenAI directly.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

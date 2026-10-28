@@ -50,6 +50,8 @@ struct TTSPlayerView: View {
                             .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(tts.state == .playing ? "Pause speech" : "Resume speech")
+                    .help(tts.state == .playing ? "Pause speech" : "Resume speech")
 
                     ProgressView(value: tts.progress)
                         .progressViewStyle(.linear)
@@ -71,6 +73,8 @@ struct TTSPlayerView: View {
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Stop speech")
+                .help("Stop speech")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -96,6 +100,90 @@ struct TTSPlayerView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.bottom, 4)
         }
+    }
+}
+
+/// An in-memory draft for listening to pasted text through the configured AI voice.
+struct ReadToMeView: View {
+    @Environment(\.commandCenterLayout) private var layout
+    @Binding var text: String
+    @ObservedObject var tts: TextToSpeechService
+    @AppStorage("ttsVoice") private var voice = "nova"
+
+    private var isBusy: Bool { tts.state != .idle }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Read to Me")
+                        .font(.system(size: layout.titleFontSize, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("Paste text, choose a voice, and listen.")
+                        .font(.system(size: layout.bodyFontSize))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Paste") {
+                        if let pastedText = NSPasteboard.general.string(forType: .string) {
+                            text = pastedText
+                        }
+                    }
+                    .disabled(isBusy)
+                    Button("Clear") {
+                        text = ""
+                        tts.error = nil
+                    }
+                    .disabled(text.isEmpty || isBusy)
+                    Spacer()
+                    Picker("Voice", selection: $voice) {
+                        ForEach(TextToSpeechService.voices, id: \.self) { voice in
+                            Text(voice.capitalized).tag(voice)
+                        }
+                    }
+                    .frame(width: 170)
+                    .disabled(isBusy)
+                }
+                .buttonStyle(.bordered)
+
+                TextEditor(text: $text)
+                    .font(.system(size: layout.bodyFontSize))
+                    .foregroundStyle(Theme.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding(10)
+                    .frame(height: 280)
+                    .background(Theme.notionSurfaceBG, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+                    .accessibilityLabel("Text to read")
+                    .disabled(isBusy)
+
+                HStack {
+                    Button {
+                        tts.speak(text)
+                    } label: {
+                        Label("Read to Me", systemImage: "speaker.wave.2.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isBusy)
+                    Spacer()
+                    Text("\(text.count.formatted()) characters")
+                        .font(.system(size: layout.smallFontSize))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(tts.connectionDescription)
+                    Text("AI-generated voice. Text is sent for speech only when you press Read to Me. Your draft is kept only for this app session.")
+                }
+                .font(.system(size: layout.smallFontSize))
+                .foregroundStyle(Theme.textTertiary)
+            }
+            .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
+            .padding(Theme.pagePadding)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(Theme.notionWindowBG)
     }
 }
 

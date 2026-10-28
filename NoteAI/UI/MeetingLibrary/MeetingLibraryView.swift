@@ -6,6 +6,7 @@ import SwiftUI
 enum SidebarSelection: Hashable {
     case home
     case meetingsList
+    case readToMe
     case meeting(UUID)
 }
 
@@ -54,6 +55,7 @@ struct MeetingLibraryView: View {
     @State private var openTabs: [SidebarSelection] = [.home]
     @State private var sidebarSearchExpanded = false
     @State private var showTranscriptImport = false
+    @State private var readToMeText = ""
     @FocusState private var searchFocused: Bool
     @AppStorage("noteai.commandCenterLayoutPreset") private var commandCenterLayoutPresetRaw = CommandCenterLayoutPreset.balanced.rawValue
     @AppStorage("noteai.sidebarExpandedLists.v1") private var sidebarExpandedListsRaw = ""
@@ -82,6 +84,7 @@ struct MeetingLibraryView: View {
                         VStack(spacing: 0) {
                             commandBar(layout: layout)
                             detail
+                            TTSPlayerView(tts: ttsService)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -298,6 +301,8 @@ struct MeetingLibraryView: View {
             return "Overview"
         case .meetingsList:
             return "Meetings"
+        case .readToMe:
+            return "Read to Me"
         case .meeting(let id):
             return meetingManager.meetings.first(where: { $0.id == id })?.title.replacingOccurrences(of: "Microsoft Teams", with: "Teams") ?? "Meeting"
         }
@@ -314,6 +319,8 @@ struct MeetingLibraryView: View {
             return LibraryListPresentation.SidebarItemKind.home.icon
         case .meetingsList, .meeting:
             return LibraryListPresentation.SidebarItemKind.meeting.icon
+        case .readToMe:
+            return "speaker.wave.2"
         }
     }
 
@@ -328,6 +335,8 @@ struct MeetingLibraryView: View {
             return LibraryListPresentation.SidebarItemKind.home.tint
         case .meetingsList, .meeting:
             return LibraryListPresentation.SidebarItemKind.meeting.tint
+        case .readToMe:
+            return Theme.accent
         }
     }
 
@@ -413,6 +422,7 @@ struct MeetingLibraryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     homeSidebarRow(layout: layout)
+                    readToMeSidebarRow(layout: layout)
 
                     sidebarSection(
                         .meetings,
@@ -780,6 +790,31 @@ struct MeetingLibraryView: View {
         .padding(.top, round(4 * layout.scale))
     }
 
+    private func readToMeSidebarRow(layout: CommandCenterLayout) -> some View {
+        Button {
+            selection = .readToMe
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.wave.2")
+                    .font(.system(size: layout.smallFontSize))
+                    .foregroundStyle(Theme.textTertiary)
+                Text("Read to Me")
+                    .font(.system(size: layout.bodyFontSize, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, round(14 * layout.scale))
+            .padding(.vertical, round(6 * layout.scale))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selection == .readToMe ? Theme.notionSelectedBG : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+    }
+
     private var visibleMeetings: [Meeting] {
         LibraryListOrdering.meetings(meetingManager.filteredMeetings)
     }
@@ -816,7 +851,9 @@ struct MeetingLibraryView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if meetingManager.state == .processing {
+        if case .readToMe = selection {
+            ReadToMeView(text: $readToMeText, tts: ttsService)
+        } else if meetingManager.state == .processing {
             processingView
         } else if case .meetingsList = selection {
             meetingsListPage

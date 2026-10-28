@@ -1384,6 +1384,43 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(importSheet.contains("selection = .meeting(meeting.id)"))
     }
 
+    func testReadToMeIsReachableAndRetainsDraftAcrossNavigation() throws {
+        let source = try meetingLibrarySource()
+
+        XCTAssertTrue(source.contains("case readToMe"))
+        XCTAssertTrue(source.contains("@State private var readToMeText = \"\""))
+        XCTAssertTrue(source.contains("readToMeSidebarRow(layout: layout)"))
+        XCTAssertTrue(source.contains("selection = .readToMe"))
+        XCTAssertTrue(source.contains("return \"Read to Me\""))
+        XCTAssertTrue(source.contains("ReadToMeView(text: $readToMeText, tts: ttsService)"))
+        let shell = try sourceFragment(
+            named: "commandBar(layout: layout)",
+            before: ".environment(\\.commandCenterLayout, layout)",
+            in: source
+        )
+        XCTAssertTrue(shell.contains("TTSPlayerView(tts: ttsService)"))
+    }
+
+    func testReadToMeRequiresExplicitPasteAndReadsTheFullDraft() throws {
+        let source = try String(contentsOf: repositoryRoot().appendingPathComponent("NoteAI/UI/TextToSpeech/TTSPlayerView.swift"), encoding: .utf8)
+        let reader = try sourceFragment(
+            named: "struct ReadToMeView: View",
+            before: "/// A simple \"Read Aloud\" button",
+            in: source
+        )
+
+        XCTAssertTrue(reader.contains("@Binding var text: String"))
+        XCTAssertTrue(reader.contains("TextEditor(text: $text)"))
+        XCTAssertTrue(reader.contains("Button(\"Paste\")"))
+        XCTAssertTrue(reader.contains("NSPasteboard.general.string(forType: .string)"))
+        XCTAssertFalse(reader.contains(".onAppear"))
+        XCTAssertTrue(reader.contains("tts.speak(text)"))
+        XCTAssertFalse(reader.contains("ReadAloudTextResolver"))
+        XCTAssertTrue(reader.contains(".disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isBusy)"))
+        XCTAssertFalse(reader.contains("TTSPlayerView("))
+        XCTAssertTrue(reader.contains("AI-generated voice"))
+    }
+
     func testFocusedShellRetiresStandaloneWorkspacesAndGeneralAssistant() throws {
         let source = try meetingLibrarySource()
         let dashboard = try homeDashboardSource()

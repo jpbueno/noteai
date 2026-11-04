@@ -112,6 +112,16 @@ struct ReadToMeView: View {
 
     private var isBusy: Bool { tts.state != .idle }
 
+    private var voiceSelection: Binding<String> {
+        Binding(
+            get: {
+                _ = voice
+                return tts.selectedVoice
+            },
+            set: { voice = $0 }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -137,8 +147,8 @@ struct ReadToMeView: View {
                     }
                     .disabled(text.isEmpty || isBusy)
                     Spacer()
-                    Picker("Voice", selection: $voice) {
-                        ForEach(TextToSpeechService.voices, id: \.self) { voice in
+                    Picker("Voice", selection: voiceSelection) {
+                        ForEach(tts.availableVoices, id: \.self) { voice in
                             Text(voice.capitalized).tag(voice)
                         }
                     }

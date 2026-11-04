@@ -60,7 +60,9 @@ Text AI defaults to GPT-6.1 Sol through NVIDIA Inference Hub. Settings > AI uses
 
 Open **Read to Me** in the sidebar, paste or type text, choose a voice, and press **Read to Me**. Playback supports pause, resume, and stop. Long text is read in consecutive parts without discarding the rest of the draft.
 
-Speech uses your selected NVIDIA or OpenAI connection when available, otherwise a saved NVIDIA or OpenAI speech connection. An optional TTS key in **Settings > AI** uses OpenAI directly. The reader displays the speech connection and its dedicated speech model; text-only models are not used to generate audio.
+Speech uses your selected NVIDIA or OpenAI connection when available, otherwise a saved NVIDIA or OpenAI speech connection. Leave **OpenAI speech key override (optional)** in **Settings > AI** empty to use your NVIDIA connection. Entering an OpenAI key there selects direct OpenAI speech. The reader displays the speech connection and its dedicated speech model.
+
+NVIDIA speech uses Gemini 3.8 Flash TTS with WAV audio and defaults to the Sulafat voice. Voice choices follow the active speech connection; an older saved voice that is unavailable uses that connection's default. Direct OpenAI speech keeps its own voices and MP3 audio.
 
 Clipboard access happens when you press **Paste**. The draft stays in memory for the app session, including when you switch pages. Text is sent to the displayed speech provider only when you start reading, and returned audio is played from memory.
 

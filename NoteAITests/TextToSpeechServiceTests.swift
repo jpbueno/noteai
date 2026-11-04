@@ -22,7 +22,7 @@ final class TextToSpeechServiceTests: XCTestCase {
             selectedProvider: .anthropic, ttsKey: "", nvidiaKey: "nvidia-key", openAIKey: "openai-key"
         )
         XCTAssertEqual(fallback?.endpoint.absoluteString, "https://inference-api.nvidia.com/v1/audio/speech")
-        XCTAssertEqual(fallback?.model, "openai/openai/gpt-4o-mini-tts")
+        XCTAssertEqual(fallback?.model, "gcp/google/gemini-3.8-flash-tts")
         XCTAssertEqual(fallback?.apiKey, "nvidia-key")
         XCTAssertNil(SpeechConnection.resolve(selectedProvider: .openRouter, ttsKey: "", nvidiaKey: "", openAIKey: ""))
     }
@@ -53,16 +53,81 @@ final class TextToSpeechServiceTests: XCTestCase {
         XCTAssertEqual(request.url?.absoluteString, "https://inference-api.nvidia.com/v1/audio/speech")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-key")
         let body = try jsonBody(request)
-        XCTAssertEqual(body["model"], "openai/openai/gpt-4o-mini-tts")
-        XCTAssertEqual(body["voice"], "nova")
+        XCTAssertEqual(body["model"], "gcp/google/gemini-3.8-flash-tts")
+        XCTAssertEqual(body["voice"], "Sulafat")
         XCTAssertEqual(body["input"], "  Read this exactly.\n")
-        XCTAssertEqual(body["response_format"], "mp3")
+        XCTAssertEqual(body["response_format"], "wav")
         XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
 
         transport.succeed(0, data: Data([1, 2, 3]))
         await waitUntil { service.state == .playing }
         XCTAssertTrue(player.isPlaying)
         service.stop()
+    }
+
+    func testDirectOpenAIKeepsItsModelVoiceAndMP3Format() async throws {
+        let transport = ControlledSpeechTransport()
+        let service = makeService(transport: transport, connection: SpeechConnection(provider: .openAI, apiKey: "openai-fixture"))
+        service.speak("Read through OpenAI")
+        await waitUntil { transport.requests.count == 1 }
+        let request = try XCTUnwrap(transport.requests.first)
+        let body = try jsonBody(request)
+        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/speech")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer openai-fixture")
+        XCTAssertEqual(body["model"], "gpt-4o-mini-tts")
+        XCTAssertEqual(body["voice"], "nova")
+        XCTAssertEqual(body["response_format"], "mp3")
+        transport.succeed(0)
+        await waitUntil { service.state == .playing }
+        service.stop()
+    }
+
+    func testSelectedVoiceUsesConnectionDefaultAndSupportedSavedChoice() async throws {
+        let transport = ControlledSpeechTransport()
+        var connection = SpeechConnection(provider: .nvidia, apiKey: "nvidia-fixture")
+        var savedVoice = "nova"
+        let service = TextToSpeechService(
+            connectionProvider: { connection }, voiceProvider: { savedVoice },
+            loadAudio: { try await transport.load($0) }, makePlayer: { _ in TestSpeechPlayback() }
+        )
+        XCTAssertEqual(service.selectedVoice, "Sulafat")
+        XCTAssertEqual(service.availableVoices, ["Sulafat", "Kore", "Aoede", "Puck", "Charon"])
+        XCTAssertFalse(service.availableVoices.contains("nova"))
+        savedVoice = "Kore"
+        XCTAssertEqual(service.selectedVoice, "Kore")
+        service.speak("Use the saved Gemini voice")
+        await waitUntil { transport.requests.count == 1 }
+        XCTAssertEqual(try jsonBody(transport.requests[0])["voice"], "Kore")
+        transport.succeed(0)
+        await waitUntil { service.state == .playing }
+        connection = SpeechConnection(provider: .openAI, apiKey: "openai-fixture")
+        savedVoice = "shimmer"
+        XCTAssertEqual(service.selectedVoice, "Kore", "An active voice is frozen for the reading")
+        XCTAssertTrue(service.availableVoices.contains("Kore"))
+        service.stop()
+        savedVoice = "Sulafat"
+        XCTAssertEqual(service.selectedVoice, "nova", "An OpenAI connection cannot reuse a Gemini voice")
+        XCTAssertTrue(service.availableVoices.contains("nova"))
+        XCTAssertFalse(service.availableVoices.contains("Sulafat"))
+        savedVoice = "shimmer"
+        XCTAssertEqual(service.selectedVoice, "shimmer")
+    }
+
+    func testUnavailableSpeechModelErrorGivesAccessGuidanceWithoutEchoingProviderText() async {
+        for (field, identifier) in [("type", "key_model_access_denied"), ("code", "team_model_access_denied")] {
+            let transport = ControlledSpeechTransport()
+            let service = makeService(transport: transport)
+            service.speak("Private pasted text")
+            await waitUntil { transport.requests.count == 1 }
+            let body = Data("{\"error\":{\"\(field)\":\"\(identifier)\",\"message\":\"Private pasted text fixture-key\"}}".utf8)
+            transport.succeed(0, status: 403, data: body)
+            await waitUntil { service.state == .idle }
+            XCTAssertTrue(service.error?.contains("model") == true)
+            XCTAssertTrue(service.error?.contains("access") == true)
+            XCTAssertFalse(service.error?.contains("Check your speech connection") == true)
+            XCTAssertFalse(service.error?.contains("Private pasted text") == true)
+            XCTAssertFalse(service.error?.contains("fixture-key") == true)
+        }
     }
 
     func testLongUnicodeTextIsReadInOrderWithinSpeechTokenBudget() async throws {

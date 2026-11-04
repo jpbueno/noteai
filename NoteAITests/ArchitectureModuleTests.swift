@@ -1421,6 +1421,31 @@ final class ArchitectureModuleTests: XCTestCase {
         XCTAssertTrue(reader.contains("AI-generated voice"))
     }
 
+    func testSpeechVoicePickersUseConnectionVoicesAndNormalizeLegacySelection() throws {
+        let reader = try String(contentsOf: repositoryRoot().appendingPathComponent("NoteAI/UI/TextToSpeech/TTSPlayerView.swift"), encoding: .utf8)
+        let settings = try String(contentsOf: repositoryRoot().appendingPathComponent("NoteAI/UI/Settings/SettingsView.swift"), encoding: .utf8)
+        let preview = try sourceFragment(
+            named: "private func previewVoice()",
+            before: "// MARK: - Markdown Settings",
+            in: settings
+        )
+
+        XCTAssertTrue(reader.contains("Picker(\"Voice\", selection: voiceSelection)"))
+        XCTAssertTrue(reader.contains("ForEach(tts.availableVoices"))
+        XCTAssertTrue(reader.contains("return tts.selectedVoice"))
+        XCTAssertTrue(reader.contains("set: { voice = $0 }"))
+        XCTAssertFalse(reader.contains("TextToSpeechService.voices"))
+        XCTAssertTrue(settings.contains("Picker(\"Voice\", selection: ttsVoiceSelection)"))
+        XCTAssertTrue(settings.contains("ForEach(previewTTS.availableVoices"))
+        XCTAssertTrue(settings.contains("return previewTTS.selectedVoice"))
+        XCTAssertTrue(settings.contains("set: { ttsVoice = $0 }"))
+        XCTAssertFalse(settings.contains("TextToSpeechService.voices"))
+        XCTAssertTrue(settings.contains("OpenAI speech key override (optional)"))
+        XCTAssertTrue(settings.contains("Leave blank to use NVIDIA"))
+        XCTAssertTrue(preview.contains("\\(previewTTS.selectedVoice) voice"))
+        XCTAssertFalse(preview.contains("\\(ttsVoice) voice"))
+    }
+
     func testFocusedShellRetiresStandaloneWorkspacesAndGeneralAssistant() throws {
         let source = try meetingLibrarySource()
         let dashboard = try homeDashboardSource()

@@ -14,7 +14,19 @@ struct SpeechConnection {
     }
 
     var model: String {
-        provider == .nvidia ? "openai/openai/gpt-4o-mini-tts" : "gpt-4o-mini-tts"
+        provider == .nvidia ? "gcp/google/gemini-3.8-flash-tts" : "gpt-4o-mini-tts"
+    }
+
+    var responseFormat: String { provider == .nvidia ? "wav" : "mp3" }
+    var defaultVoice: String { provider == .nvidia ? "Sulafat" : "nova" }
+
+    static let openAIVoices = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+    private static let geminiVoices = ["Sulafat", "Kore", "Aoede", "Puck", "Charon"]
+
+    var availableVoices: [String] { provider == .nvidia ? Self.geminiVoices : Self.openAIVoices }
+
+    func normalizedVoice(_ savedVoice: String) -> String {
+        availableVoices.contains(savedVoice) ? savedVoice : defaultVoice
     }
 
     static func resolve(
@@ -89,14 +101,14 @@ final class TextToSpeechService: ObservableObject {
     private var activeVoice: String?
 
     private static let maximumChunkUTF8Bytes = 1800
-    static let voices = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+    static let voices = SpeechConnection.openAIVoices
 
     init(
         connectionProvider: @escaping () -> SpeechConnection? = SpeechConnection.current,
         voiceProvider: @escaping () -> String = { UserDefaults.standard.string(forKey: "ttsVoice") ?? "nova" },
         loadAudio: ((URLRequest) async throws -> (Data, URLResponse))? = nil,
         makePlayer: @escaping (Data) throws -> SpeechPlayback = { data in
-            let player = try AVAudioPlayer(data: data, fileTypeHint: AVFileType.mp3.rawValue)
+            let player = try AVAudioPlayer(data: data)
             player.prepareToPlay()
             return player
         }
@@ -115,7 +127,16 @@ final class TextToSpeechService: ObservableObject {
         }
     }
 
-    var selectedVoice: String { activeVoice ?? voiceProvider() }
+    var availableVoices: [String] {
+        (activeConnection ?? connectionProvider())?.availableVoices ?? Self.voices
+    }
+
+    var selectedVoice: String {
+        if let activeVoice { return activeVoice }
+        let savedVoice = voiceProvider()
+        if let connection = connectionProvider() { return connection.normalizedVoice(savedVoice) }
+        return Self.voices.contains(savedVoice) ? savedVoice : "nova"
+    }
 
     var connectionDescription: String {
         guard let connection = activeConnection ?? connectionProvider() else {
@@ -133,11 +154,10 @@ final class TextToSpeechService: ObservableObject {
         }
 
         activeConnection = connection
-        let voice = voiceProvider()
-        activeVoice = Self.voices.contains(voice) ? voice : "nova"
+        activeVoice = connection.normalizedVoice(voiceProvider())
         totalBytes = text.utf8.count
-        // The voice model accepts at most 2,000 input tokens. A conservative UTF-8
-        // byte ceiling avoids exceeding it without a model-specific tokenizer.
+        // Keep parts within the smaller speech connection's input budget.
+        // A conservative UTF-8 byte ceiling avoids a tokenizer dependency.
         // Scalar boundaries preserve even a single grapheme larger than a part.
         let scalars = text.unicodeScalars
         var start = scalars.startIndex
@@ -217,7 +237,7 @@ final class TextToSpeechService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(connection.apiKey)", forHTTPHeaderField: "Authorization")
-        let body = ["model": connection.model, "input": chunks[chunkIndex], "voice": selectedVoice, "response_format": "mp3"]
+        let body = ["model": connection.model, "input": chunks[chunkIndex], "voice": selectedVoice, "response_format": connection.responseFormat]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         currentTask = Task { [weak self] in
@@ -228,7 +248,7 @@ final class TextToSpeechService: ObservableObject {
                 currentTask = nil
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else {
-                    fail("Speech request failed (HTTP \(code)). Check your speech connection in Settings > AI.")
+                    fail(speechErrorMessage(statusCode: code, data: data))
                     return
                 }
                 let contentType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
@@ -249,6 +269,21 @@ final class TextToSpeechService: ObservableObject {
                 fail("Unable to generate speech. Check your connection and speech settings, then try again.")
             }
         }
+    }
+
+    private func speechErrorMessage(statusCode: Int, data: Data) -> String {
+        // Only recognize stable error identifiers. Provider messages may contain
+        // credentials or pasted text and must never be shown verbatim.
+        let accessErrors: Set<String> = ["key_model_access_denied", "team_model_access_denied"]
+        if data.count <= 65_536,
+           let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            let fields = payload["error"] as? [String: Any] ?? payload
+            let identifiers = [fields["type"] as? String, fields["code"] as? String].compactMap { $0 }
+            if identifiers.contains(where: accessErrors.contains) {
+                return "The speech model is unavailable for this connection. Request model access or choose another speech connection in Settings > AI."
+            }
+        }
+        return "Speech request failed (HTTP \(statusCode)). Check your speech connection in Settings > AI."
     }
 
     private func startProgressTimer(operation: UUID) {

@@ -517,12 +517,22 @@ struct AISettingsView: View {
     @State private var isPreviewingVoice = false
     @StateObject private var previewTTS = TextToSpeechService()
 
+    private var ttsVoiceSelection: Binding<String> {
+        Binding(
+            get: {
+                _ = ttsVoice
+                return previewTTS.selectedVoice
+            },
+            set: { ttsVoice = $0 }
+        )
+    }
+
     var body: some View {
         Form {
             Section("Text-to-Speech") {
                 HStack {
-                    Picker("Voice", selection: $ttsVoice) {
-                        ForEach(TextToSpeechService.voices, id: \.self) { voice in
+                    Picker("Voice", selection: ttsVoiceSelection) {
+                        ForEach(previewTTS.availableVoices, id: \.self) { voice in
                             Text(voice.capitalized).tag(voice)
                         }
                     }
@@ -541,13 +551,16 @@ struct AISettingsView: View {
                     .foregroundStyle(Color.accentColor)
                     .disabled(isPreviewingVoice)
                 }
-                SecureField("TTS API Key (optional)", text: $ttsAPIKey)
+                Text(previewTTS.connectionDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("OpenAI speech key override (optional)", text: $ttsAPIKey)
                     .onChange(of: ttsAPIKey) { _, newValue in
                         TextToSpeechService.saveTTSKey(newValue)
                     }
                 HStack(spacing: 4) {
                     Image(systemName: "info.circle")
-                    Text("Uses your selected NVIDIA or OpenAI connection when available, otherwise a saved NVIDIA or OpenAI speech connection. The optional TTS key uses OpenAI directly.")
+                    Text("Leave blank to use NVIDIA with your existing NVIDIA key, or your selected OpenAI connection. Enter an OpenAI key here only to override speech.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -831,7 +844,7 @@ struct AISettingsView: View {
     private func previewVoice() {
         previewTTS.stop()
         isPreviewingVoice = true
-        let sample = "Hi, I'm the \(ttsVoice) voice. This is how I sound when reading your meeting summaries in NoteAI."
+        let sample = "Hi, I'm the \(previewTTS.selectedVoice) voice. This is how I sound when reading your meeting summaries in NoteAI."
         previewTTS.speak(sample)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             isPreviewingVoice = false

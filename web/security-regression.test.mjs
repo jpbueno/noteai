@@ -174,3 +174,24 @@ test("web API auth avoids unsupported Next request interception on Cloudflare", 
   assert.match(dataRoute, /requireApiAuth/);
   assert.match(chatRoute, /requireApiAuth/);
 });
+
+test("Claude access controls: allowlist fails closed and CN/HK requests are blocked before upstream", () => {
+  const security = read("./src/lib/security.ts");
+  const authRoute = read("./src/app/api/auth/route.ts");
+  const chatRoute = read("./src/app/api/chat/route.ts");
+
+  // Empty GOOGLE_ALLOWED_EMAILS must not admit everyone.
+  assert.match(security, /getAllowedEmails\(env\)\.length > 0/);
+  assert.doesNotMatch(authRoute, /allowed\.length > 0 &&/);
+  assert.match(authRoute, /isEmailAllowed\(user\.email\)/);
+  // API sessions re-check the allowlist, not just the HMAC.
+  assert.match(security, /return isEmailAllowed\(payload\.email\)/);
+
+  // Region gate precedes the upstream fetch.
+  assert.match(security, /CLAUDE_RESTRICTED_COUNTRIES = \["CN", "HK"\]/);
+  assert.match(security, /cf-ipcountry/);
+  const gate = chatRoute.indexOf("isClaudeRestrictedRequest(request.headers)");
+  const upstream = chatRoute.indexOf("await fetch(endpoint");
+  assert.ok(gate > 0 && upstream > gate, "region gate must run before the upstream LLM call");
+  assert.match(chatRoute, /status: 451/);
+});

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { getSettingValue } from "@/lib/server-db";
+import { isClaudeModel, isClaudeRestrictedRequest } from "@/lib/security";
 
 const ENDPOINTS: Record<string, string> = {
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
@@ -91,6 +92,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Message content is too large" }, { status: 413 });
     }
     const safeMaxTokens = Math.min(Math.max(Number(maxTokens) || 1024, 1), MAX_CHAT_TOKENS);
+
+    // Block Claude before any data is sent upstream for requests from
+    // Anthropic-restricted regions (Mainland China / Hong Kong).
+    if (isClaudeModel(provider, model) && isClaudeRestrictedRequest(request.headers)) {
+      return NextResponse.json(
+        { error: "Claude models are not available from your current region. Choose a non-Anthropic model in Settings." },
+        { status: 451 },
+      );
+    }
 
     const endpoint = ENDPOINTS[provider];
     if (!endpoint) {

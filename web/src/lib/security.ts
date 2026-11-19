@@ -14,8 +14,42 @@ export function isExplicitAuthBypassEnabled(env: Env = process.env): boolean {
   return envValue(env, "NOTEAI_DISABLE_AUTH") === "true" && envValue(env, "NODE_ENV") !== "production";
 }
 
+export function getAllowedEmails(env: Env = process.env): string[] {
+  return envValue(env, "GOOGLE_ALLOWED_EMAILS")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Fail closed: an empty allowlist admits nobody. NoteAI's server-side LLM keys
+// (including the Claude key) are shared by every signed-in user, so the set of
+// users must be explicit.
+export function isEmailAllowed(email: unknown, env: Env = process.env): boolean {
+  if (typeof email !== "string" || !email) return false;
+  return getAllowedEmails(env).includes(email.trim().toLowerCase());
+}
+
 export function isBrowserAuthConfigured(env: Env = process.env): boolean {
-  return Boolean(envValue(env, "NOTEAI_AUTH_SECRET") && envValue(env, "GOOGLE_CLIENT_ID"));
+  return Boolean(
+    envValue(env, "NOTEAI_AUTH_SECRET") &&
+    envValue(env, "GOOGLE_CLIENT_ID") &&
+    getAllowedEmails(env).length > 0,
+  );
+}
+
+// Anthropic supported-regions policy: no Claude use from Mainland China or Hong Kong.
+// Cloudflare sets CF-IPCountry on every request to the Worker. This is a
+// network-location signal only; the primary control is the explicit allowlist.
+export const CLAUDE_RESTRICTED_COUNTRIES = ["CN", "HK"];
+
+export function isClaudeModel(provider: unknown, model: unknown): boolean {
+  if (provider === "anthropic") return true;
+  return typeof model === "string" && /anthropic|claude/i.test(model);
+}
+
+export function isClaudeRestrictedRequest(headers: Headers): boolean {
+  const country = headers.get("cf-ipcountry")?.trim().toUpperCase() || "";
+  return CLAUDE_RESTRICTED_COUNTRIES.includes(country);
 }
 
 export async function hmacSign(payload: string, secret: string): Promise<string> {
@@ -68,7 +102,9 @@ export async function isValidSession(cookie: string, secret: string): Promise<bo
   try {
     const payload = JSON.parse(atob(encoded));
     if (payload.exp < Date.now()) return false;
-    return true;
+    // Re-check the allowlist on every request so removing an email revokes
+    // existing 30-day sessions immediately.
+    return isEmailAllowed(payload.email);
   } catch {
     return false;
   }

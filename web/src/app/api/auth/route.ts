@@ -4,16 +4,12 @@ import {
   constantTimeEqual,
   hmacSign,
   isBrowserAuthConfigured,
+  isEmailAllowed,
   isExplicitAuthBypassEnabled,
 } from "@/lib/security";
 
 function getSessionSecret(): string {
   return process.env.NOTEAI_AUTH_SECRET || "";
-}
-
-function getAllowedEmails(): string[] {
-  const raw = process.env.GOOGLE_ALLOWED_EMAILS || "";
-  return raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 }
 
 // --- Google ID token verification ---
@@ -70,8 +66,7 @@ export async function parseSession(cookie: string): Promise<{ email: string; nam
     const payload = JSON.parse(atob(encoded));
     if (payload.exp < Date.now()) return null;
 
-    const allowed = getAllowedEmails();
-    if (allowed.length > 0 && !allowed.includes(payload.email.toLowerCase())) return null;
+    if (!isEmailAllowed(payload.email)) return null;
 
     return { email: payload.email, name: payload.name, picture: payload.picture };
   } catch {
@@ -116,7 +111,7 @@ export async function GET(request: NextRequest) {
 // Login with Google credential
 export async function POST(request: NextRequest) {
   const secret = getSessionSecret();
-  if (!secret) {
+  if (!secret || !isBrowserAuthConfigured()) {
     return NextResponse.json({ error: "Auth not configured" }, { status: 500 });
   }
 
@@ -130,9 +125,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid Google token" }, { status: 401 });
   }
 
-  // Check email allowlist
-  const allowed = getAllowedEmails();
-  if (allowed.length > 0 && !allowed.includes(user.email.toLowerCase())) {
+  // Check email allowlist (fails closed: an empty allowlist admits nobody)
+  if (!isEmailAllowed(user.email)) {
     return NextResponse.json({ error: "Email not authorized" }, { status: 403 });
   }
 
